@@ -1,0 +1,85 @@
+@startuml usecase
+title Use Case Diagram — Participation Traceability Platform
+
+left to right direction
+
+actor "Citizen" as citizen
+actor "Representative / Office" as rep
+actor "Committee Clerk" as clerk
+actor "Civil Society Researcher" as researcher
+actor "Moderator" as moderator
+actor "Administrator" as admin
+
+rectangle "Participation Traceability Platform" {
+  ' Citizen use cases
+  usecase "Submit view on bill/clause" as UC1
+  usecase "Receive tamper-evident receipt" as UC2
+  usecase "Look up receipt by ID" as UC3
+  usecase "Draft submission offline" as UC4
+  usecase "Browse outcome trail" as UC5
+  usecase "Browse notice adequacy" as UC6
+  usecase "Report content" as UC7
+
+  ' Representative use cases
+  usecase "Claim profile" as UC8
+  usecase "View aggregated outcomes" as UC9
+
+  ' Clerk use cases
+  usecase "Upload committee report" as UC10
+  usecase "Verify report entries" as UC11
+  usecase "Create notice record" as UC12
+
+  ' Researcher use cases
+  usecase "Export outcome trail" as UC13
+  usecase "Export notice dataset" as UC14
+
+  ' Moderator use cases
+  usecase "Confirm/reject matches" as UC15
+  usecase "Handle reported content" as UC16
+  usecase "Handle appeals" as UC17
+
+  ' Admin use cases
+  usecase "Verify profiles" as UC18
+  usecase "Manage roles" as UC19
+  usecase "Export anonymized data" as UC20
+  usecase "Configure settings" as UC21
+}
+
+citizen --> UC1
+citizen --> UC2
+citizen --> UC3
+citizen --> UC4
+citizen --> UC5
+citizen --> UC6
+citizen --> UC7
+
+rep --> UC5
+rep --> UC8
+rep --> UC9
+rep --> UC7
+
+clerk --> UC10
+clerk --> UC11
+clerk --> UC12
+
+researcher --> UC5
+researcher --> UC6
+researcher --> UC13
+researcher --> UC14
+
+moderator --> UC15
+moderator --> UC16
+moderator --> UC17
+
+admin --> UC18
+admin --> UC19
+admin --> UC20
+admin --> UC21
+
+' Include relationships
+UC1 ..> UC2 : <<include>>
+UC10 ..> UC11 : <<include>>
+
+' Extend relationships
+UC3 ..> UC5 : <<extend>>
+@enduml

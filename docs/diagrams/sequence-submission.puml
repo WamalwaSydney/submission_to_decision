@@ -1,0 +1,71 @@
+@startuml sequence-submission
+title Sequence Diagram — Workflow A: Submission-to-Decision
+
+actor Citizen
+participant "Web Client\n(React)" as UI
+participant "Receipt Service" as RS
+participant "Database\n(PostgreSQL)" as DB
+participant "Ingestion Service" as IS
+participant "Linking Service" as LS
+participant "Moderator" as MOD
+participant "Web Client\n(Public)" as PUB
+
+== Phase 1: Citizen Submits View ==
+
+Citizen -> UI: Select bill, write submission
+UI -> RS: POST /receipts
+RS -> DB: Lock chain head (SERIALIZABLE)
+RS -> RS: Compute SHA-256 hash
+RS -> DB: INSERT participation_receipt
+RS -> DB: INSERT audit_log
+RS --> UI: Receipt ID + timestamp + status
+UI --> Citizen: Show receipt confirmation
+
+== Phase 2: Committee Report Tabled ==
+
+note over IS: Triggered by scheduled sync\nor clerk upload
+IS -> IS: Fetch/download PDF
+IS -> IS: Try native text extraction
+alt Text layer insufficient
+  IS -> IS: Rasterize pages
+  IS -> IS: Run Tesseract OCR
+end
+IS -> DB: INSERT committee_report
+IS -> IS: Parse into entries
+IS -> DB: INSERT report_entries (per clause)
+IS -> DB: UPDATE extraction_status
+
+== Phase 3: Linking Engine Proposes Matches ==
+
+LS -> DB: Fetch open receipts for bill
+LS -> DB: Fetch report entries for bill
+LS -> LS: Step 1: Clause-reference match
+alt Clause match found
+  LS -> LS: confidence = 0.9+
+else No clause match
+  LS -> LS: Step 2: Text similarity (rapidfuzz)
+  LS -> LS: confidence = 0.3-0.89
+end
+LS -> DB: INSERT submission_match (reviewer_decision = pending)
+LS -> LS: Generate explanation
+
+== Phase 4: Moderator Reviews ==
+
+MOD -> UI: View match queue
+UI -> LS: GET /matches/pending
+LS -> DB: SELECT pending matches
+LS --> UI: Match details + explanation
+MOD -> UI: Confirm or reject
+UI -> LS: POST /matches/{id}/confirm
+LS -> DB: UPDATE reviewer_decision = confirmed
+LS -> DB: INSERT audit_log
+
+== Phase 5: Public Sees Outcome ==
+
+PUB -> UI: View bill page
+UI -> DB: Fetch confirmed matches
+DB --> UI: Matches with treatments
+UI -> UI: Compute outcome counts
+UI --> PUB: Show outcome trail\n(adopted/amended/rejected/not addressed)
+
+@enduml
