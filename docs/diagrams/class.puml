@@ -1,0 +1,235 @@
+@startuml class
+title Class Diagram — Participation Traceability Platform
+
+package "Domain Models" {
+  class User {
+    +UUID id
+    +String role
+    +String name
+    +String email
+    +String password_hash
+    +JSON privacy_prefs
+    +String status
+    +DateTime created_date
+    +login()
+    +logout()
+  }
+
+  class LegislativeItem {
+    +UUID id
+    +String title
+    +String identifier
+    +String institution
+    +String stage
+    +JSON documents
+    +JSON status_history
+    +Boolean is_simulated
+    +getOutcomeCounts()
+  }
+
+  class ParticipationReceipt {
+    +UUID id
+    +String public_id
+    +UUID author_id
+    +UUID legislative_item_id
+    +String clause_ref
+    +String submission_text
+    +String lodging_status
+    +DateTime timestamp
+    +String hash
+    +String previous_hash
+    +String author_name_public
+    +verifyHash()
+  }
+
+  class CommitteeReport {
+    +UUID id
+    +UUID bill_ref
+    +String institution
+    +Date date_tabled
+    +String source_document_ref
+    +String extraction_status
+    +Boolean ocr_used
+    +Boolean is_simulated
+    +getEntries()
+  }
+
+  class ReportEntry {
+    +UUID id
+    +UUID report_ref
+    +String clause_ref
+    +String extracted_summary
+    +String treatment
+    +String stated_reason
+  }
+
+  class SubmissionMatch {
+    +UUID id
+    +UUID receipt_ref
+    +UUID report_entry_ref
+    +String match_method
+    +Float confidence_score
+    +String explanation
+    +String reviewer_decision
+    +UUID reviewer_id
+    +DateTime timestamp
+    +confirm()
+    +reject()
+  }
+
+  class RepresentativeProfile {
+    +UUID id
+    +UUID user_id
+    +String office
+    +String jurisdiction
+    +String institution
+    +String[] committee_membership
+    +String verification_status
+    +String profile_label
+    +UUID verifier_id
+    +JSON contact_channels
+    +claim()
+    +verify()
+  }
+
+  class NoticeRecord {
+    +UUID id
+    +UUID bill_ref
+    +String institution
+    +Date notice_date
+    +Date window_start
+    +Date window_end
+    +String mode
+    +Boolean bill_text_accessible
+    +getWindowLength()
+    +getDaysOfNotice()
+  }
+
+  class ModerationAction {
+    +UUID id
+    +UUID reporter_id
+    +String content_type
+    +UUID content_id
+    +String reason
+    +String decision
+    +UUID moderator_id
+    +String appeal_status
+    +DateTime timestamp
+    +uphold()
+    +dismiss()
+    +appeal()
+  }
+
+  class AuditLog {
+    +UUID id
+    +String entity_type
+    +UUID entity_id
+    +String action
+    +String details
+    +DateTime timestamp
+  }
+}
+
+package "Services" {
+  class ReceiptService {
+    +createReceipt()
+    +verifyChain()
+    +getChainHead()
+    +computeHash()
+  }
+
+  class IngestionService {
+    +ingestReport()
+    +extractText()
+    +ocrExtract()
+    +parseReportEntries()
+  }
+
+  class LinkingService {
+    +proposeMatches()
+    +getPendingMatches()
+    +confirmMatch()
+    +rejectMatch()
+  }
+
+  class NoticeService {
+    +createNotice()
+    +getNotices()
+    +exportCSV()
+  }
+
+  class ProfileService {
+    +createProfile()
+    +claimProfile()
+    +verifyProfile()
+    +getProfiles()
+  }
+}
+
+package "Enums" {
+  enum UserRole {
+    citizen
+    representative
+    researcher
+    moderator
+    administrator
+    clerk
+  }
+
+  enum SubmissionStatus {
+    "awaiting committee report"
+    adopted
+    amended
+    "rejected with reasons"
+    "not addressed"
+  }
+
+  enum RepresentativeStatus {
+    unclaimed
+    "verified and active"
+    "verified but inactive"
+  }
+
+  enum MatchMethod {
+    clause
+    "text-similarity"
+  }
+
+  enum ReviewerDecision {
+    confirmed
+    rejected
+    pending
+  }
+
+  enum ExtractionStatus {
+    pending
+    extracted
+    ocr_used
+    needs_review
+    verified
+  }
+}
+
+' Relationships
+User "1" --> "0..*" ParticipationReceipt : submits >
+User "1" --> "0..*" ModerationAction : reports >
+User "1" --> "0..*" RepresentativeProfile : claims >
+User "1" --> "0..*" SubmissionMatch : reviews >
+
+ParticipationReceipt "0..*" --> "1" LegislativeItem : targets >
+ParticipationReceipt "1" --> "0..*" SubmissionMatch : matched by >
+
+LegislativeItem "1" --> "0..*" NoticeRecord : announces >
+LegislativeItem "1" --> "0..*" CommitteeReport : reported on by >
+
+CommitteeReport "1" --> "0..*" ReportEntry : contains >
+ReportEntry "1" --> "0..*" SubmissionMatch : matched by >
+
+ReceiptService ..> ParticipationReceipt : manages
+IngestionService ..> CommitteeReport : manages
+IngestionService ..> ReportEntry : creates
+LinkingService ..> SubmissionMatch : manages
+NoticeService ..> NoticeRecord : manages
+ProfileService ..> RepresentativeProfile : manages
+
+@enduml

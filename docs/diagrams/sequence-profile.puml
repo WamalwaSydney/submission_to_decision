@@ -1,0 +1,88 @@
+@startuml sequence-profile
+title Sequence Diagram — Workflow B: Unclaimed Profile / Non-Adoption
+
+actor Citizen
+participant "Web Client\n(React)" as UI
+participant "Profile Service" as PS
+participant "Receipt Service" as RS
+participant "Database\n(PostgreSQL)" as DB
+participant "Ingestion Service" as IS
+participant "Linking Service" as LS
+participant "Moderator" as MOD
+
+== Phase 1: Citizen Views Unclaimed Profile ==
+
+Citizen -> UI: Open bill page
+UI -> PS: GET /profiles/{id}
+PS -> DB: SELECT profile WHERE status = 'unclaimed'
+DB --> PS: Profile data
+PS --> UI: Profile (status = unclaimed)
+UI --> Citizen: Show profile with "unclaimed" badge
+
+note over UI
+  Profile shows office, jurisdiction,
+  committee membership, contact channels.
+  Clearly marked as unclaimed.
+  No effect on receipt/outcome mechanism.
+end note
+
+== Phase 2: Citizen Submits View ==
+
+Citizen -> UI: Submit view on bill
+UI -> RS: POST /receipts
+RS -> DB: INSERT participation_receipt
+RS -> DB: INSERT audit_log
+RS --> UI: Receipt ID + timestamp
+UI --> Citizen: Show receipt confirmation
+
+note over Citizen
+  Status: "awaiting committee report"
+  Receipt is tamper-evident, hash-chained.
+  Office never joins or responds.
+end note
+
+== Phase 3: Committee Report Tabled (Later) ==
+
+note over IS
+  Time passes...
+  Committee publishes report.
+end note
+
+IS -> IS: Fetch/download PDF
+IS -> IS: Extract text (OCR if needed)
+IS -> DB: INSERT committee_report
+IS -> DB: INSERT report_entries
+IS -> DB: UPDATE extraction_status
+
+== Phase 4: Linking Engine Proposes Match ==
+
+LS -> DB: Fetch receipts for bill
+LS -> DB: Fetch report entries for bill
+LS -> LS: Clause-reference match OR text similarity
+LS -> DB: INSERT submission_match (pending)
+
+== Phase 5: Moderator Confirms Match ==
+
+MOD -> UI: View match queue
+UI -> LS: GET /matches/pending
+LS --> UI: Match details
+MOD -> UI: Confirm match
+UI -> LS: POST /matches/{id}/confirm
+LS -> DB: UPDATE reviewer_decision = 'confirmed'
+LS -> DB: INSERT audit_log
+
+== Phase 6: Public Sees Outcome ==
+
+Citizen -> UI: View receipt lookup
+UI -> DB: SELECT confirmed match
+DB --> UI: Match + treatment
+UI -> UI: Compute status from ReportEntry.treatment
+UI --> Citizen: Show outcome (adopted/amended/rejected/not addressed)
+
+note over Citizen
+  Neutral label + audit history.
+  No allegation of misconduct.
+  Non-response shown as observable fact.
+end note
+
+@enduml

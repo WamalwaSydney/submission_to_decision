@@ -1,0 +1,91 @@
+@startuml architecture
+title System Architecture — 4-Layer Design
+
+' Web Client Layer
+package "Web Clients (React)" as web {
+  component "Public Views" as public_views
+  component "Citizen Views" as citizen_views
+  component "Representative Views" as rep_views
+  component "Moderator Views" as mod_views
+  component "Admin Views" as admin_views
+  component "Research Views" as research_views
+}
+
+' API Layer
+package "API & Authorization (FastAPI)" as api {
+  component "REST Endpoints" as endpoints
+  component "JWT Authentication" as auth
+  component "Role-Based Access Control" as rbac
+  component "Rate Limiting" as rate
+  component "Domain Rule Enforcement" as rules
+}
+
+' Service Layer
+package "Civic Domain Services" as services {
+  component "receipt_service" as receipt_svc
+  component "ingestion_service" as ingestion_svc
+  component "linking_service" as linking_svc
+  component "notice_service" as notice_svc
+  component "profile_service" as profile_svc
+}
+
+' Data Layer
+package "Data & Audit Layer" as data {
+  database "PostgreSQL" as db
+  component "File Storage" as files
+  component "Full-Text Search Index" as fts
+  database "Audit Log (Append-Only)" as audit
+}
+
+' External
+cloud "Kenya Law / Parliament" as external
+cloud "Tesseract OCR" as ocr
+
+' Relationships
+web --> api : HTTPS / REST
+api --> services : Business Logic
+services --> data : Persistence
+
+receipt_svc --> db : Receipts + Chain
+ingestion_svc --> db : Reports + Entries
+ingestion_svc --> files : Source PDFs
+ingestion_svc --> ocr : OCR Fallback
+linking_svc --> db : Matches
+notice_svc --> db : Notices
+profile_svc --> db : Profiles
+
+db --> fts : Index
+db --> audit : Audit Trail
+
+external --> ingestion_svc : Scheduled Sync
+
+note right of web
+  React + Tailwind CSS
+  Responsive, mobile-first
+  Service Worker (offline)
+  IndexedDB (drafts)
+end note
+
+note right of api
+  FastAPI (Python)
+  JWT + RBAC
+  Argon2 password hashing
+  Rate limiting
+end note
+
+note right of services
+  Domain-specific logic
+  Hash chain management
+  PDF/OCR ingestion
+  Match proposals
+  Profile verification
+end note
+
+note right of data
+  PostgreSQL 15+
+  UUID primary keys
+  Append-only enforcement
+  Full-text search
+end note
+
+@enduml

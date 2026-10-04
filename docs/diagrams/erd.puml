@@ -1,0 +1,143 @@
+@startuml erd
+title Entity Relationship Diagram
+
+entity "User" as user {
+  *id : UUID <<PK>>
+  --
+  role : VARCHAR(20)
+  name : VARCHAR(255)
+  email : VARCHAR(255)
+  password_hash : VARCHAR(255)
+  privacy_prefs : JSONB
+  status : VARCHAR(20)
+  created_date : TIMESTAMPTZ
+}
+
+entity "RepresentativeProfile" as profile {
+  *id : UUID <<PK>>
+  --
+  user_id : UUID <<FK>>
+  office : VARCHAR(255)
+  jurisdiction : VARCHAR(255)
+  institution : VARCHAR(100)
+  committee_membership : TEXT[]
+  verification_status : VARCHAR(30)
+  profile_label : VARCHAR(20)
+  verifier_id : UUID <<FK>>
+  contact_channels : JSONB
+  created_date : TIMESTAMPTZ
+}
+
+entity "LegislativeItem" as bill {
+  *id : UUID <<PK>>
+  --
+  title : VARCHAR(500)
+  identifier : VARCHAR(100)
+  institution : VARCHAR(100)
+  stage : VARCHAR(100)
+  documents : JSONB
+  status_history : JSONB
+  is_simulated : BOOLEAN
+}
+
+entity "ParticipationReceipt" as receipt {
+  *id : UUID <<PK>>
+  --
+  public_id : VARCHAR(20)
+  author_id : UUID <<FK>>
+  legislative_item_id : UUID <<FK>>
+  clause_ref : VARCHAR(100)
+  submission_text : TEXT
+  lodging_status : VARCHAR(20)
+  timestamp : TIMESTAMPTZ
+  hash : VARCHAR(64)
+  previous_hash : VARCHAR(64)
+  author_name_public : VARCHAR(255)
+}
+
+entity "CommitteeReport" as report {
+  *id : UUID <<PK>>
+  --
+  bill_ref : UUID <<FK>>
+  institution : VARCHAR(100)
+  date_tabled : DATE
+  source_document_ref : VARCHAR(500)
+  extraction_status : VARCHAR(20)
+  ocr_used : BOOLEAN
+  is_simulated : BOOLEAN
+}
+
+entity "ReportEntry" as entry {
+  *id : UUID <<PK>>
+  --
+  report_ref : UUID <<FK>>
+  clause_ref : VARCHAR(100)
+  extracted_summary : TEXT
+  treatment : VARCHAR(30)
+  stated_reason : TEXT
+}
+
+entity "SubmissionMatch" as match {
+  *id : UUID <<PK>>
+  --
+  receipt_ref : UUID <<FK>>
+  report_entry_ref : UUID <<FK>>
+  match_method : VARCHAR(20)
+  confidence_score : FLOAT
+  explanation : TEXT
+  reviewer_decision : VARCHAR(20)
+  reviewer_id : UUID <<FK>>
+  timestamp : TIMESTAMPTZ
+}
+
+entity "NoticeRecord" as notice {
+  *id : UUID <<PK>>
+  --
+  bill_ref : UUID <<FK>>
+  institution : VARCHAR(100)
+  notice_date : DATE
+  window_start : DATE
+  window_end : DATE
+  mode : VARCHAR(255)
+  bill_text_accessible : BOOLEAN
+}
+
+entity "ModerationAction" as moderation {
+  *id : UUID <<PK>>
+  --
+  reporter_id : UUID <<FK>>
+  content_type : VARCHAR(20)
+  content_id : UUID
+  reason : TEXT
+  decision : VARCHAR(20)
+  moderator_id : UUID <<FK>>
+  appeal_status : VARCHAR(20)
+  timestamp : TIMESTAMPTZ
+}
+
+entity "AuditLog" as audit {
+  *id : UUID <<PK>>
+  --
+  entity_type : VARCHAR(50)
+  entity_id : UUID
+  action : VARCHAR(50)
+  details : TEXT
+  timestamp : TIMESTAMPTZ
+}
+
+' Relationships
+user ||--o{ receipt : "submits"
+user ||--o{ moderation : "reports"
+user ||--o{ profile : "claims"
+user ||--o{ match : "reviews"
+
+receipt }o--|| bill : "targets"
+receipt ||--o{ match : "matched by"
+
+bill ||--o{ notice : "announces"
+bill ||--o{ report : "reported on by"
+
+report ||--o{ entry : "contains"
+entry ||--o{ match : "matched by"
+
+@enduml
