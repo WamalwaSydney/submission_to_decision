@@ -11,7 +11,8 @@ on:
 jobs:
   sync:
     runs-on: ubuntu-latest
-    
+    permissions:
+      issues: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -34,7 +35,7 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: |
           cd backend
-          python -m app.scripts.sync_legislation
+          python app/scripts/sync_legislation.py
       
       - name: Notify on failure
         if: failure()
