@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { ReviewerDecision } from '../types';
+import { api } from '../api/endpoints';
 import { v4 as uuidv4 } from 'uuid';
 import { CheckCircle2, XCircle, Clock, AlertTriangle, Flag, Shield, Gavel, Users, FileText, Sparkles } from 'lucide-react';
 import { motion } from 'framer-motion';
@@ -11,8 +12,15 @@ export function ModeratorQueuePage() {
   const pendingMatches = state.matches.filter(m => m.reviewer_decision === 'pending');
   const reviewedMatches = state.matches.filter(m => m.reviewer_decision !== 'pending');
 
-  const handleDecision = (matchId: string, decision: ReviewerDecision) => {
+  const handleDecision = async (matchId: string, decision: ReviewerDecision) => {
     if (!state.currentUser) return;
+    if (decision === 'pending') return;
+    try {
+      await api.decideMatch(matchId, decision === 'confirmed' ? 'confirm' : 'reject');
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'Unable to update the match.');
+      return;
+    }
     dispatch({
       type: 'UPDATE_MATCH_DECISION',
       payload: { matchId, decision, reviewerId: state.currentUser.id }

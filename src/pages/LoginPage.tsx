@@ -5,6 +5,7 @@ import { ArrowRight, Eye, EyeOff, FileCheck, Gavel, LockKeyhole, Search, Setting
 import { Card } from '../components/UI';
 import { useApp } from '../context/AppContext';
 import { User, UserRole } from '../types';
+import { api } from '../api/endpoints';
 
 const roleIcons: Record<UserRole, React.ReactNode> = {
   citizen: <Users size={17} />,
@@ -32,26 +33,32 @@ export function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
 
-  const signInAs = (user: User) => {
-    if (user.status !== 'active') {
-      setError('This demo account is not active. Choose another account or create a new one.');
-      return;
+  const signInAs = async (user: User) => {
+    setError('');
+    try {
+      const response = await api.login(user.email, 'password123');
+      localStorage.setItem('access_token', response.access_token);
+      localStorage.setItem('current_user', JSON.stringify(response.user));
+      dispatch({ type: 'SET_USER', payload: response.user });
+      navigate('/');
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Unable to sign in.');
     }
-    dispatch({ type: 'SET_USER', payload: user });
-    navigate('/');
   };
 
-  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError('');
     const normalizedEmail = email.trim().toLowerCase();
-    const user = state.users.find(account => account.email.trim().toLowerCase() === normalizedEmail);
-
-    if (!user) {
-      setError('No demo account with that email is available in this session. Choose a sample account or create a new demo profile.');
-      return;
+    try {
+      const response = await api.login(normalizedEmail, password);
+      localStorage.setItem('access_token', response.access_token);
+      localStorage.setItem('current_user', JSON.stringify(response.user));
+      dispatch({ type: 'SET_USER', payload: response.user });
+      navigate('/');
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Unable to sign in.');
     }
-    signInAs(user);
   };
 
   return (
@@ -74,7 +81,7 @@ export function LoginPage() {
           <Typography sx={{ color: '#526060', fontSize: 13, mb: 2.5 }}>Use a demo profile available in this browser session.</Typography>
 
           <Alert severity="info" icon={<LockKeyhole size={17} />} sx={{ mb: 2.5, borderRadius: '12px', '& .MuiAlert-message': { fontSize: 12.5, lineHeight: 1.55 } }}>
-            Demo mode only: the password is not verified, stored, or sent anywhere. Do not enter a real password.
+            Your password is sent securely to the API over HTTPS and is never stored in the browser.
           </Alert>
 
           {error && <Alert severity="error" role="alert" sx={{ mb: 2 }}>{error}</Alert>}
@@ -91,14 +98,14 @@ export function LoginPage() {
               autoFocus
             />
             <TextField
-              label="Password (demo only)"
+              label="Password"
               type={showPassword ? 'text' : 'password'}
               value={password}
               onChange={event => setPassword(event.target.value)}
               required
               fullWidth
               autoComplete="current-password"
-              helperText="Any value is accepted for an available demo email."
+              helperText="Use your account password."
               slotProps={{
                 input: {
                   endAdornment: (

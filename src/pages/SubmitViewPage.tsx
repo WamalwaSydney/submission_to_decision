@@ -6,6 +6,7 @@ import { saveDraft, getUnsyncedDrafts } from '../utils/offline';
 import { generatePublicId } from '../data/seed';
 import { OfflineDraft } from '../types';
 import { v4 as uuidv4 } from 'uuid';
+import { api } from '../api/endpoints';
 import {
   Send, Save, Wifi, WifiOff, FileText, Gavel,
   CheckCircle2, Sparkles, Shield, Eye, EyeOff, Copy, ArrowRight
@@ -68,45 +69,35 @@ export function SubmitViewPage() {
 
     setSubmitting(true);
     const bill = state.bills.find(b => b.id === selectedBill);
-    if (!bill) return;
-
-    const receiptId = uuidv4();
-    const publicId = generatePublicId();
-    const timestamp = new Date().toISOString();
-    const previousHash = state.receipts.length > 0
-      ? state.receipts[state.receipts.length - 1].hash
-      : '0000000000000000000000000000000000000000000000000000000000000000';
-
-    const receipt = await createReceipt(
-      receiptId,
-      publicId,
-      state.currentUser.id,
-      selectedBill,
-      clauseRef || undefined,
-      submissionText.trim(),
-      previousHash,
-      timestamp
-    );
-
-    if (showName) {
-      receipt.author_name_public = state.currentUser.name;
+    if (!bill) { setSubmitting(false); return; }
+    try {
+      const result = await api.createReceipt({
+        legislative_item_id: selectedBill,
+        clause_ref: clauseRef || undefined,
+        submission_text: submissionText.trim(),
+        show_name_publicly: showName,
+      });
+      const receiptId = String(result.receipt_id);
+      const publicId = String(result.public_id);
+      dispatch({ type: 'ADD_RECEIPT', payload: {
+        id: receiptId,
+        public_id: publicId,
+        author_id: state.currentUser.id,
+        legislative_item_id: selectedBill,
+        clause_ref: clauseRef || undefined,
+        submission_text: submissionText.trim(),
+        lodging_status: 'pending',
+        timestamp: result.timestamp,
+        hash: result.hash,
+        previous_hash: result.previous_hash,
+        author_name_public: showName ? state.currentUser.name : undefined,
+      } });
+      setSubmitting(false);
+      setSuccess({ receiptId, publicId });
+    } catch (error) {
+      setSubmitting(false);
+      alert(error instanceof Error ? error.message : 'Unable to submit your view.');
     }
-
-    dispatch({ type: 'ADD_RECEIPT', payload: receipt });
-    dispatch({
-      type: 'ADD_AUDIT_LOG',
-      payload: {
-        id: uuidv4(),
-        entity_type: 'receipt',
-        entity_id: receiptId,
-        action: 'created',
-        details: `Receipt ${publicId} issued for ${selectedBill}`,
-        timestamp,
-      }
-    });
-
-    setSubmitting(false);
-    setSuccess({ receiptId, publicId });
     setTimeout(fireConfetti, 120);
   };
 

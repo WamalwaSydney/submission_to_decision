@@ -1,67 +1,91 @@
 # Dependencies
 node_modules/
-backend/venv/
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-.Python
-env/
+backend/.venv/
+.venv/
 venv/
-ENV/
+env/
 
-# Build outputs
+# Frontend build output
 dist/
 build/
-*.egg-info/
+.vite/
+.cache/
 
-# Environment
+# Environment files
 .env
-.env.local
-.env.production
+.env.*
+!.env.example
+!.env.sample
 
-# IDE
+# Python cache and generated files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Python tooling
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# Uploads and local storage
+uploads/
+backend/uploads/
+storage/
+tmp/
+temp/
+
+# Local databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Operating system files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE and editor files
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
 
-# OS
-.DS_Store
-Thumbs.db
+# TypeScript
+*.tsbuildinfo
 
-# Logs
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
+# Docker and local development overrides
+docker-compose.override.yml
 
-# Testing
+# Test reports
+junit.xml
+test-results/
+playwright-report/
 coverage/
-.nyc_output/
-.pytest_cache/
-htmlcov/
 
-# Docker
-.docker/
-
-# Uploads
-uploads/
-*.pdf
+# Generated documentation and local artifacts
 *.tmp
+*.bak
+*.orig
 
-# Database
-*.db
-*.sqlite
-*.sqlite3
+# Git
+.git/
 
-# Secrets
-*.key
-*.pem
-.next/
+# Deployment files that may contain local credentials
+.netlify/
+.render/
 
-node_modules
-.git
-dist
+# Local scripts and personal files
 builddrip-push.ps1

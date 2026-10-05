@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
+import { api } from '../api/endpoints';
 import { RepresentativeStatus, ProfileLabel } from '../types';
 import { Users, MapPin, Building2, CheckCircle2, AlertTriangle, Info, Shield, ArrowLeft, UserRoundPlus, ArrowRight } from 'lucide-react';
 import { motion } from 'framer-motion';
@@ -172,13 +173,19 @@ export function ProfileDetailPage() {
     );
   }
 
-  const handleClaim = () => {
+  const handleClaim = async () => {
     if (!state.currentUser || state.currentUser.role !== 'representative') {
       alert('Only representative accounts can claim profiles. Please sign in as a representative.');
       return;
     }
-    dispatch({ type: 'CLAIM_PROFILE', payload: { profileId: profile.id, userId: state.currentUser.id } });
-    alert('Profile claimed. An administrator must verify it.');
+    try {
+      const result = await api.claimProfile(profile.id);
+      dispatch({ type: 'CLAIM_PROFILE', payload: { profileId: profile.id, userId: state.currentUser.id } });
+      if (result.profile) dispatch({ type: 'HYDRATE', payload: { profiles: state.profiles.map(p => p.id === profile.id ? result.profile : p) } });
+      alert('Profile claimed. An administrator must verify it.');
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'Unable to claim this profile.');
+    }
   };
 
   const verificationVariant =
@@ -342,10 +349,15 @@ export function ClaimProfilePage() {
     profile.verification_status === 'unclaimed' && (!profile.user_id || profile.user_id === state.currentUser?.id)
   );
 
-  const claimProfile = (profileId: string) => {
+  const claimProfile = async (profileId: string) => {
     if (!state.currentUser || !isRepresentative) return;
-    dispatch({ type: 'CLAIM_PROFILE', payload: { profileId, userId: state.currentUser.id } });
-    setClaimedId(profileId);
+    try {
+      await api.claimProfile(profileId);
+      dispatch({ type: 'CLAIM_PROFILE', payload: { profileId, userId: state.currentUser.id } });
+      setClaimedId(profileId);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'Unable to claim this profile.');
+    }
   };
 
   return (

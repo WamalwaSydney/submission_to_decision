@@ -4,7 +4,8 @@ import { Alert, Box, IconButton, InputAdornment, MenuItem, TextField, Typography
 import { ArrowRight, Eye, EyeOff, LockKeyhole, UserRoundPlus } from 'lucide-react';
 import { Card } from '../components/UI';
 import { useApp } from '../context/AppContext';
-import { User, UserRole } from '../types';
+import { UserRole } from '../types';
+import { api } from '../api/endpoints';
 
 export function SignupPage() {
   const { state, dispatch } = useApp();
@@ -18,7 +19,7 @@ export function SignupPage() {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [error, setError] = useState('');
 
-  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError('');
     const normalizedName = name.trim();
@@ -36,22 +37,15 @@ export function SignupPage() {
       setError('The passwords do not match.');
       return;
     }
-    if (state.users.some(user => user.email.trim().toLowerCase() === normalizedEmail)) {
-      setError('A demo account with this email already exists. Sign in instead.');
-      return;
+    try {
+      const response = await api.register(normalizedName, normalizedEmail, password, role as 'citizen' | 'representative');
+      localStorage.setItem('access_token', response.access_token);
+      localStorage.setItem('current_user', JSON.stringify(response.user));
+      dispatch({ type: 'SET_USER', payload: response.user });
+      navigate('/');
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Unable to create the account.');
     }
-
-    const user: User = {
-      id: `u-local-${Date.now()}`,
-      role,
-      name: normalizedName,
-      email: normalizedEmail,
-      status: 'active',
-      created_date: new Date().toISOString(),
-    };
-    dispatch({ type: 'ADD_USER', payload: user });
-    dispatch({ type: 'SET_USER', payload: user });
-    navigate('/');
   };
 
   return (
@@ -85,7 +79,7 @@ export function SignupPage() {
             required
             fullWidth
             autoComplete="new-password"
-            helperText="At least 8 characters. This prototype does not store or send it."
+            helperText="At least 8 characters. It will be sent securely to the API."
             slotProps={{
               input: {
                 endAdornment: (
@@ -128,7 +122,7 @@ export function SignupPage() {
           />
 
           <Alert severity="info" icon={<LockKeyhole size={17} />} sx={{ borderRadius: '12px', '& .MuiAlert-message': { fontSize: 12, lineHeight: 1.55 } }}>
-            Demo account only: the profile exists in app memory for this session. Passwords are checked here but never stored or sent. This is not production authentication.
+            Your account and password are stored and verified by the backend. Never use a password you reuse elsewhere for a demo environment.
           </Alert>
 
           <button type="submit" className="btn-primary w-full inline-flex items-center justify-center gap-2 !py-3">

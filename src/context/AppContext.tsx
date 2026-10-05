@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useReducer, ReactNode } from 'react';
+import React, { createContext, useContext, useEffect, useReducer, ReactNode } from 'react';
 import {
   User, LegislativeItem, ParticipationReceipt, CommitteeReport,
   ReportEntry, SubmissionMatch, NoticeRecord, RepresentativeProfile,
@@ -9,6 +9,7 @@ import {
   seedUsers, seedBills, seedReceipts, seedReports, seedReportEntries,
   seedMatches, seedNotices, seedProfiles, seedModerationActions, seedAuditLog
 } from '../data/seed';
+import { api } from '../api/endpoints';
 
 interface AppState {
   users: User[];
@@ -23,9 +24,13 @@ interface AppState {
   auditLog: AuditLogEntry[];
   currentUser: User | null;
   isOnline: boolean;
+  isLoading: boolean;
+  apiError?: string;
 }
 
 type Action =
+  | { type: 'HYDRATE'; payload: Partial<AppState> }
+  | { type: 'SET_API_ERROR'; payload: string }
   | { type: 'ADD_RECEIPT'; payload: ParticipationReceipt }
   | { type: 'ADD_AUDIT_LOG'; payload: AuditLogEntry }
   | { type: 'ADD_REPORT'; payload: CommitteeReport }
@@ -57,10 +62,20 @@ const initialState: AppState = {
   auditLog: seedAuditLog,
   currentUser: null,
   isOnline: true,
+  isLoading: true,
 };
 
 function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
+    case 'HYDRATE':
+      return { ...state, ...action.payload, isLoading: false, apiError: undefined };
+    case 'SET_API_ERROR':
+      return {
+        ...state,
+        users: [], bills: [], receipts: [], reports: [], reportEntries: [], matches: [], notices: [], profiles: [], moderationActions: [], auditLog: [],
+        isLoading: false,
+        apiError: action.payload,
+      };
     case 'ADD_RECEIPT':
       return { ...state, receipts: [...state.receipts, action.payload] };
     case 'ADD_AUDIT_LOG':
@@ -152,6 +167,29 @@ const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reducer, initialState);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.bootstrap().then(data => {
+      if (cancelled) return;
+      dispatch({ type: 'HYDRATE', payload: {
+        bills: data.bills,
+        receipts: data.receipts,
+        reports: data.reports,
+        reportEntries: data.report_entries,
+        matches: data.matches,
+        notices: data.notices,
+        profiles: data.profiles,
+      } });
+    }).catch(error => {
+      if (!cancelled) dispatch({ type: 'SET_API_ERROR', payload: error instanceof Error ? error.message : 'Unable to load API data' });
+    });
+    const savedUser = localStorage.getItem('current_user');
+    if (savedUser) {
+      try { dispatch({ type: 'SET_USER', payload: JSON.parse(savedUser) as User }); } catch { localStorage.removeItem('current_user'); }
+    }
+    return () => { cancelled = true; };
+  }, []);
 
   const getSubmissionStatus = (receiptId: string): SubmissionStatus => {
     const confirmedMatch = state.matches.find(

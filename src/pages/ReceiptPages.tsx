@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import { verifyChain } from '../utils/hashChain';
+import { api } from '../api/endpoints';
 import { ChainVerificationResult, SubmissionStatus } from '../types';
 import {
   Search, CheckCircle2, XCircle, AlertTriangle, Clock,
@@ -19,12 +20,23 @@ export function ReceiptLookupPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [query, setQuery] = useState(searchParams.get('id') || '');
   const { state, getSubmissionStatus } = useApp();
+  const [remoteReceipt, setRemoteReceipt] = useState<any>(null);
+  const [lookupError, setLookupError] = useState('');
 
-  const receipt = query ? state.receipts.find(r => r.public_id === query.toUpperCase()) : null;
+  useEffect(() => {
+    if (!query) { setRemoteReceipt(null); return; }
+    setLookupError('');
+    api.receipt(query.toUpperCase()).then(setRemoteReceipt).catch(() => {
+      setRemoteReceipt(null);
+      setLookupError('Receipt not found on the API.');
+    });
+  }, [query]);
+
+  const receipt = remoteReceipt || (query ? state.receipts.find(r => r.public_id === query.toUpperCase()) : null);
   const bill = receipt ? state.bills.find(b => b.id === receipt.legislative_item_id) : null;
-  const status = receipt ? getSubmissionStatus(receipt.id) : null;
+  const status = remoteReceipt ? remoteReceipt.status as SubmissionStatus : (receipt ? getSubmissionStatus(receipt.id) : null);
   const match = receipt ? state.matches.find(m => m.receipt_ref === receipt.id && m.reviewer_decision === 'confirmed') : null;
-  const entry = match ? state.reportEntries.find(e => e.id === match.report_entry_ref) : null;
+  const entry = remoteReceipt?.match ? { treatment: remoteReceipt.match.treatment, stated_reason: remoteReceipt.match.stated_reason } : (match ? state.reportEntries.find(e => e.id === match.report_entry_ref) : null);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -319,8 +331,19 @@ export function ReceiptVerifyPage() {
     setVerifying(true);
     setVerificationError('');
     try {
-      await new Promise(r => setTimeout(r, 350));
-      setResult(await verifyChain(state.receipts));
+      const remote = await api.verifyChain();
+      setResult({
+        valid: remote.valid,
+        totalChecked: remote.total_checked,
+        firstBrokenIndex: remote.first_broken_index ?? undefined,
+        details: (remote.details || []).map((item: any) => ({
+          index: item.index,
+          receiptId: item.receipt_id,
+          valid: item.valid,
+          expectedHash: item.expected_hash,
+          actualHash: item.actual_hash,
+        })),
+      });
     } catch (error) {
       setResult(null);
       setVerificationError(error instanceof Error ? error.message : 'The receipt chain could not be verified in this browser.');

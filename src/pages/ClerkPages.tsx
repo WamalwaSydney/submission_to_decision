@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { ExtractionStatus, SubmissionStatus } from '../types';
+import { api } from '../api/endpoints';
 import { v4 as uuidv4 } from 'uuid';
 import { Upload, FileText, CheckCircle2, AlertTriangle, Eye, ChevronDown, ChevronUp, Plus, Database, FileCheck2 } from 'lucide-react';
 import { motion } from 'framer-motion';
@@ -10,32 +11,35 @@ export function ClerkIngestionPage() {
   const { state, dispatch } = useApp();
   const [uploading, setUploading] = useState(false);
   const [selectedBill, setSelectedBill] = useState('');
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [uploadSuccess, setUploadSuccess] = useState(false);
   const [expandedReport, setExpandedReport] = useState<string | null>(null);
 
-  const handleUpload = () => {
-    if (!selectedBill) return;
+  const handleUpload = async () => {
+    if (!selectedBill || !selectedFile) return;
     setUploading(true);
-    
-    setTimeout(() => {
-      const reportId = uuidv4();
+    try {
+      const result = await api.uploadReport(selectedFile, selectedBill, state.bills.find(b => b.id === selectedBill)?.institution || 'National Assembly', new Date().toISOString().split('T')[0]);
       dispatch({
         type: 'ADD_REPORT',
         payload: {
-          id: reportId,
+          id: String(result.report_id),
           bill_ref: selectedBill,
           institution: state.bills.find(b => b.id === selectedBill)?.institution || 'National Assembly',
           date_tabled: new Date().toISOString().split('T')[0],
-          source_document_ref: `report-${Date.now()}.pdf`,
-          extraction_status: 'pending',
-          ocr_used: Math.random() > 0.5,
-          is_simulated: true,
+          source_document_ref: selectedFile.name,
+          extraction_status: result.extraction_status,
+          ocr_used: result.ocr_used,
+          is_simulated: false,
         }
       });
       setUploading(false);
       setUploadSuccess(true);
       setTimeout(() => setUploadSuccess(false), 3000);
-    }, 1500);
+    } catch (error) {
+      setUploading(false);
+      alert(error instanceof Error ? error.message : 'Unable to upload the report.');
+    }
   };
 
   const handleVerifyEntry = (entryId: string, treatment: SubmissionStatus) => {
@@ -91,13 +95,14 @@ export function ClerkIngestionPage() {
                 <div className="mx-auto w-16 h-16 rounded-2xl bg-gradient-to-br from-primary-500 to-accent-500 flex items-center justify-center text-white shadow-lg shadow-primary-500/25 mb-4 group-hover:scale-105 transition-transform duration-300">
                   <Upload className="h-8 w-8" />
                 </div>
-                <p className="text-base font-semibold text-surface-800 mb-1">Drag and drop a PDF or click to browse</p>
+                <input type="file" accept="application/pdf,.pdf" onChange={event => setSelectedFile(event.target.files?.[0] || null)} className="block mx-auto mb-3 text-sm" />
+                <p className="text-base font-semibold text-surface-800 mb-1">{selectedFile ? selectedFile.name : 'Choose a PDF report'}</p>
                 <p className="text-xs text-surface-500 mt-1">Supports native text PDFs and scanned/image PDFs (OCR fallback)</p>
               </div>
             </div>
             <button
               onClick={handleUpload}
-              disabled={!selectedBill || uploading}
+              disabled={!selectedBill || !selectedFile || uploading}
               className="btn-primary inline-flex items-center gap-2"
             >
               {uploading ? (
@@ -276,23 +281,20 @@ export function ClerkNoticesPage() {
     bill_ref: '', institution: '' as string, notice_date: '', window_start: '', window_end: '', mode: '', bill_text_accessible: false
   });
 
-  const handleAdd = () => {
+  const handleAdd = async () => {
     if (!formData.bill_ref || !formData.notice_date) return;
-    dispatch({
-      type: 'ADD_NOTICE',
-      payload: {
-        id: uuidv4(),
-        bill_ref: formData.bill_ref,
-        institution: formData.institution as any,
-        notice_date: formData.notice_date,
+    try {
+      const result = await api.createNotice({
+        ...formData,
         window_start: formData.window_start || formData.notice_date,
-        window_end: formData.window_end,
-        mode: formData.mode,
-        bill_text_accessible: formData.bill_text_accessible,
-      }
-    });
-    setShowForm(false);
-    setFormData({ bill_ref: '', institution: '', notice_date: '', window_start: '', window_end: '', mode: '', bill_text_accessible: false });
+        window_end: formData.window_end || formData.notice_date,
+      });
+      dispatch({ type: 'ADD_NOTICE', payload: result.notice });
+      setShowForm(false);
+      setFormData({ bill_ref: '', institution: '', notice_date: '', window_start: '', window_end: '', mode: '', bill_text_accessible: false });
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'Unable to create the notice.');
+    }
   };
 
   return (

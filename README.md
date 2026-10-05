@@ -3,7 +3,7 @@ Submission-to-Decision Traceability Platform — Kenya
 A web application designed to help citizens trace public submissions on bills in Kenya’s National and County Legislatures—from lodging to the committee’s recorded treatment.
 
 
-Deployment status: AWS is the target deployment, not a live production deployment. The AWS architecture and steps below are a plan. The Figma/export ZIP shared for review is a static UI capture, not the complete runnable application; the setup instructions assume the full project source tree described below is present in the repository. The feature table reflects the implementation status in the project README supplied by the author and should be kept synchronized with the code.
+Deployment status: the current deployment plan uses Netlify for the Vite frontend, Render for the FastAPI API, and Neon for PostgreSQL. The frontend is configured to call the Render API through the build-time `VITE_API_URL` variable. The Figma/export ZIP shared for review is a static UI capture, not the complete runnable application; the setup instructions assume the full project source tree described below is present in the repository.
 
 Project links
 
@@ -63,15 +63,51 @@ Suggest candidate links for human review
 Local development
 Docker Compose
 Run the API and database locally
-Target deployment
-AWS Amplify, API Gateway, AWS Lambda, RDS for PostgreSQL, S3
-Static web app, serverless API, relational data, and report storage
+Current deployment
+Netlify, Render, Neon PostgreSQL
+Static Vite frontend, containerized FastAPI API, managed PostgreSQL database
 CI/CD target
-GitHub Actions with AWS role federation
-Tests, build, and controlled deployments
+GitHub integration with Netlify and Render
+Build, health checks, migrations, and controlled deploys
 
 
 
+
+Current deployment plan — Netlify + Render + Neon
+
+The current deployment is split into three services:
+
+| Layer | Service | Configuration |
+|---|---|---|
+| Frontend | Netlify | `npm run build`, publish `dist`, and `VITE_API_URL=https://<render-service>.onrender.com/api/v1` |
+| API | Render Web Service | `backend/Dockerfile`; `DATABASE_URL`, `JWT_SECRET_KEY`, and `CORS_ORIGINS` environment variables |
+| Database | Neon PostgreSQL | Rotated `postgresql+asyncpg://` connection string with `ssl=require`; stored only on Render |
+
+Render variables:
+
+```text
+DATABASE_URL=postgresql+asyncpg://<user>:<rotated-password>@<neon-host>/<database>?ssl=require
+JWT_SECRET_KEY=<long-random-secret>
+CORS_ORIGINS=https://<netlify-site>.netlify.app
+```
+
+Netlify variable:
+
+```text
+VITE_API_URL=https://<render-service>.onrender.com/api/v1
+```
+
+Never place database credentials or `JWT_SECRET_KEY` in Netlify or any `VITE_*` variable. The frontend now uses `src/api/client.ts` and `src/api/endpoints.ts`; bootstrap data, authentication, receipt submission, receipt lookup, chain verification, clerk uploads, notices, profile claims, and moderator match decisions use the Render API.
+
+Deployment order:
+
+1. Rotate any Neon password and JWT secret that were previously committed or shared.
+2. Set the three backend variables in Render and deploy the API.
+3. Verify `GET https://<render-service>.onrender.com/health` returns HTTP 200.
+4. Seed or migrate Neon through a controlled Render release step.
+5. Add `VITE_API_URL` in Netlify under **Site configuration → Environment variables**, select Production, and redeploy.
+6. Check the browser Network tab; requests must use the Render hostname.
+7. If CORS fails, add the exact Netlify origin to `CORS_ORIGINS` on Render and redeploy.
 
 Main workflow
 
@@ -163,7 +199,7 @@ Sign in at /login using a simulated account:
 
 These are demo accounts, not production credentials. Never use real passwords in a demo environment.
 
-AWS deployment plan
+Legacy AWS alternative
 
 The proposed AWS design separates static frontend hosting, API compute, relational data, and uploaded committee documents. The architecture diagram is in docs/architecture.png, with editable source in docs/architecture.mmd.
 

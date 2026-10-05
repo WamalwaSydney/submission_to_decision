@@ -63,6 +63,8 @@ async def create_receipt(
         lodging_status="pending",
         author_name_public=author_name if show_name else None
     )
+    db.add(receipt)
+    await db.flush()
     
     # Compute hash
     receipt.hash = compute_receipt_hash({
@@ -74,9 +76,6 @@ async def create_receipt(
         "timestamp": receipt.timestamp,
         "previous_hash": receipt.previous_hash,
     })
-    
-    # Save
-    db.add(receipt)
     
     # Audit log
     audit = AuditLog(

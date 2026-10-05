@@ -7,19 +7,80 @@ from typing import Optional
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from pydantic import BaseModel
 from sqlalchemy import select, inspect as sa_inspect
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.auth import get_current_user, require_role
+from app.auth import get_current_user, require_role, verify_password, get_password_hash, create_access_token
 from app.models import (
     User, LegislativeItem, ParticipationReceipt,
-    ReportEntry, SubmissionMatch, RepresentativeProfile, NoticeRecord,
+    CommitteeReport, ReportEntry, SubmissionMatch, RepresentativeProfile, NoticeRecord,
     ModerationAction,
 )
 from app.services import receipt_service, linking_service, ingestion_service
 
 router = APIRouter()
+
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+class RegisterRequest(BaseModel):
+    name: str
+    email: str
+    password: str
+    role: str = "citizen"
+
+
+def public_user(user: User) -> dict:
+    return {
+        "id": str(user.id),
+        "role": user.role,
+        "name": user.name,
+        "email": user.email,
+        "status": user.status,
+        "created_date": user.created_date,
+    }
+
+
+# ============ Authentication ============
+
+@router.post("/auth/login")
+async def login(payload: LoginRequest, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(User).where(User.email == payload.email.strip().lower()))
+    user = result.scalar_one_or_none()
+    if not user or not verify_password(payload.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+    if user.status != "active":
+        raise HTTPException(status_code=403, detail="Account suspended")
+    token = create_access_token({"sub": str(user.id)})
+    return {"access_token": token, "token_type": "bearer", "user": public_user(user)}
+
+
+@router.post("/auth/register")
+async def register(payload: RegisterRequest, db: AsyncSession = Depends(get_db)):
+    if payload.role not in {"citizen", "representative"}:
+        raise HTTPException(status_code=400, detail="Only citizen and representative accounts can self-register")
+    if len(payload.password) < 8:
+        raise HTTPException(status_code=422, detail="Password must be at least 8 characters")
+    email = payload.email.strip().lower()
+    result = await db.execute(select(User).where(User.email == email))
+    if result.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail="An account with that email already exists")
+    user = User(name=payload.name.strip(), email=email, role=payload.role, password_hash=get_password_hash(payload.password), status="active")
+    db.add(user)
+    await db.commit()
+    await db.refresh(user)
+    token = create_access_token({"sub": str(user.id)})
+    return {"access_token": token, "token_type": "bearer", "user": public_user(user)}
+
+
+@router.get("/auth/me")
+async def me(current_user: User = Depends(get_current_user)):
+    return {"user": public_user(current_user)}
 
 
 # ============ Helpers ============
@@ -114,6 +175,24 @@ async def get_bill(bill_id: UUID, db: AsyncSession = Depends(get_db)):
     }
 
 
+@router.get("/bootstrap")
+async def bootstrap(db: AsyncSession = Depends(get_db)):
+    """Return the non-secret application data needed by the initial client shell."""
+    async def all_rows(model, exclude=frozenset()):
+        result = await db.execute(select(model))
+        return [to_dict(row, exclude=exclude) for row in result.scalars().all()]
+
+    return {
+        "bills": await all_rows(LegislativeItem),
+        "receipts": await all_rows(ParticipationReceipt),
+        "reports": await all_rows(CommitteeReport),
+        "report_entries": await all_rows(ReportEntry),
+        "matches": await all_rows(SubmissionMatch),
+        "notices": await all_rows(NoticeRecord),
+        "profiles": await all_rows(RepresentativeProfile, exclude=PROFILE_PUBLIC_EXCLUDE),
+    }
+
+
 # ============ Receipts ============
 
 @router.post("/receipts")
@@ -168,6 +247,17 @@ async def create_receipt(
 @router.get("/receipts/verify")
 async def verify_chain(db: AsyncSession = Depends(get_db)):
     return await receipt_service.verify_chain(db)
+
+
+@router.get("/receipts/my")
+async def my_receipts(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    result = await db.execute(
+        select(ParticipationReceipt).where(ParticipationReceipt.author_id == current_user.id)
+    )
+    return {"receipts": [to_dict(receipt) for receipt in result.scalars().all()]}
 
 
 @router.get("/receipts/{public_id}")

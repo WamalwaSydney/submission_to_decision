@@ -8,11 +8,12 @@ from datetime import datetime, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import List
+import os
 
 from app.database import get_db
 from app.models import User
 
-SECRET_KEY = "your-secret-key-change-in-production"
+SECRET_KEY = os.environ["JWT_SECRET_KEY"]
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
 

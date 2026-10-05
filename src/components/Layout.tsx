@@ -423,7 +423,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
                 <Tooltip title="Sign out" placement="bottom" arrow>
                   <IconButton
                     size="small"
-                    onClick={() => dispatch({ type: 'SET_USER', payload: null })}
+                    onClick={() => { localStorage.removeItem('access_token'); localStorage.removeItem('current_user'); dispatch({ type: 'SET_USER', payload: null }); }}
                     aria-label="Sign out"
                     sx={{
                       '&:hover': {
