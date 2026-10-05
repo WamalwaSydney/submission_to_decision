@@ -72,7 +72,6 @@ function reducer(state: AppState, action: Action): AppState {
     case 'SET_API_ERROR':
       return {
         ...state,
-        users: [], bills: [], receipts: [], reports: [], reportEntries: [], matches: [], notices: [], profiles: [], moderationActions: [], auditLog: [],
         isLoading: false,
         apiError: action.payload,
       };
@@ -173,7 +172,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     api.bootstrap().then(data => {
       if (cancelled) return;
       dispatch({ type: 'HYDRATE', payload: {
-        bills: data.bills,
+        // Keep the bundled demo bills available when the API is reachable but
+        // has not been seeded yet. This is especially important for clerk
+        // report ingestion, which must always have a bill to attach to.
+        bills: data.bills.length > 0 ? data.bills : seedBills,
         receipts: data.receipts,
         reports: data.reports,
         reportEntries: data.report_entries,

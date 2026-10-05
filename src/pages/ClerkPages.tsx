@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { api } from '../api/endpoints';
+import { seedBills } from '../data/seed';
 import { Upload, FileText, CheckCircle2, AlertTriangle, ChevronDown, Plus, Database, FileCheck2, X } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { Card, InfoBox, Badge, Label, InputField, SelectField } from '../components/UI';
@@ -17,6 +18,7 @@ export function ClerkIngestionPage() {
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [expandedReport, setExpandedReport] = useState<string | null>(null);
+  const availableBills = state.bills.length > 0 ? state.bills : seedBills;
 
   useEffect(() => {
     if (state.bills.length > 0) return;
@@ -69,7 +71,7 @@ export function ClerkIngestionPage() {
 
   const handleUpload = async () => {
     if (!selectedBill || !selectedFile) return;
-    const bill = state.bills.find(b => b.id === selectedBill);
+    const bill = availableBills.find(b => b.id === selectedBill);
     const institution = bill?.institution || 'National Assembly';
     const dateTabled = new Date().toISOString().split('T')[0];
 
@@ -142,15 +144,13 @@ export function ClerkIngestionPage() {
                 onChange={(e) => setSelectedBill(e.target.value)}
               >
                 <option value="">Select a bill...</option>
-                {state.bills.map(b => (
+                {availableBills.map(b => (
                   <option key={b.id} value={b.id}>{b.title} ({b.institution})</option>
                 ))}
               </SelectField>
-              {state.bills.length === 0 && (
-                <p className="text-xs text-amber-700 mt-2">
-                  No bills are loaded yet. Run the legislation sync or refresh the page, then try again.
-                </p>
-              )}
+              <p className="text-xs text-surface-500 mt-2">
+                {state.bills.length > 0 ? 'Select the bill that this committee report belongs to.' : 'Showing bundled bills while live legislation data is unavailable.'}
+              </p>
             </div>
 
             <div>
