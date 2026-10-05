@@ -15,8 +15,16 @@ jobs:
       contents: read
       issues: write
     steps:
+      
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Show what is running
+        run: |
+          echo "ref: ${{ github.ref }}"
+          echo "sha: ${{ github.sha }}"
+          git log -1 --oneline
+          ls -la backend/app/scripts
 
       - name: Set up Python
         uses: actions/setup-python@v5
