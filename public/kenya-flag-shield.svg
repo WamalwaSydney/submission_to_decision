@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Created with Inkscape (http://www.inkscape.org/) -->
+<svg
+   xmlns:svg="http://www.w3.org/2000/svg"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:xlink="http://www.w3.org/1999/xlink"
+   version="1.0"
+   width="246.23711"
+   height="395.625"
+   viewBox="-120 -80 240 160"
+   id="svg2">
+  <defs
+     id="defs4">
+    <path
+       d="M -1,55.425626 L 1,55.425626 L 1,-38 C 3,-40 3,-43 3,-46 C 3,-48 3,-56 0,-64.66323 C -3,-56 -3,-48 -3,-46 C -3,-43 -3,-40 -1,-38 L -1,55.425626 z"
+       transform="matrix(0.8660254,0.5,-0.5,0.8660254,0,0)"
+       id="spearshape"
+       style="stroke-miterlimit:10" />
+  </defs>
+  <g
+     transform="matrix(3.6535452,0,0,3.6535452,0.3013658,14.266521)"
+     id="g2412">
+    <g
+       id="spear">
+      <use
+         id="use14"
+         style="stroke:#000000;stroke-width:0.27370676"
+         x="0"
+         y="0"
+         width="240"
+         height="160"
+         xlink:href="#spearshape" />
+      <use
+         id="use16"
+         style="fill:#ffffff;stroke:none"
+         x="0"
+         y="0"
+         width="240"
+         height="160"
+         xlink:href="#spearshape" />
+    </g>
+    <use
+       transform="scale(-1,1)"
+       id="use18"
+       x="0"
+       y="0"
+       width="240"
+       height="160"
+       xlink:href="#spear" />
+    <path
+       d="M -19,24 C -16,32 -6,48 -1.6653345e-15,48 C 6,48 16,32 19,24 L 19,-24 C 16,-32 6,-48 -1.6653345e-15,-48 C -6,-48 -16,-32 -19,-24 L -19,24 z"
+       id="path20"
+       style="fill:#bb0000" />
+    <path
+       d="M 19,24 C 22,16 24,8 24,0 C 24,-8 22,-16 19,-24 C 16,-16 14,-8 14,0 C 14,8 16,16 19,24"
+       id="deco_r"
+       style="fill:#000000" />
+    <use
+       transform="scale(-1,1)"
+       id="use23"
+       x="0"
+       y="0"
+       width="240"
+       height="160"
+       xlink:href="#deco_r" />
+    <g
+       id="g25"
+       style="fill:#ffffff">
+      <ellipse
+         cx="0"
+         cy="0"
+         rx="4"
+         ry="6"
+         id="ellipse27" />
+      <path
+         d="M 1,5.85 C 1,5.85 5,13.85 5,26.85 C 5,39.85 1,47.85 1,47.85 L 1,5.85 z"
+         id="deco_br" />
+      <use
+         transform="scale(-1,-1)"
+         id="use30"
+         x="0"
+         y="0"
+         width="240"
+         height="160"
+         xlink:href="#deco_br" />
+      <use
+         transform="scale(-1,1)"
+         id="use32"
+         x="0"
+         y="0"
+         width="240"
+         height="160"
+         xlink:href="#deco_br" />
+      <use
+         transform="scale(1,-1)"
+         id="use34"
+         x="0"
+         y="0"
+         width="240"
+         height="160"
+         xlink:href="#deco_br" />
+    </g>
+  </g>
+</svg>
