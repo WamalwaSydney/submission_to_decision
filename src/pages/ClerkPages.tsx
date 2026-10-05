@@ -18,7 +18,9 @@ export function ClerkIngestionPage() {
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [expandedReport, setExpandedReport] = useState<string | null>(null);
-  const availableBills = state.bills.length > 0 ? state.bills : seedBills;
+  const liveBills = state.bills.filter(bill => Boolean(bill?.id && bill?.title));
+  const availableBills = liveBills.length > 0 ? liveBills : seedBills;
+  const usingBundledBills = liveBills.length === 0;
 
   useEffect(() => {
     if (state.bills.length > 0) return;
@@ -139,17 +141,20 @@ export function ClerkIngestionPage() {
           <div className="space-y-5">
             <div>
               <Label className="!text-xs !font-black !uppercase !tracking-[0.15em] !text-surface-600 !mb-2">Associated Bill</Label>
-              <SelectField
+              <select
+                aria-label="Associated bill"
                 value={selectedBill}
                 onChange={(e) => setSelectedBill(e.target.value)}
+                className="input-field"
+                required
               >
                 <option value="">Select a bill...</option>
                 {availableBills.map(b => (
                   <option key={b.id} value={b.id}>{b.title} ({b.institution})</option>
                 ))}
-              </SelectField>
+              </select>
               <p className="text-xs text-surface-500 mt-2">
-                {state.bills.length > 0 ? 'Select the bill that this committee report belongs to.' : 'Showing bundled bills while live legislation data is unavailable.'}
+                {usingBundledBills ? 'Showing bundled bills while live legislation data is unavailable.' : `${availableBills.length} bill${availableBills.length === 1 ? '' : 's'} available. Select the bill that this committee report belongs to.`}
               </p>
             </div>
 
