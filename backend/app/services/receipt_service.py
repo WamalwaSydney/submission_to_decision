@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import uuid
 from datetime import datetime
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -50,9 +51,21 @@ async def create_receipt(
     # Get chain head
     previous_hash = await get_chain_head(db)
     
-    # Create receipt
+    # Allocate the primary key before flush so the complete hash payload can
+    # be computed before PostgreSQL validates the NOT NULL hash column.
     timestamp = datetime.utcnow()
+    receipt_id = uuid.uuid4()
+    hash_payload = {
+        "id": receipt_id,
+        "author_id": author_id,
+        "legislative_item_id": legislative_item_id,
+        "clause_ref": clause_ref,
+        "submission_text": submission_text,
+        "timestamp": timestamp,
+        "previous_hash": previous_hash,
+    }
     receipt = ParticipationReceipt(
+        id=receipt_id,
         public_id=public_id,
         author_id=author_id,
         legislative_item_id=legislative_item_id,
@@ -60,22 +73,12 @@ async def create_receipt(
         submission_text=submission_text,
         timestamp=timestamp,
         previous_hash=previous_hash,
+        hash=compute_receipt_hash(hash_payload),
         lodging_status="pending",
         author_name_public=author_name if show_name else None
     )
     db.add(receipt)
     await db.flush()
-    
-    # Compute hash
-    receipt.hash = compute_receipt_hash({
-        "id": receipt.id,
-        "author_id": receipt.author_id,
-        "legislative_item_id": receipt.legislative_item_id,
-        "clause_ref": receipt.clause_ref,
-        "submission_text": receipt.submission_text,
-        "timestamp": receipt.timestamp,
-        "previous_hash": receipt.previous_hash,
-    })
     
     # Audit log
     audit = AuditLog(
