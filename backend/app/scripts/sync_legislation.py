@@ -15,17 +15,23 @@ A report is linked to a bill automatically only when the normalized
 (house, number, year) key agrees.  A title-only/numberless report is never
 silently attached: candidates are written to ``legislative_link_reviews`` for
 human confirmation.
+
+Note on ids: every raw ``INSERT`` below supplies ``id`` explicitly
+(``uuid.uuid4()``).  The models use ``default=uuid.uuid4`` which is applied by
+the ORM only, so raw SQL must generate the id itself.
 """
 from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import logging
 import os
 import re
 import subprocess
 import sys
 import tempfile
+import uuid
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
@@ -36,6 +42,7 @@ import httpx
 from bs4 import BeautifulSoup
 from rapidfuzz.fuzz import ratio
 from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import create_async_engine
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -65,6 +72,33 @@ DATE_RE = re.compile(
     re.I,
 )
 
+# File references look like DLS/NA/2023/123 -- no spaces.  The old pattern
+# allowed spaces around slashes and matched fragments such as "DLS/NA/ The".
+FILE_REF_RE = re.compile(r"\bDLS/[A-Za-z0-9.()-]+(?:/[A-Za-z0-9.()-]+)+")
+
+# Whitelisted stage labels, most advanced first.  Anything else falls back to
+# DEFAULT_STAGE instead of storing raw table text.
+DEFAULT_STAGE = "Legislative proposal"
+STAGE_PATTERNS = (
+    ("Assented", re.compile(r"\bassent(?:ed)?\b", re.I)),
+    ("Third Reading", re.compile(r"\bthird\s+reading\b", re.I)),
+    ("Committee of the Whole", re.compile(r"\bcommittee\s+of\s+the\s+whole\b", re.I)),
+    ("Second Reading", re.compile(r"\bsecond\s+reading\b", re.I)),
+    ("First Reading", re.compile(r"\bfirst\s+reading\b", re.I)),
+    ("Withdrawn", re.compile(r"\bwithdrawn\b", re.I)),
+    ("Lapsed", re.compile(r"\blapsed\b", re.I)),
+    ("Published", re.compile(r"\bpublished\b", re.I)),
+)
+
+# Column limits from models.LegislativeItem
+BILL_LIMITS = {
+    "title": 500,
+    "identifier": 100,
+    "stage": 100,
+    "source_url": 1000,
+    "source_file_ref": 255,
+}
+
 MONTHS = {m.lower(): i for i, m in enumerate(("January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"), 1)}
 
 
@@ -89,6 +123,14 @@ def canonical_house(value: str | None) -> str | None:
     if value in {"na", "national assembly"} or "national assembly" in value:
         return "na"
     return None
+
+
+def extract_stage(joined_row: str) -> str:
+    """Map a raw tracker row to a known stage label (never raw table text)."""
+    for label, pattern in STAGE_PATTERNS:
+        if pattern.search(joined_row):
+            return label
+    return DEFAULT_STAGE
 
 
 @dataclass(frozen=True)
@@ -219,12 +261,12 @@ def parse_tracker(text_value: str, source_url: str, as_at: date) -> list[BillRow
             continue
         if not re.search(r"\b(bill|amendment|appropriation|finance|fund)\b", title, re.I):
             continue
-        file_match = re.search(r"DLS\s*/\s*([^\s]+(?:\s*/\s*[^\s]+){1,})", joined, re.I)
+        file_match = FILE_REF_RE.search(joined)
         file_ref = clean(file_match.group(0)) if file_match else None
         suffix = f"Bill-{number:03d}" if number is not None else f"Proposal-{hashlib.sha1((file_ref or title).encode()).hexdigest()[:10]}"
         identifier = f"{house.upper()}/{year}/{suffix}"
-        stage = clean(joined[joined.lower().rfind("published") :]) if "published" in joined.lower() else "Legislative proposal"
-        rows.append(BillRow(title=title, identifier=identifier, house=house, number=number, year=year, stage=stage[:100], source_url=source_url, source_file_ref=file_ref))
+        stage = extract_stage(joined)
+        rows.append(BillRow(title=title, identifier=identifier, house=house, number=number, year=year, stage=stage, source_url=source_url, source_file_ref=file_ref))
     unique: dict[str, BillRow] = {row.identifier: row for row in rows}
     if len(unique) < 5:
         raise RuntimeError(f"Tracker parser produced only {len(unique)} bills; refusing a partial sync")
@@ -402,58 +444,130 @@ def bill_documents(row: BillRow) -> list[dict]:
     return [{"name": "Legislative Proposals Tracker", "url": row.source_url}]
 
 
-async def upsert_bills(conn, rows: list[BillRow], as_at: date) -> int:
-    changed = 0
+# --------------------------------------------------------------------------
+# Bills
+# --------------------------------------------------------------------------
+def validate_bill(row: BillRow) -> str | None:
+    """Return a reason to skip the row, or None if it is safe to store."""
+    for field in ("title", "identifier", "stage"):
+        if not getattr(row, field):
+            return f"missing required field '{field}'"
+    for field, limit in BILL_LIMITS.items():
+        value = getattr(row, field, None)
+        if isinstance(value, str) and len(value) > limit:
+            return f"'{field}' too long ({len(value)} > {limit})"
+    return None
+
+
+async def _upsert_bill(conn, row: BillRow, as_at: date) -> bool:
+    """Insert or update one bill. Returns True if a new row was inserted."""
+    result = await conn.execute(text("SELECT id FROM legislative_items WHERE identifier=:identifier"), {"identifier": row.identifier})
+    exists = result.first()
+    params = {
+        "title": row.title,
+        "identifier": row.identifier,
+        "institution": "National Assembly",
+        "stage": row.stage,
+        "documents": json.dumps(bill_documents(row)),
+        "bill_house": row.house,
+        "bill_number": row.number,
+        "bill_year": row.year,
+        "source_url": row.source_url,
+        "source_file_ref": row.source_file_ref,
+        "source_updated_at": as_at,
+        "source_status": row.stage,
+    }
+    if exists:
+        await conn.execute(text("""UPDATE legislative_items SET title=:title, institution=:institution, stage=:stage, documents=CAST(:documents AS jsonb), bill_house=:bill_house, bill_number=:bill_number, bill_year=:bill_year, source_url=:source_url, source_file_ref=:source_file_ref, source_updated_at=:source_updated_at, source_status=:source_status, is_simulated=false WHERE identifier=:identifier"""), params)
+        return False
+    await conn.execute(text("""INSERT INTO legislative_items (id, title, identifier, institution, stage, documents, status_history, is_simulated, bill_house, bill_number, bill_year, source_url, source_file_ref, source_updated_at, source_status) VALUES (:id,:title,:identifier,:institution,:stage,CAST(:documents AS jsonb),'[]'::jsonb,false,:bill_house,:bill_number,:bill_year,:source_url,:source_file_ref,:source_updated_at,:source_status)"""), {**params, "id": uuid.uuid4()})
+    return True
+
+
+async def upsert_bills(conn, rows: list[BillRow], as_at: date) -> tuple[int, int]:
+    """Returns (new_count, skipped_count). One savepoint per row."""
+    new = skipped = 0
     for row in rows:
-        result = await conn.execute(text("SELECT id FROM legislative_items WHERE identifier=:identifier"), {"identifier": row.identifier})
-        exists = result.first()
-        params = {"title": row.title, "identifier": row.identifier, "institution": "National Assembly", "stage": row.stage, "documents": bill_documents(row), "bill_house": row.house, "bill_number": row.number, "bill_year": row.year, "source_url": row.source_url, "source_file_ref": row.source_file_ref, "source_updated_at": as_at, "source_status": row.stage}
-        if exists:
-            await conn.execute(text("""UPDATE legislative_items SET title=:title, institution=:institution, stage=:stage, documents=CAST(:documents AS jsonb), bill_house=:bill_house, bill_number=:bill_number, bill_year=:bill_year, source_url=:source_url, source_file_ref=:source_file_ref, source_updated_at=:source_updated_at, source_status=:source_status, is_simulated=false WHERE identifier=:identifier"""), {**params, "documents": __import__("json").dumps(params["documents"])})
-        else:
-            await conn.execute(text("""INSERT INTO legislative_items (title, identifier, institution, stage, documents, status_history, is_simulated, bill_house, bill_number, bill_year, source_url, source_file_ref, source_updated_at, source_status) VALUES (:title,:identifier,:institution,:stage,CAST(:documents AS jsonb),'[]'::jsonb,false,:bill_house,:bill_number,:bill_year,:source_url,:source_file_ref,:source_updated_at,:source_status)"""), {**params, "documents": __import__("json").dumps(params["documents"])})
-            changed += 1
-    return changed
+        reason = validate_bill(row)
+        if reason:
+            skipped += 1
+            log.warning("Skipping bill %r: %s", row.identifier, reason)
+            continue
+        try:
+            async with conn.begin_nested():
+                if await _upsert_bill(conn, row, as_at):
+                    new += 1
+        except SQLAlchemyError as exc:
+            skipped += 1
+            log.error("DB error for bill %r: %s", row.identifier, exc)
+    return new, skipped
+
+
+# --------------------------------------------------------------------------
+# Notices
+# --------------------------------------------------------------------------
+async def _upsert_notice(conn, notice: NoticeRow) -> None:
+    result = await conn.execute(text("SELECT id FROM legislative_items WHERE bill_house=:house AND bill_number IS NOT DISTINCT FROM :number AND bill_year=:year ORDER BY id LIMIT 1"), {"house": notice.bill_house, "number": notice.bill_number, "year": notice.bill_year})
+    bill = result.first()
+    if not bill:
+        identifier = f"{notice.bill_house.upper()}/{notice.bill_year}/Notice-{hashlib.sha1(notice.bill_title.lower().encode()).hexdigest()[:10]}"
+        await conn.execute(text("""INSERT INTO legislative_items (id,title,identifier,institution,stage,documents,status_history,is_simulated,bill_house,bill_number,bill_year,source_url,source_status) VALUES (:id,:title,:identifier,'National Assembly','Public participation',CAST(:documents AS jsonb),'[]'::jsonb,false,:house,:number,:year,:source_url,'Public participation') ON CONFLICT (identifier) DO NOTHING"""), {"id": uuid.uuid4(), "title": notice.bill_title[:500], "identifier": identifier, "documents": json.dumps([{"name": "Memoranda notice", "url": notice.source_url}, *({"name": "Bill text", "url": u} for u in notice.document_urls)]), "house": notice.bill_house, "number": notice.bill_number, "year": notice.bill_year, "source_url": notice.source_url})
+        bill = (await conn.execute(text("SELECT id FROM legislative_items WHERE identifier=:identifier"), {"identifier": identifier})).first()
+    await conn.execute(text("""INSERT INTO notice_records (id,bill_ref,institution,notice_date,window_start,window_end,mode,bill_text_accessible,source_url,source_title,committee_name,published_date) VALUES (:id,:bill,'National Assembly',:notice_date,:notice_date,:deadline,:mode,:accessible,:source_url,:title,:committee,:published) ON CONFLICT (source_url) WHERE source_url IS NOT NULL DO UPDATE SET bill_ref=EXCLUDED.bill_ref, notice_date=EXCLUDED.notice_date, window_start=EXCLUDED.window_start, window_end=EXCLUDED.window_end, mode=EXCLUDED.mode, bill_text_accessible=EXCLUDED.bill_text_accessible, source_title=EXCLUDED.source_title, committee_name=EXCLUDED.committee_name, published_date=EXCLUDED.published_date"""), {"id": uuid.uuid4(), "bill": bill[0], "notice_date": notice.notice_date, "deadline": notice.deadline, "mode": "Parliament website notice", "accessible": bool(notice.document_urls), "source_url": notice.source_url, "title": notice.title, "committee": notice.committee_name, "published": notice.notice_date})
 
 
 async def upsert_notices(conn, notices: list[NoticeRow]) -> int:
-    inserted = 0
+    done = 0
     for notice in notices:
-        result = await conn.execute(text("SELECT id FROM legislative_items WHERE bill_house=:house AND bill_number IS NOT DISTINCT FROM :number AND bill_year=:year ORDER BY id LIMIT 1"), {"house": notice.bill_house, "number": notice.bill_number, "year": notice.bill_year})
-        bill = result.first()
-        if not bill:
-            identifier = f"{notice.bill_house.upper()}/{notice.bill_year}/Notice-{hashlib.sha1(notice.bill_title.lower().encode()).hexdigest()[:10]}"
-            await conn.execute(text("""INSERT INTO legislative_items (title,identifier,institution,stage,documents,status_history,is_simulated,bill_house,bill_number,bill_year,source_url,source_status) VALUES (:title,:identifier,'National Assembly','Public participation',CAST(:documents AS jsonb),'[]'::jsonb,false,:house,:number,:year,:source_url,'Public participation') ON CONFLICT (identifier) DO NOTHING"""), {"title": notice.bill_title, "identifier": identifier, "documents": __import__("json").dumps([{"name": "Memoranda notice", "url": notice.source_url}, *({"name": "Bill text", "url": u} for u in notice.document_urls)]), "house": notice.bill_house, "number": notice.bill_number, "year": notice.bill_year, "source_url": notice.source_url})
-            bill = (await conn.execute(text("SELECT id FROM legislative_items WHERE identifier=:identifier"), {"identifier": identifier})).first()
-        await conn.execute(text("""INSERT INTO notice_records (bill_ref,institution,notice_date,window_start,window_end,mode,bill_text_accessible,source_url,source_title,committee_name,published_date) VALUES (:bill,'National Assembly',:notice_date,:notice_date,:deadline,:mode,:accessible,:source_url,:title,:committee,:published) ON CONFLICT (source_url) WHERE source_url IS NOT NULL DO UPDATE SET bill_ref=EXCLUDED.bill_ref, notice_date=EXCLUDED.notice_date, window_start=EXCLUDED.window_start, window_end=EXCLUDED.window_end, mode=EXCLUDED.mode, bill_text_accessible=EXCLUDED.bill_text_accessible, source_title=EXCLUDED.source_title, committee_name=EXCLUDED.committee_name, published_date=EXCLUDED.published_date"""), {"bill": bill[0], "notice_date": notice.notice_date, "deadline": notice.deadline, "mode": "Parliament website notice", "accessible": bool(notice.document_urls), "source_url": notice.source_url, "title": notice.title, "committee": notice.committee_name, "published": notice.notice_date})
-        inserted += 1
-    return inserted
+        try:
+            async with conn.begin_nested():
+                await _upsert_notice(conn, notice)
+            done += 1
+        except SQLAlchemyError as exc:
+            log.error("DB error for notice %s (%r): %s", notice.source_url, notice.bill_title, exc)
+    return done
+
+
+# --------------------------------------------------------------------------
+# Committee reports
+# --------------------------------------------------------------------------
+async def _upsert_report(conn, row: dict) -> bool:
+    """Insert or update one report. Returns True if a new row was inserted."""
+    is_new = False
+    bill_id = None
+    if row["bill_house"] and row["bill_number"] and row["bill_year"]:
+        bill = await conn.execute(text("SELECT id FROM legislative_items WHERE bill_house=:house AND bill_number=:number AND bill_year=:year ORDER BY id LIMIT 1"), {"house": row["bill_house"], "number": row["bill_number"], "year": row["bill_year"]})
+        found = bill.first()
+        bill_id = found[0] if found else None
+    existing = (await conn.execute(text("SELECT id FROM committee_reports WHERE source_url=:source_url AND committee_url=:committee_url"), {"source_url": row["source_url"], "committee_url": row["committee_url"]})).first()
+    params = {**row, "bill_ref": bill_id, "source_document_ref": row["source_url"], "date_tabled": row["date_tabled"] or date.today(), "extraction_status": "pending", "ocr_used": False, "is_simulated": False}
+    if existing:
+        await conn.execute(text("""UPDATE committee_reports SET bill_ref=:bill_ref,institution=:institution,date_tabled=:date_tabled,source_document_ref=:source_document_ref,committee_name=:committee_name,committee_url=:committee_url,title=:title,bill_house=:bill_house,bill_number=:bill_number,bill_year=:bill_year,source_url=:source_url,is_simulated=false WHERE id=:id"""), {**params, "id": existing[0]})
+        report_id = existing[0]
+    else:
+        report_id = uuid.uuid4()
+        await conn.execute(text("""INSERT INTO committee_reports (id,bill_ref,institution,date_tabled,source_document_ref,extraction_status,ocr_used,is_simulated,committee_name,committee_url,title,bill_house,bill_number,bill_year,source_url) VALUES (:id,:bill_ref,:institution,:date_tabled,:source_document_ref,:extraction_status,:ocr_used,:is_simulated,:committee_name,:committee_url,:title,:bill_house,:bill_number,:bill_year,:source_url)"""), {**params, "id": report_id})
+        is_new = True
+    if bill_id is None:
+        bills = (await conn.execute(text("SELECT id,title FROM legislative_items WHERE bill_house=:house AND bill_year=:year"), {"house": row["bill_house"] or "na", "year": row["bill_year"] or (row["date_tabled"].year if row["date_tabled"] else date.today().year)})).all()
+        report_title = canonical_title(row["title"])
+        ranked = sorted(((ratio(report_title, canonical_title(b[1])) / 100, b[0], b[1]) for b in bills), reverse=True)[:3]
+        for score, candidate_id, candidate_title in ranked:
+            if score < 0.70:
+                continue
+            await conn.execute(text("""INSERT INTO legislative_link_reviews (report_ref,candidate_bill_ref,match_method,confidence_score,explanation) VALUES (:report,:bill,'title-review',:score,:explanation) ON CONFLICT (report_ref,candidate_bill_ref) DO UPDATE SET confidence_score=EXCLUDED.confidence_score,explanation=EXCLUDED.explanation"""), {"report": report_id, "bill": candidate_id, "score": score, "explanation": f"Title-only candidate requires human confirmation. Report: {row['title']}; candidate: {candidate_title}."})
+    return is_new
 
 
 async def upsert_reports(conn, rows: list[dict]) -> int:
     count = 0
     for row in rows:
-        bill_id = None
-        if row["bill_house"] and row["bill_number"] and row["bill_year"]:
-            bill = await conn.execute(text("SELECT id FROM legislative_items WHERE bill_house=:house AND bill_number=:number AND bill_year=:year ORDER BY id LIMIT 1"), {"house": row["bill_house"], "number": row["bill_number"], "year": row["bill_year"]})
-            found = bill.first()
-            bill_id = found[0] if found else None
-        existing = (await conn.execute(text("SELECT id FROM committee_reports WHERE source_url=:source_url AND committee_url=:committee_url"), row)).first()
-        params = {**row, "bill_ref": bill_id, "source_document_ref": row["source_url"], "date_tabled": row["date_tabled"] or date.today(), "extraction_status": "pending", "ocr_used": False, "is_simulated": False}
-        if existing:
-            await conn.execute(text("""UPDATE committee_reports SET bill_ref=:bill_ref,institution=:institution,date_tabled=:date_tabled,source_document_ref=:source_document_ref,committee_name=:committee_name,committee_url=:committee_url,title=:title,bill_house=:bill_house,bill_number=:bill_number,bill_year=:bill_year,source_url=:source_url,is_simulated=false WHERE id=:id"""), {**params, "id": existing[0]})
-            report_id = existing[0]
-        else:
-            report_id = (await conn.execute(text("""INSERT INTO committee_reports (bill_ref,institution,date_tabled,source_document_ref,extraction_status,ocr_used,is_simulated,committee_name,committee_url,title,bill_house,bill_number,bill_year,source_url) VALUES (:bill_ref,:institution,:date_tabled,:source_document_ref,:extraction_status,:ocr_used,:is_simulated,:committee_name,:committee_url,:title,:bill_house,:bill_number,:bill_year,:source_url) RETURNING id"""), params)).scalar_one()
-            count += 1
-        if bill_id is None:
-            bills = (await conn.execute(text("SELECT id,title FROM legislative_items WHERE bill_house=:house AND bill_year=:year"), {"house": row["bill_house"] or "na", "year": row["bill_year"] or (row["date_tabled"].year if row["date_tabled"] else date.today().year)})).all()
-            report_title = canonical_title(row["title"])
-            ranked = sorted(((ratio(report_title, canonical_title(b[1])) / 100, b[0], b[1]) for b in bills), reverse=True)[:3]
-            for score, candidate_id, candidate_title in ranked:
-                if score < 0.70:
-                    continue
-                await conn.execute(text("""INSERT INTO legislative_link_reviews (report_ref,candidate_bill_ref,match_method,confidence_score,explanation) VALUES (:report,:bill,'title-review',:score,:explanation) ON CONFLICT (report_ref,candidate_bill_ref) DO UPDATE SET confidence_score=EXCLUDED.confidence_score,explanation=EXCLUDED.explanation"""), {"report": report_id, "bill": candidate_id, "score": score, "explanation": f"Title-only candidate requires human confirmation. Report: {row['title']}; candidate: {candidate_title}."})
+        try:
+            async with conn.begin_nested():
+                if await _upsert_report(conn, row):
+                    count += 1
+        except SQLAlchemyError as exc:
+            log.error("DB error for report %s: %s", row.get("source_url"), exc)
     return count
 
 
@@ -511,13 +625,23 @@ async def main() -> int:
             await conn.execute(text("SELECT 1"))
             for statement in filter(None, (s.strip() for s in SCHEMA_SQL.split(";"))):
                 await conn.execute(text(statement))
-            new_bills = await upsert_bills(conn, bills, date.today())
+            new_bills, skipped_bills = await upsert_bills(conn, bills, date.today())
             notice_count = await upsert_notices(conn, notices)
             new_reports = await upsert_reports(conn, reports)
-            log.info("Synced %d bills (%d new), %d notice-bill rows, %d reports (%d new), %d/%d committees failed", len(bills), new_bills, notice_count, len(reports), new_reports, failed, committee_count)
+            log.info(
+                "Synced %d bills (%d new, %d skipped), %d notice-bill rows, %d reports (%d new), %d/%d committees failed",
+                len(bills), new_bills, skipped_bills, notice_count, len(reports), new_reports, failed, committee_count,
+            )
     finally:
         await engine.dispose()
-    return 1 if failed / committee_count > MAX_FAILED_FRACTION else 0
+
+    # Data is committed above; a non-zero exit just makes CI (and the
+    # failure-issue step) flag a run where too much was skipped or failed.
+    too_many_committee_failures = failed / committee_count > MAX_FAILED_FRACTION
+    too_many_bill_skips = bool(bills) and skipped_bills / len(bills) > MAX_FAILED_FRACTION
+    if too_many_bill_skips:
+        log.error("%d of %d bills were skipped; check the tracker parser", skipped_bills, len(bills))
+    return 1 if (too_many_committee_failures or too_many_bill_skips) else 0
 
 
 if __name__ == "__main__":
