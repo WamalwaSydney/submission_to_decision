@@ -7,8 +7,27 @@ import { useApp } from '../context/AppContext';
 import { UserRole } from '../types';
 import { api } from '../api/endpoints';
 
+const ROLE_OPTIONS: { value: UserRole; label: string }[] = [
+  { value: 'citizen', label: 'Citizen' },
+  { value: 'representative', label: 'Representative / office holder' },
+  { value: 'clerk', label: 'Clerk' },
+  { value: 'cso', label: 'Civil society organisation (CSO)' },
+  { value: 'journalist', label: 'Journalist' },
+  { value: 'moderator', label: 'Moderator' },
+  { value: 'administrator', label: 'Administrator' },
+];
+
+const ELEVATED: UserRole[] = [
+  'representative',
+  'clerk',
+  'moderator',
+  'administrator',
+  'cso',
+  'journalist',
+];
+
 export function SignupPage() {
-  const { state, dispatch } = useApp();
+  const { dispatch } = useApp();
   const navigate = useNavigate();
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -18,6 +37,7 @@ export function SignupPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [error, setError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -37,21 +57,38 @@ export function SignupPage() {
       setError('The passwords do not match.');
       return;
     }
+
+    setSubmitting(true);
     try {
-      const response = await api.register(normalizedName, normalizedEmail, password, role as 'citizen' | 'representative');
+      const response = await api.register(normalizedName, normalizedEmail, password, role);
       localStorage.setItem('access_token', response.access_token);
       localStorage.setItem('current_user', JSON.stringify(response.user));
       dispatch({ type: 'SET_USER', payload: response.user });
       navigate('/');
-    } catch (error) {
-      setError(error instanceof Error ? error.message : 'Unable to create the account.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to create the account.');
+    } finally {
+      setSubmitting(false);
     }
   };
 
   return (
     <Box sx={{ maxWidth: 600, mx: 'auto' }}>
       <Box sx={{ textAlign: 'center', mb: 3.5 }}>
-        <Box sx={{ width: 48, height: 48, mx: 'auto', mb: 2, borderRadius: '15px', display: 'grid', placeItems: 'center', color: '#fff', background: 'linear-gradient(135deg,#a52d29,#176b2b)', boxShadow: '0 10px 24px rgba(23,107,43,.18)' }}>
+        <Box
+          sx={{
+            width: 48,
+            height: 48,
+            mx: 'auto',
+            mb: 2,
+            borderRadius: '15px',
+            display: 'grid',
+            placeItems: 'center',
+            color: '#fff',
+            background: 'linear-gradient(135deg,#a52d29,#176b2b)',
+            boxShadow: '0 10px 24px rgba(23,107,43,.18)',
+          }}
+        >
           <UserRoundPlus size={21} />
         </Box>
         <Typography sx={{ fontSize: { xs: 32, md: 42 }, fontWeight: 900, letterSpacing: '-.035em', color: '#182020', mb: 1 }}>
@@ -65,12 +102,46 @@ export function SignupPage() {
       <Card className="!p-5 sm:!p-7">
         <Box component="form" onSubmit={handleSubmit} sx={{ display: 'grid', gap: 2 }}>
           {error && <Alert severity="error" role="alert">{error}</Alert>}
-          <TextField label="Full name" value={name} onChange={event => setName(event.target.value)} required fullWidth autoComplete="name" autoFocus />
-          <TextField label="Email address" type="email" value={email} onChange={event => setEmail(event.target.value)} required fullWidth autoComplete="email" />
-          <TextField select label="Account type" value={role} onChange={event => setRole(event.target.value as UserRole)} fullWidth>
-            <MenuItem value="citizen">Citizen</MenuItem>
-            <MenuItem value="representative">Representative / office holder</MenuItem>
+
+          <TextField
+            label="Full name"
+            value={name}
+            onChange={event => setName(event.target.value)}
+            required
+            fullWidth
+            autoComplete="name"
+            autoFocus
+          />
+          <TextField
+            label="Email address"
+            type="email"
+            value={email}
+            onChange={event => setEmail(event.target.value)}
+            required
+            fullWidth
+            autoComplete="email"
+          />
+          <TextField
+            select
+            label="Account type"
+            value={role}
+            onChange={event => setRole(event.target.value as UserRole)}
+            fullWidth
+          >
+            {ROLE_OPTIONS.map(option => (
+              <MenuItem key={option.value} value={option.value}>
+                {option.label}
+              </MenuItem>
+            ))}
           </TextField>
+
+          {ELEVATED.includes(role) && (
+            <Alert severity="warning" sx={{ borderRadius: '12px' }}>
+              This role needs approval. Your account starts with citizen access until an
+              administrator verifies you.
+            </Alert>
+          )}
+
           <TextField
             label="Password"
             type={showPassword ? 'text' : 'password'}
@@ -121,18 +192,31 @@ export function SignupPage() {
             }}
           />
 
-          <Alert severity="info" icon={<LockKeyhole size={17} />} sx={{ borderRadius: '12px', '& .MuiAlert-message': { fontSize: 12, lineHeight: 1.55 } }}>
-            Your account and password are stored and verified by the backend. Never use a password you reuse elsewhere for a demo environment.
+          <Alert
+            severity="info"
+            icon={<LockKeyhole size={17} />}
+            sx={{ borderRadius: '12px', '& .MuiAlert-message': { fontSize: 12, lineHeight: 1.55 } }}
+          >
+            Your account and password are stored and verified by the backend. Never use a
+            password you reuse elsewhere for a demo environment.
           </Alert>
 
-          <button type="submit" className="btn-primary w-full inline-flex items-center justify-center gap-2 !py-3">
-            Create demo account <ArrowRight className="h-4 w-4" />
+          <button
+            type="submit"
+            disabled={submitting}
+            className="btn-primary w-full inline-flex items-center justify-center gap-2 !py-3"
+          >
+            {submitting ? 'Creating account...' : 'Create demo account'}
+            {!submitting && <ArrowRight className="h-4 w-4" />}
           </button>
         </Box>
       </Card>
 
       <Typography sx={{ textAlign: 'center', mt: 2.5, color: '#526060', fontSize: 13 }}>
-        Already have an account? <Link to="/signin" className="font-extrabold text-primary-700 hover:text-primary-800">Sign in</Link>
+        Already have an account?{' '}
+        <Link to="/signin" className="font-extrabold text-primary-700 hover:text-primary-800">
+          Sign in
+        </Link>
       </Typography>
     </Box>
   );

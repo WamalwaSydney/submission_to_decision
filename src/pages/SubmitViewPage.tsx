@@ -1,19 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
-import { createReceipt } from '../utils/hashChain';
 import { saveDraft, getUnsyncedDrafts } from '../utils/offline';
-import { generatePublicId } from '../data/seed';
 import { OfflineDraft } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 import { api } from '../api/endpoints';
 import {
   Send, Save, Wifi, WifiOff, FileText, Gavel,
-  CheckCircle2, Sparkles, Shield, Eye, EyeOff, Copy, ArrowRight
+  CheckCircle2, Sparkles, Shield, Eye, EyeOff, Copy, ArrowRight, ThumbsUp
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import confetti from 'canvas-confetti';
-import { Card, Badge, Label, InputField, DisclaimerBox, InfoBox, SelectField } from '../components/UI';
+import { Card, Badge, Label, InputField, DisclaimerBox, InfoBox } from '../components/UI';
 
 export function SubmitViewPage() {
   const [searchParams] = useSearchParams();
@@ -39,22 +37,8 @@ export function SubmitViewPage() {
     const colors = ['#3a5cff', '#13b892', '#1f37f5', '#2dd3ad', '#ed8b29'];
 
     (function frame() {
-      confetti({
-        particleCount: 4,
-        angle: 60,
-        spread: 60,
-        origin: { x: 0 },
-        colors,
-        scalar: 0.8,
-      });
-      confetti({
-        particleCount: 4,
-        angle: 120,
-        spread: 60,
-        origin: { x: 1 },
-        colors,
-        scalar: 0.8,
-      });
+      confetti({ particleCount: 4, angle: 60, spread: 60, origin: { x: 0 }, colors, scalar: 0.8 });
+      confetti({ particleCount: 4, angle: 120, spread: 60, origin: { x: 1 }, colors, scalar: 0.8 });
       if (Date.now() < end) requestAnimationFrame(frame);
     })();
   };
@@ -69,7 +53,10 @@ export function SubmitViewPage() {
 
     setSubmitting(true);
     const bill = state.bills.find(b => b.id === selectedBill);
-    if (!bill) { setSubmitting(false); return; }
+    if (!bill) {
+      setSubmitting(false);
+      return;
+    }
     try {
       const result = await api.createReceipt({
         legislative_item_id: selectedBill,
@@ -79,26 +66,29 @@ export function SubmitViewPage() {
       });
       const receiptId = String(result.receipt_id);
       const publicId = String(result.public_id);
-      dispatch({ type: 'ADD_RECEIPT', payload: {
-        id: receiptId,
-        public_id: publicId,
-        author_id: state.currentUser.id,
-        legislative_item_id: selectedBill,
-        clause_ref: clauseRef || undefined,
-        submission_text: submissionText.trim(),
-        lodging_status: 'pending',
-        timestamp: result.timestamp,
-        hash: result.hash,
-        previous_hash: result.previous_hash,
-        author_name_public: showName ? state.currentUser.name : undefined,
-      } });
+      dispatch({
+        type: 'ADD_RECEIPT',
+        payload: {
+          id: receiptId,
+          public_id: publicId,
+          author_id: state.currentUser.id,
+          legislative_item_id: selectedBill,
+          clause_ref: clauseRef || undefined,
+          submission_text: submissionText.trim(),
+          lodging_status: 'pending',
+          timestamp: result.timestamp,
+          hash: result.hash,
+          previous_hash: result.previous_hash,
+          author_name_public: showName ? state.currentUser.name : undefined,
+        },
+      });
       setSubmitting(false);
       setSuccess({ receiptId, publicId });
+      setTimeout(fireConfetti, 120);
     } catch (error) {
       setSubmitting(false);
       alert(error instanceof Error ? error.message : 'Unable to submit your view.');
     }
-    setTimeout(fireConfetti, 120);
   };
 
   const handleSaveDraft = async () => {
@@ -129,12 +119,30 @@ export function SubmitViewPage() {
           transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
         >
           <Card className="!p-0 overflow-hidden !rounded-3xl text-center">
+            {/* Thumbs up */}
+            <div className="flex justify-center pt-8 bg-white">
+              <motion.div
+                initial={{ scale: 0, rotate: -20 }}
+                animate={{ scale: 1, rotate: 0 }}
+                transition={{ type: 'spring', stiffness: 260, damping: 15 }}
+                className="w-20 h-20 rounded-full flex items-center justify-center shadow-lg"
+                style={{ background: '#13b892' }}
+                role="img"
+                aria-label="Submission successful"
+              >
+                <ThumbsUp className="h-10 w-10 text-white" strokeWidth={2.5} />
+              </motion.div>
+            </div>
+
             {/* Banner */}
-            <div className="relative p-10 md:p-14 bg-gradient-to-br from-primary-600 via-primary-700 to-accent-600 text-white overflow-hidden">
-              <div className="absolute inset-0 opacity-15" style={{
-                backgroundImage: 'radial-gradient(circle at 2px 2px, white 1px, transparent 0)',
-                backgroundSize: '28px 28px'
-              }} />
+            <div className="relative p-10 md:p-14 bg-primary-700 bg-gradient-to-br from-primary-600 via-primary-700 to-accent-600 text-white overflow-hidden">
+              <div
+                className="absolute inset-0 opacity-15"
+                style={{
+                  backgroundImage: 'radial-gradient(circle at 2px 2px, white 1px, transparent 0)',
+                  backgroundSize: '28px 28px',
+                }}
+              />
               <div className="absolute -top-24 -left-24 w-60 h-60 rounded-full bg-white/10 blur-3xl" />
               <div className="absolute -bottom-24 -right-24 w-64 h-64 rounded-full bg-accent-300/20 blur-3xl" />
 
@@ -227,7 +235,12 @@ export function SubmitViewPage() {
                   <Gavel className="h-4.5 w-4.5" /> Browse More Bills
                 </Link>
                 <button
-                  onClick={() => { setSuccess(null); setSubmissionText(''); setClauseRef(''); setSelectedBill(searchParams.get('bill') || ''); }}
+                  onClick={() => {
+                    setSuccess(null);
+                    setSubmissionText('');
+                    setClauseRef('');
+                    setSelectedBill(searchParams.get('bill') || '');
+                  }}
                   className="btn-secondary !px-7 !py-3.5"
                 >
                   <Send className="h-4.5 w-4.5" /> Submit Another View
@@ -261,12 +274,7 @@ export function SubmitViewPage() {
       {/* Offline notice */}
       <AnimatePresence>
         {offlineDrafts.length > 0 && (
-          <motion.div
-            initial={{ opacity: 0, y: -8 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="InfoBox !p-5"
-            style={{}}
-          >
+          <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}>
             <InfoBox className="!p-5">
               <div className="pl-3 flex items-start gap-3">
                 <WifiOff className="h-5 w-5 text-primary-700 flex-shrink-0 mt-0.5" />
@@ -282,17 +290,22 @@ export function SubmitViewPage() {
 
       {/* Connection + auth status */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-xl font-semibold text-sm backdrop-blur-sm border w-fit ${
-          state.isOnline
-            ? 'bg-accent-50/80 border-accent-200 text-accent-800'
-            : 'bg-warm-50/80 border-warm-200 text-warm-800'
-        }`}>
+        <div
+          className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-xl font-semibold text-sm backdrop-blur-sm border w-fit ${
+            state.isOnline
+              ? 'bg-accent-50/80 border-accent-200 text-accent-800'
+              : 'bg-warm-50/80 border-warm-200 text-warm-800'
+          }`}
+        >
           {state.isOnline ? <Wifi className="h-4 w-4" /> : <WifiOff className="h-4 w-4" />}
           {state.isOnline ? 'Online — submissions are processed immediately' : 'Offline — drafts are saved on this device'}
         </div>
 
         {!state.currentUser ? (
-          <Link to="/login" className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-sm bg-primary-50 border border-primary-200 text-primary-800 hover:bg-primary-100 transition-colors">
+          <Link
+            to="/signin"
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-sm bg-primary-50 border border-primary-200 text-primary-800 hover:bg-primary-100 transition-colors"
+          >
             <Shield className="h-4 w-4" />
             Sign in to submit
             <ArrowRight className="h-3.5 w-3.5" />
@@ -314,10 +327,10 @@ export function SubmitViewPage() {
         <DisclaimerBox className="!p-5">
           <div className="pl-3 text-sm leading-relaxed font-semibold">
             You are not signed in.{' '}
-            <Link to="/login" className="underline decoration-primary-400 decoration-2 hover:text-primary-800 font-black">
+            <Link to="/signin" className="underline decoration-primary-400 decoration-2 hover:text-primary-800 font-black">
               Sign in
             </Link>
-            {' '}to submit a view. (Demo accounts are available on the login page.)
+            {' '}to submit a view. (Demo accounts are available on the sign-in page.)
           </div>
         </DisclaimerBox>
       )}
@@ -327,14 +340,14 @@ export function SubmitViewPage() {
         <div className="absolute -top-24 -right-24 w-56 h-56 rounded-full bg-primary-100/60 blur-3xl pointer-events-none" />
         <div className="absolute -bottom-24 -left-24 w-56 h-56 rounded-full bg-accent-100/60 blur-3xl pointer-events-none" />
 
-        <form onSubmit={handleSubmit} className="relative space-y-6" style={{}}>
+        <form onSubmit={handleSubmit} className="relative space-y-6">
           {/* Bill */}
           <div>
             <Label htmlFor="bill-select">Bill <span className="text-red-500">*</span></Label>
             <select
               id="bill-select"
               value={selectedBill}
-              onChange={(e) => setSelectedBill(e.target.value)}
+              onChange={e => setSelectedBill(e.target.value)}
               className="input-field"
               required
             >
@@ -349,12 +362,14 @@ export function SubmitViewPage() {
 
           {/* Clause ref */}
           <div>
-            <Label htmlFor="clause-ref">Clause reference <span className="text-surface-400 font-normal text-xs">(optional)</span></Label>
+            <Label htmlFor="clause-ref">
+              Clause reference <span className="text-surface-400 font-normal text-xs">(optional)</span>
+            </Label>
             <InputField
               id="clause-ref"
               type="text"
               value={clauseRef}
-              onChange={(e) => setClauseRef(e.target.value)}
+              onChange={e => setClauseRef(e.target.value)}
               placeholder="e.g. Clause 4, Section 2.1"
             />
             <p className="text-xs font-semibold text-surface-500 mt-2 leading-relaxed">
@@ -368,7 +383,7 @@ export function SubmitViewPage() {
             <textarea
               id="submission-text"
               value={submissionText}
-              onChange={(e) => setSubmissionText(e.target.value)}
+              onChange={e => setSubmissionText(e.target.value)}
               rows={7}
               className="input-field"
               placeholder="Write your views on this bill here. Be specific, constructive, and clear about what you'd like to see changed or retained."
@@ -391,7 +406,7 @@ export function SubmitViewPage() {
                 id="show-name"
                 type="checkbox"
                 checked={showName}
-                onChange={(e) => setShowName(e.target.checked)}
+                onChange={e => setShowName(e.target.checked)}
                 className="checkbox-premium mt-1"
               />
               <div className="flex-1 min-w-0">
