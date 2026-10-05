@@ -1,6 +1,7 @@
 # Ingestion Service — PDF extraction with OCR fallback
 
 import os
+from datetime import date, datetime
 from typing import List, Tuple
 from pathlib import Path
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,9 +16,17 @@ async def ingest_report(
     bill_ref: str,
     institution: str,
     file_path: str,
-    date_tabled: str
+    date_tabled: str | date
 ) -> CommitteeReport:
     """Ingest a committee report PDF."""
+
+    if isinstance(date_tabled, str):
+        try:
+            date_tabled = date.fromisoformat(date_tabled)
+        except ValueError as exc:
+            raise ValueError("date_tabled must use YYYY-MM-DD format") from exc
+    elif isinstance(date_tabled, datetime):
+        date_tabled = date_tabled.date()
     
     # Create report record
     report = CommitteeReport(
