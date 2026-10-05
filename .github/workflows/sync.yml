@@ -1,12 +1,24 @@
-# GitHub Actions — Scheduled Legislative Sync
+# GitHub Actions — Legislative Sync
 
 name: Legislative Data Sync
 
 on:
+  push:
+    branches: [main]
+    # Optional: only run when backend or the workflow itself changes.
+    # Delete this paths block to run on every push to main.
+    paths:
+      - 'backend/**'
+      - '.github/workflows/sync.yml'
   schedule:
     # Run daily at 2 AM UTC
     - cron: '0 2 * * *'
   workflow_dispatch:
+
+# Prevents a push and the nightly run from syncing at the same time
+concurrency:
+  group: legislative-sync
+  cancel-in-progress: false
 
 jobs:
   sync:
@@ -15,16 +27,8 @@ jobs:
       contents: read
       issues: write
     steps:
-      
       - name: Checkout code
         uses: actions/checkout@v4
-
-      - name: Show what is running
-        run: |
-          echo "ref: ${{ github.ref }}"
-          echo "sha: ${{ github.sha }}"
-          git log -1 --oneline
-          ls -la backend/app/scripts
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -62,5 +66,5 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               title: 'Legislative Sync Failed',
-              body: `The scheduled legislative data sync failed.\n\nRun: ${runUrl}`
+              body: `The legislative data sync failed (trigger: ${context.eventName}).\n\nRun: ${runUrl}`
             });
