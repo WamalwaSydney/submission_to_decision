@@ -83,6 +83,16 @@ async def me(current_user: User = Depends(get_current_user)):
     return {"user": public_user(current_user)}
 
 
+@router.get("/users")
+async def list_users(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_role("administrator")),
+):
+    """Return the complete user registry for the administrator console."""
+    result = await db.execute(select(User).order_by(User.created_date.desc(), User.name.asc()))
+    return {"users": [public_user(user) for user in result.scalars().all()]}
+
+
 # ============ Helpers ============
 
 def to_dict(obj, exclude: set = frozenset()) -> dict:

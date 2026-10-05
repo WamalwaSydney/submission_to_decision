@@ -1,13 +1,36 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useApp } from '../context/AppContext';
+import { api } from '../api/endpoints';
 import { RepresentativeStatus } from '../types';
-import { Shield, Users, Download, Settings, AlertTriangle, Info, CheckCircle2, XCircle, Upload, FileText, Gauge } from 'lucide-react';
+import { Shield, Users, Download, Settings, AlertTriangle, Info, CheckCircle2, XCircle, Upload, FileText, Gauge, ChevronLeft, ChevronRight } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { Badge, DisclaimerBox, InfoBox, Card } from '../components/UI';
 
 export function AdminPage() {
   const { state, dispatch } = useApp();
   const [activeTab, setActiveTab] = useState<'profiles' | 'roles' | 'export' | 'settings'>('profiles');
+  const [adminUsers, setAdminUsers] = useState(state.users);
+  const [userPage, setUserPage] = useState(1);
+
+  useEffect(() => {
+    if (activeTab !== 'roles' || state.currentUser?.role !== 'administrator') return;
+    let cancelled = false;
+    api.users()
+      .then(({ users }) => {
+        if (!cancelled) {
+          setAdminUsers(users);
+          setUserPage(1);
+        }
+      })
+      .catch(() => {
+        // Keep the seeded/local registry visible if the protected request fails.
+      });
+    return () => { cancelled = true; };
+  }, [activeTab, state.currentUser?.role]);
+
+  const usersPerPage = 10;
+  const totalUserPages = Math.max(1, Math.ceil(adminUsers.length / usersPerPage));
+  const visibleUsers = adminUsers.slice((userPage - 1) * usersPerPage, userPage * usersPerPage);
 
   const handleVerifyProfile = (profileId: string, status: RepresentativeStatus) => {
     if (!state.currentUser) return;
@@ -245,7 +268,7 @@ export function AdminPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {state.users.map((u, idx) => (
+                      {visibleUsers.map((u, idx) => (
                         <motion.tr
                           key={u.id}
                           initial={{ opacity: 0, y: 12 }}
@@ -262,6 +285,32 @@ export function AdminPage() {
                       ))}
                     </tbody>
                   </table>
+                </div>
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mt-5 pt-4 border-t border-surface-200">
+                  <p className="text-xs font-semibold text-surface-500">
+                    Showing {adminUsers.length === 0 ? 0 : (userPage - 1) * usersPerPage + 1}–{Math.min(userPage * usersPerPage, adminUsers.length)} of {adminUsers.length} users
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setUserPage(page => Math.max(1, page - 1))}
+                      disabled={userPage === 1}
+                      className="btn-secondary !px-3 !py-2 disabled:opacity-40 disabled:cursor-not-allowed"
+                      aria-label="Previous users page"
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                    </button>
+                    <span className="text-sm font-bold text-surface-700 min-w-24 text-center">Page {Math.min(userPage, totalUserPages)} of {totalUserPages}</span>
+                    <button
+                      type="button"
+                      onClick={() => setUserPage(page => Math.min(totalUserPages, page + 1))}
+                      disabled={userPage >= totalUserPages}
+                      className="btn-secondary !px-3 !py-2 disabled:opacity-40 disabled:cursor-not-allowed"
+                      aria-label="Next users page"
+                    >
+                      <ChevronRight className="h-4 w-4" />
+                    </button>
+                  </div>
                 </div>
               </div>
             </Card>

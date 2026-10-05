@@ -14,6 +14,7 @@ export interface BootstrapResponse {
 
 export const api = {
   bootstrap: () => apiFetch<BootstrapResponse>('/bootstrap'),
+  users: () => apiFetch<{ users: User[] }>('/users'),
   login: (email: string, password: string) => apiFetch<LoginResponse>('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
   register: (name: string, email: string, password: string, role: 'citizen' | 'representative') => apiFetch<LoginResponse>('/auth/register', { method: 'POST', body: JSON.stringify({ name, email, password, role }) }),
   me: () => apiFetch<{ user: User }>('/auth/me'),

@@ -5,7 +5,7 @@ import { getDaysOfNotice, getWindowLength } from '../data/seed';
 import { SubmissionStatus } from '../types';
 import {
   FileText, Clock, Building2, ArrowRight, ArrowLeft,
-  FileCheck, Calendar, FileSearch, Gavel, Users
+  FileCheck, Calendar, FileSearch, Gavel, Users, Download
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import {
@@ -15,6 +15,30 @@ import {
 
 function SubmissionStatusBadge({ status }: { status: SubmissionStatus }) {
   return StatusBadge({ status });
+}
+
+function downloadReadableBillDocument(
+  bill: { title: string; identifier: string; institution: string; stage: string; status_history: { date: string; stage: string; note: string }[] },
+  documentName: string,
+) {
+  const content = [
+    documentName,
+    `Bill: ${bill.title}`,
+    `Identifier: ${bill.identifier}`,
+    `Institution: ${bill.institution}`,
+    `Current stage: ${bill.stage}`,
+    '',
+    'Legislative timeline',
+    ...(bill.status_history || []).map(item => `${item.date} — ${item.stage}: ${item.note}`),
+    '',
+    'This readable document was generated from the bill record. It is provided for reference and does not replace an official source document.',
+  ].join('\n');
+  const url = URL.createObjectURL(new Blob([content], { type: 'text/plain;charset=utf-8' }));
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = `${bill.identifier.replace(/[^a-z0-9]+/gi, '-')}-${documentName.replace(/[^a-z0-9]+/gi, '-')}.txt`;
+  anchor.click();
+  URL.revokeObjectURL(url);
 }
 
 export function BillsListPage() {
@@ -144,7 +168,7 @@ export function BillsListPage() {
                       </div>
                       <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-warm-50/80 border border-warm-200 text-warm-700 text-xs font-bold">
                         <FileText className="h-3.5 w-3.5" />
-                        {bill.documents.length} document{bill.documents.length !== 1 ? 's' : ''}
+                        {(bill.documents || []).length} document{(bill.documents || []).length !== 1 ? 's' : ''}
                       </div>
                       {topOutcome && (
                         <div className="ml-auto">
@@ -393,18 +417,30 @@ export function BillPage() {
           <h2 className="text-2xl md:text-3xl font-black text-surface-900 tracking-tight">Documents</h2>
         </div>
         <div className="space-y-3">
-          {bill.documents.map((doc, i) => (
-            <div key={i} className="flex items-center gap-4 p-4 rounded-2xl bg-surface-50/70 border border-surface-200/60 hover:bg-white hover:border-primary-100 hover:shadow-soft transition-all group cursor-pointer">
-              <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-primary-100 to-accent-100 border border-primary-200/60 flex items-center justify-center text-primary-700 flex-shrink-0 group-hover:scale-110 transition-transform">
-                <FileText className="h-5 w-5" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="font-bold text-surface-900 truncate">{doc.name}</p>
-                <p className="text-xs text-surface-500 font-medium">PDF Document · Legislative Source</p>
-              </div>
-              <ArrowRight className="h-4 w-4 text-surface-400 group-hover:text-primary-600 group-hover:-rotate-45 transition-all flex-shrink-0" />
-            </div>
-          ))}
+          {(bill.documents || []).map((doc, i) => {
+            const documentUrl = doc.url && doc.url !== '#' ? doc.url : undefined;
+            const content = (
+              <>
+                <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-primary-100 to-accent-100 border border-primary-200/60 flex items-center justify-center text-primary-700 flex-shrink-0 group-hover:scale-110 transition-transform">
+                  <FileText className="h-5 w-5" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-bold text-surface-900 truncate">{doc.name}</p>
+                  <p className="text-xs text-surface-500 font-medium">{documentUrl ? 'Open source document' : 'Download readable bill record'}</p>
+                </div>
+                {documentUrl ? <ArrowRight className="h-4 w-4 text-surface-400 group-hover:text-primary-600 group-hover:-rotate-45 transition-all flex-shrink-0" /> : <Download className="h-4 w-4 text-surface-400 group-hover:text-primary-600 transition-all flex-shrink-0" />}
+              </>
+            );
+            return documentUrl ? (
+              <a key={i} href={documentUrl} target="_blank" rel="noreferrer" download={doc.name} className="flex items-center gap-4 p-4 rounded-2xl bg-surface-50/70 border border-surface-200/60 hover:bg-white hover:border-primary-100 hover:shadow-soft transition-all group">
+                {content}
+              </a>
+            ) : (
+              <button key={i} type="button" onClick={() => downloadReadableBillDocument(bill, doc.name)} className="w-full text-left flex items-center gap-4 p-4 rounded-2xl bg-surface-50/70 border border-surface-200/60 hover:bg-white hover:border-primary-100 hover:shadow-soft transition-all group">
+                {content}
+              </button>
+            );
+          })}
         </div>
       </Card>
 

@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { api } from '../api/endpoints';
 import { Upload, FileText, CheckCircle2, AlertTriangle, ChevronDown, Plus, Database, FileCheck2, X } from 'lucide-react';
@@ -17,6 +17,21 @@ export function ClerkIngestionPage() {
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [expandedReport, setExpandedReport] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (state.bills.length > 0) return;
+    let cancelled = false;
+    api.bills()
+      .then(({ bills }) => {
+        if (!cancelled && bills.length > 0) {
+          dispatch({ type: 'HYDRATE', payload: { bills } });
+        }
+      })
+      .catch(() => {
+        // The app shell reports the original API error; keep this page stable.
+      });
+    return () => { cancelled = true; };
+  }, [dispatch, state.bills.length]);
 
   const openFilePicker = () => {
     if (!uploading) fileInputRef.current?.click();
