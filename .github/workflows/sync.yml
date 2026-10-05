@@ -17,27 +17,32 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      
+
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
       - name: Install dependencies
-        run: |
-          cd backend
-          pip install -r requirements.txt
+        working-directory: backend
+        run: pip install -r requirements.txt
 
       - name: Install PDF text extractor
         run: sudo apt-get update && sudo apt-get install -y poppler-utils
-      
+
+      - name: Verify script path
+        working-directory: backend
+        run: ls -la app app/scripts
+
       - name: Fetch legislative data
+        working-directory: backend
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        run: |
-          cd backend
-          python app/scripts/sync_legislation.py
-      
+          PYTHONPATH: ${{ github.workspace }}/backend
+        run: python -m app.scripts.sync_legislation
+
       - name: Notify on failure
         if: failure()
         continue-on-error: true
