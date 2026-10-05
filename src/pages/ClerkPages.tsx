@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { api } from '../api/endpoints';
-import { seedBills } from '../data/seed';
 import { Upload, FileText, CheckCircle2, AlertTriangle, ChevronDown, Plus, Database, FileCheck2, X } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { Card, InfoBox, Badge, Label, InputField, SelectField } from '../components/UI';
@@ -18,24 +17,33 @@ export function ClerkIngestionPage() {
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [expandedReport, setExpandedReport] = useState<string | null>(null);
-  const liveBills = state.bills.filter(bill => Boolean(bill?.id && bill?.title));
-  const availableBills = liveBills.length > 0 ? liveBills : seedBills;
-  const usingBundledBills = liveBills.length === 0;
+  const [availableBills, setAvailableBills] = useState<typeof state.bills>([]);
+  const [billsLoading, setBillsLoading] = useState(true);
+  const [billsError, setBillsError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (state.bills.length > 0) return;
     let cancelled = false;
+    setBillsLoading(true);
+    setBillsError(null);
     api.bills()
       .then(({ bills }) => {
-        if (!cancelled && bills.length > 0) {
-          dispatch({ type: 'HYDRATE', payload: { bills } });
+        if (!cancelled) {
+          const validBills = bills.filter(bill => Boolean(bill?.id && bill?.title));
+          setAvailableBills(validBills);
+          dispatch({ type: 'HYDRATE', payload: { bills: validBills } });
         }
       })
-      .catch(() => {
-        // The app shell reports the original API error; keep this page stable.
+      .catch(error => {
+        if (!cancelled) {
+          setAvailableBills([]);
+          setBillsError(error instanceof Error ? error.message : 'Unable to load bills from the live API.');
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setBillsLoading(false);
       });
     return () => { cancelled = true; };
-  }, [dispatch, state.bills.length]);
+  }, [dispatch]);
 
   const openFilePicker = () => {
     if (!uploading) fileInputRef.current?.click();
@@ -146,16 +154,23 @@ export function ClerkIngestionPage() {
                 value={selectedBill}
                 onChange={(e) => setSelectedBill(e.target.value)}
                 className="input-field"
+                disabled={billsLoading || Boolean(billsError)}
                 required
               >
-                <option value="">Select a bill...</option>
+                <option value="">{billsLoading ? 'Loading live bills...' : billsError ? 'Live bills unavailable' : 'Select a bill...'}</option>
                 {availableBills.map(b => (
                   <option key={b.id} value={b.id}>{b.title} ({b.institution})</option>
                 ))}
               </select>
               <p className="text-xs text-surface-500 mt-2">
-                {usingBundledBills ? 'Showing bundled bills while live legislation data is unavailable.' : `${availableBills.length} bill${availableBills.length === 1 ? '' : 's'} available. Select the bill that this committee report belongs to.`}
+                {billsLoading ? 'Loading bills from the live database…' : billsError ? billsError : `${availableBills.length} bill${availableBills.length === 1 ? '' : 's'} available from the live database.`}
               </p>
+              {billsError && (
+                <div role="alert" className="flex items-start gap-2 mt-2 text-xs text-red-700">
+                  <AlertTriangle className="h-4 w-4 flex-shrink-0" />
+                  <span>Check the deployed API URL and Neon connection, then refresh this page.</span>
+                </div>
+              )}
             </div>
 
             <div>
