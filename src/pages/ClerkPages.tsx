@@ -1,53 +1,96 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { useApp } from '../context/AppContext';
-import { ExtractionStatus, SubmissionStatus } from '../types';
 import { api } from '../api/endpoints';
-import { v4 as uuidv4 } from 'uuid';
-import { Upload, FileText, CheckCircle2, AlertTriangle, Eye, ChevronDown, ChevronUp, Plus, Database, FileCheck2 } from 'lucide-react';
+import { Upload, FileText, CheckCircle2, AlertTriangle, ChevronDown, Plus, Database, FileCheck2, X } from 'lucide-react';
 import { motion } from 'framer-motion';
-import { Card, DisclaimerBox, InfoBox, Badge, Label, InputField, SelectField, BtnPrimary, BtnSecondary } from '../components/UI';
+import { Card, InfoBox, Badge, Label, InputField, SelectField } from '../components/UI';
+
+const MAX_UPLOAD_MB = 50;
 
 export function ClerkIngestionPage() {
   const { state, dispatch } = useApp();
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [selectedBill, setSelectedBill] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [uploadSuccess, setUploadSuccess] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
   const [expandedReport, setExpandedReport] = useState<string | null>(null);
+
+  const openFilePicker = () => {
+    if (!uploading) fileInputRef.current?.click();
+  };
+
+  const acceptFile = (file: File | null | undefined) => {
+    setUploadError(null);
+    setUploadSuccess(false);
+    if (!file) return;
+    const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+    if (!isPdf) {
+      setUploadError('Please choose a PDF file.');
+      return;
+    }
+    if (file.size > MAX_UPLOAD_MB * 1024 * 1024) {
+      setUploadError(`That file is too large. The limit is ${MAX_UPLOAD_MB} MB.`);
+      return;
+    }
+    setSelectedFile(file);
+  };
+
+  const handleFileInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    acceptFile(event.target.files?.[0]);
+    // Reset so choosing the same file again still fires onChange.
+    event.target.value = '';
+  };
+
+  const handleDrop = (event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setIsDragging(false);
+    if (uploading) return;
+    acceptFile(event.dataTransfer.files?.[0]);
+  };
 
   const handleUpload = async () => {
     if (!selectedBill || !selectedFile) return;
+    const bill = state.bills.find(b => b.id === selectedBill);
+    const institution = bill?.institution || 'National Assembly';
+    const dateTabled = new Date().toISOString().split('T')[0];
+
     setUploading(true);
+    setUploadError(null);
+    setUploadSuccess(false);
     try {
-      const result = await api.uploadReport(selectedFile, selectedBill, state.bills.find(b => b.id === selectedBill)?.institution || 'National Assembly', new Date().toISOString().split('T')[0]);
+      const result = await api.uploadReport(selectedFile, selectedBill, institution, dateTabled);
       dispatch({
         type: 'ADD_REPORT',
         payload: {
           id: String(result.report_id),
           bill_ref: selectedBill,
-          institution: state.bills.find(b => b.id === selectedBill)?.institution || 'National Assembly',
-          date_tabled: new Date().toISOString().split('T')[0],
+          institution,
+          date_tabled: dateTabled,
           source_document_ref: selectedFile.name,
           extraction_status: result.extraction_status,
           ocr_used: result.ocr_used,
           is_simulated: false,
-        }
+        },
       });
-      setUploading(false);
+      setSelectedFile(null);
       setUploadSuccess(true);
-      setTimeout(() => setUploadSuccess(false), 3000);
+      setTimeout(() => setUploadSuccess(false), 4000);
     } catch (error) {
+      setUploadError(error instanceof Error ? error.message : 'Unable to upload the report.');
+    } finally {
       setUploading(false);
-      alert(error instanceof Error ? error.message : 'Unable to upload the report.');
     }
   };
 
-  const handleVerifyEntry = (entryId: string, treatment: SubmissionStatus) => {
-    dispatch({
-      type: 'UPDATE_REPORT_ENTRY',
-      payload: { entryId, treatment }
-    });
-  };
+  const disabledReason = !selectedBill
+    ? 'Select a bill to continue.'
+    : !selectedFile
+      ? 'Choose a PDF to continue.'
+      : null;
 
   return (
     <div>
@@ -88,34 +131,112 @@ export function ClerkIngestionPage() {
                   <option key={b.id} value={b.id}>{b.title} ({b.institution})</option>
                 ))}
               </SelectField>
+              {state.bills.length === 0 && (
+                <p className="text-xs text-amber-700 mt-2">
+                  No bills are loaded yet. Run the legislation sync or refresh the page, then try again.
+                </p>
+              )}
             </div>
+
             <div>
               <Label className="!text-xs !font-black !uppercase !tracking-[0.15em] !text-surface-600 !mb-2">PDF Document</Label>
-              <div className="border-2 border-dashed border-surface-200 hover:border-primary-300 transition-all duration-300 rounded-2xl p-8 text-center cursor-pointer group bg-gradient-to-b from-surface-50/50 to-white">
+
+              {/* Hidden native input, triggered by clicking/pressing the dropzone */}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="application/pdf,.pdf"
+                onChange={handleFileInputChange}
+                className="sr-only"
+                tabIndex={-1}
+                aria-hidden="true"
+              />
+
+              <div
+                role="button"
+                tabIndex={0}
+                aria-label="Choose a PDF report to upload"
+                onClick={openFilePicker}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    openFilePicker();
+                  }
+                }}
+                onDragEnter={(e) => { e.preventDefault(); if (!uploading) setIsDragging(true); }}
+                onDragOver={(e) => { e.preventDefault(); if (!uploading) setIsDragging(true); }}
+                onDragLeave={(e) => { e.preventDefault(); setIsDragging(false); }}
+                onDrop={handleDrop}
+                className={`border-2 border-dashed transition-all duration-300 rounded-2xl p-8 text-center cursor-pointer group bg-gradient-to-b from-surface-50/50 to-white focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 ${
+                  isDragging ? 'border-primary-500 bg-primary-50/60' : 'border-surface-200 hover:border-primary-300'
+                } ${uploading ? 'opacity-60 cursor-not-allowed' : ''}`}
+              >
                 <div className="mx-auto w-16 h-16 rounded-2xl bg-gradient-to-br from-primary-500 to-accent-500 flex items-center justify-center text-white shadow-lg shadow-primary-500/25 mb-4 group-hover:scale-105 transition-transform duration-300">
                   <Upload className="h-8 w-8" />
                 </div>
-                <input type="file" accept="application/pdf,.pdf" onChange={event => setSelectedFile(event.target.files?.[0] || null)} className="block mx-auto mb-3 text-sm" />
-                <p className="text-base font-semibold text-surface-800 mb-1">{selectedFile ? selectedFile.name : 'Choose a PDF report'}</p>
-                <p className="text-xs text-surface-500 mt-1">Supports native text PDFs and scanned/image PDFs (OCR fallback)</p>
+
+                {selectedFile ? (
+                  <div className="flex items-center justify-center gap-3">
+                    <FileText className="h-5 w-5 text-primary-600 flex-shrink-0" />
+                    <p className="text-base font-semibold text-surface-800 truncate max-w-xs">{selectedFile.name}</p>
+                    <span className="text-xs text-surface-500">({(selectedFile.size / (1024 * 1024)).toFixed(1)} MB)</span>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedFile(null);
+                        setUploadError(null);
+                      }}
+                      disabled={uploading}
+                      className="p-1 rounded-lg hover:bg-surface-100 text-surface-500"
+                      aria-label="Remove selected file"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <p className="text-base font-semibold text-surface-800 mb-1">
+                      {isDragging ? 'Drop the PDF here' : 'Click to choose a PDF, or drag it here'}
+                    </p>
+                    <p className="text-xs text-surface-500 mt-1">
+                      Supports native text PDFs and scanned/image PDFs (OCR fallback). Max {MAX_UPLOAD_MB} MB.
+                    </p>
+                  </>
+                )}
               </div>
             </div>
-            <button
-              onClick={handleUpload}
-              disabled={!selectedBill || !selectedFile || uploading}
-              className="btn-primary inline-flex items-center gap-2"
-            >
-              {uploading ? (
-                <>
-                  <div className="h-4 w-4 rounded-full border-2 border-white/40 border-t-white animate-spin" />
-                  Processing...
-                </>
-              ) : (
-                <>
-                  <Upload className="h-4 w-4" /> Upload &amp; Extract
-                </>
+
+            {uploadError && (
+              <div role="alert" className="flex items-start gap-3 p-4 rounded-xl bg-red-50 border border-red-200 text-red-800">
+                <AlertTriangle className="h-5 w-5 mt-0.5 flex-shrink-0" />
+                <p className="text-sm font-medium">{uploadError}</p>
+              </div>
+            )}
+
+            <div>
+              <button
+                type="button"
+                onClick={handleUpload}
+                disabled={!selectedBill || !selectedFile || uploading}
+                className="btn-primary inline-flex items-center gap-2"
+              >
+                {uploading ? (
+                  <>
+                    <div className="h-4 w-4 rounded-full border-2 border-white/40 border-t-white animate-spin" />
+                    Processing...
+                  </>
+                ) : (
+                  <>
+                    <Upload className="h-4 w-4" /> Upload &amp; Extract
+                  </>
+                )}
+              </button>
+              {disabledReason && !uploading && (
+                <p className="text-xs text-surface-500 mt-2">{disabledReason}</p>
               )}
-            </button>
+            </div>
+
             {uploadSuccess && (
               <InfoBox className="!p-5">
                 <div className="flex items-start gap-3">
@@ -236,12 +357,14 @@ export function ClerkIngestionPage() {
                       {report.extraction_status !== 'verified' && (
                         <div className="flex flex-wrap gap-3 pl-6 pt-3 border-t border-surface-100">
                           <button
+                            type="button"
                             onClick={() => dispatch({ type: 'UPDATE_REPORT_STATUS', payload: { reportId: report.id, status: 'verified' } })}
                             className="btn-primary inline-flex items-center gap-2 text-sm"
                           >
                             <CheckCircle2 className="h-4 w-4" /> Mark Verified
                           </button>
                           <button
+                            type="button"
                             onClick={() => dispatch({ type: 'UPDATE_REPORT_STATUS', payload: { reportId: report.id, status: 'needs_review' } })}
                             className="btn-secondary inline-flex items-center gap-2 text-sm"
                           >
@@ -311,6 +434,7 @@ export function ClerkNoticesPage() {
       </p>
 
       <button
+        type="button"
         onClick={() => setShowForm(!showForm)}
         className="btn-primary inline-flex items-center gap-2 mb-6"
       >
@@ -409,6 +533,7 @@ export function ClerkNoticesPage() {
                 </label>
               </div>
               <button
+                type="button"
                 onClick={handleAdd}
                 className="btn-primary inline-flex items-center gap-2"
               >
