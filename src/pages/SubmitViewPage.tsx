@@ -11,7 +11,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import confetti from 'canvas-confetti';
-import { Card, Badge, Label, InputField, DisclaimerBox, InfoBox } from '../components/UI';
+import { Card, Label, InputField, DisclaimerBox, InfoBox } from '../components/UI';
 
 export function SubmitViewPage() {
   const [searchParams] = useSearchParams();
@@ -119,23 +119,11 @@ export function SubmitViewPage() {
           transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
         >
           <Card className="!p-0 overflow-hidden !rounded-3xl text-center">
-            {/* Thumbs up */}
-            <div className="flex justify-center pt-8 bg-white">
-              <motion.div
-                initial={{ scale: 0, rotate: -20 }}
-                animate={{ scale: 1, rotate: 0 }}
-                transition={{ type: 'spring', stiffness: 260, damping: 15 }}
-                className="w-20 h-20 rounded-full flex items-center justify-center shadow-lg"
-                style={{ background: '#13b892' }}
-                role="img"
-                aria-label="Submission successful"
-              >
-                <ThumbsUp className="h-10 w-10 text-white" strokeWidth={2.5} />
-              </motion.div>
-            </div>
-
             {/* Banner */}
-            <div className="relative p-10 md:p-14 bg-primary-700 bg-gradient-to-br from-primary-600 via-primary-700 to-accent-600 text-white overflow-hidden">
+            <div
+              className="relative p-10 md:p-14 text-white overflow-hidden"
+              style={{ background: 'linear-gradient(135deg, #3a5cff 0%, #1f37f5 55%, #13b892 100%)' }}
+            >
               <div
                 className="absolute inset-0 opacity-15"
                 style={{
@@ -144,17 +132,23 @@ export function SubmitViewPage() {
                 }}
               />
               <div className="absolute -top-24 -left-24 w-60 h-60 rounded-full bg-white/10 blur-3xl" />
-              <div className="absolute -bottom-24 -right-24 w-64 h-64 rounded-full bg-accent-300/20 blur-3xl" />
+              <div className="absolute -bottom-24 -right-24 w-64 h-64 rounded-full bg-white/10 blur-3xl" />
 
               <div className="relative">
+                {/* Square with thumbs up */}
                 <motion.div
                   initial={{ scale: 0, rotate: -30 }}
                   animate={{ scale: 1, rotate: 0 }}
                   transition={{ type: 'spring', stiffness: 200, damping: 18, delay: 0.1 }}
-                  className="mx-auto w-24 h-24 md:w-28 md:h-28 rounded-[32px] bg-white flex items-center justify-center shadow-2xl mb-6"
+                  className="mx-auto w-24 h-24 md:w-28 md:h-28 p-2 rounded-[32px] bg-white shadow-2xl mb-6"
+                  role="img"
+                  aria-label="Submission successful"
                 >
-                  <div className="w-20 h-20 md:w-24 md:h-24 rounded-[24px] bg-gradient-to-br from-accent-500 to-accent-600 flex items-center justify-center shadow-inner">
-                    <CheckCircle2 className="h-12 w-12 md:h-14 md:w-14 text-white" strokeWidth={2.5} />
+                  <div
+                    className="w-full h-full rounded-[24px] flex items-center justify-center shadow-inner"
+                    style={{ background: 'linear-gradient(135deg, #2dd3ad, #13b892)' }}
+                  >
+                    <ThumbsUp className="h-10 w-10 md:h-12 md:w-12 text-white" strokeWidth={2.5} />
                   </div>
                 </motion.div>
 
@@ -163,13 +157,19 @@ export function SubmitViewPage() {
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: 0.2, duration: 0.4 }}
                 >
-                  <Badge variant="accent" className="!bg-white/15 !text-white !border-white/30 backdrop-blur-sm mb-5 !text-[11px]">
+                  <span
+                    className="inline-flex items-center gap-1.5 mb-5 px-3 py-1 rounded-full text-[11px] font-black uppercase tracking-wider text-white"
+                    style={{
+                      background: 'rgba(255,255,255,0.18)',
+                      border: '1px solid rgba(255,255,255,0.4)',
+                    }}
+                  >
                     <Sparkles className="h-3 w-3" /> Submission Received
-                  </Badge>
+                  </span>
                   <h2 className="text-3xl md:text-5xl font-black tracking-tighter mb-4">
                     All done. Your voice is on the record.
                   </h2>
-                  <p className="text-white/85 text-lg md:text-xl max-w-xl mx-auto leading-relaxed font-medium">
+                  <p className="text-white/90 text-lg md:text-xl max-w-xl mx-auto leading-relaxed font-medium">
                     Your view has been recorded and a tamper-evident receipt has been issued.
                     Save this ID — it's your proof.
                   </p>
