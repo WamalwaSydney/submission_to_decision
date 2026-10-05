@@ -1,6 +1,6 @@
 # Database Models
 
-from sqlalchemy import Column, String, Text, Boolean, Float, Date, DateTime, ForeignKey, ARRAY, JSON
+from sqlalchemy import Column, String, Text, Boolean, Float, Date, DateTime, ForeignKey, ARRAY, JSON, Integer
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -37,6 +37,13 @@ class LegislativeItem(Base):
     documents = Column(JSON, default=[])
     status_history = Column(JSON, default=[])
     is_simulated = Column(Boolean, default=False)
+    bill_house = Column(String(20))
+    bill_number = Column(Integer)
+    bill_year = Column(Integer)
+    source_url = Column(String(1000))
+    source_file_ref = Column(String(255))
+    source_updated_at = Column(Date)
+    source_status = Column(String(100))
 
     receipts = relationship("ParticipationReceipt", back_populates="legislative_item")
     reports = relationship("CommitteeReport", back_populates="bill")
@@ -65,13 +72,20 @@ class CommitteeReport(Base):
     __tablename__ = "committee_reports"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    bill_ref = Column(UUID(as_uuid=True), ForeignKey("legislative_items.id"), nullable=False)
+    bill_ref = Column(UUID(as_uuid=True), ForeignKey("legislative_items.id"), nullable=True)
     institution = Column(String(100), nullable=False)
     date_tabled = Column(Date, nullable=False)
     source_document_ref = Column(String(500), nullable=False)
     extraction_status = Column(String(20), default="pending")
     ocr_used = Column(Boolean, default=False)
     is_simulated = Column(Boolean, default=False)
+    committee_name = Column(String(255))
+    committee_url = Column(String(1000))
+    title = Column(String(1000))
+    bill_house = Column(String(20))
+    bill_number = Column(Integer)
+    bill_year = Column(Integer)
+    source_url = Column(String(1000))
 
     bill = relationship("LegislativeItem", back_populates="reports")
     entries = relationship("ReportEntry", back_populates="report")
@@ -137,6 +151,10 @@ class NoticeRecord(Base):
     window_end = Column(Date, nullable=False)
     mode = Column(String(255), nullable=False)
     bill_text_accessible = Column(Boolean, default=False)
+    source_url = Column(String(1000))
+    source_title = Column(String(500))
+    committee_name = Column(String(255))
+    published_date = Column(Date)
 
     bill = relationship("LegislativeItem", back_populates="notices")
 
