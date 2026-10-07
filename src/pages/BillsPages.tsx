@@ -1,11 +1,13 @@
-import React from 'react';
+import React, { useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import { getDaysOfNotice, getWindowLength } from '../data/seed';
 import { SubmissionStatus } from '../types';
 import {
   FileText, Clock, Building2, ArrowRight, ArrowLeft,
-  FileCheck, Calendar, FileSearch, Gavel, Users, Download
+  FileCheck, Calendar, FileSearch, Gavel, Users, Download, Search,
+  SlidersHorizontal, X, Home, WalletCards, Sprout, HeartPulse,
+  BusFront, Boxes, ChevronDown, Sparkles
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import {
@@ -43,6 +45,42 @@ function downloadReadableBillDocument(
 
 export function BillsListPage() {
   const { state } = useApp();
+  const [query, setQuery] = useState('');
+  const [institution, setInstitution] = useState('All institutions');
+  const [stage, setStage] = useState('All stages');
+  const [category, setCategory] = useState('All topics');
+
+  const categoryMeta = [
+    { name: 'Housing & planning', icon: Home, tone: 'from-orange-500 to-rose-500', soft: 'bg-orange-50 text-orange-700 border-orange-100', keywords: ['urban', 'planning', 'housing', 'land', 'zoning'] },
+    { name: 'Finance & economy', icon: WalletCards, tone: 'from-emerald-500 to-teal-600', soft: 'bg-emerald-50 text-emerald-700 border-emerald-100', keywords: ['finance', 'market', 'tax', 'budget', 'trade'] },
+    { name: 'Agriculture & food', icon: Sprout, tone: 'from-lime-500 to-green-600', soft: 'bg-lime-50 text-lime-700 border-lime-100', keywords: ['agriculture', 'farmer', 'food', 'fertilizer', 'livestock'] },
+    { name: 'Health & wellbeing', icon: HeartPulse, tone: 'from-pink-500 to-red-500', soft: 'bg-pink-50 text-pink-700 border-pink-100', keywords: ['health', 'insurance', 'hospital', 'care', 'wellbeing'] },
+    { name: 'Transport & infrastructure', icon: BusFront, tone: 'from-blue-500 to-indigo-600', soft: 'bg-blue-50 text-blue-700 border-blue-100', keywords: ['traffic', 'transport', 'road', 'infrastructure', 'mobility'] },
+    { name: 'Other topics', icon: Boxes, tone: 'from-slate-500 to-slate-700', soft: 'bg-slate-50 text-slate-700 border-slate-200', keywords: [] },
+  ];
+
+  const getCategory = (title: string) => {
+    const normalized = title.toLowerCase();
+    return categoryMeta.find(item => item.keywords.some(keyword => normalized.includes(keyword)))?.name || 'Other topics';
+  };
+
+  const filteredBills = useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase();
+    return state.bills.filter(bill => {
+      const searchable = `${bill.title} ${bill.identifier} ${bill.institution} ${bill.stage}`.toLowerCase();
+      return (!normalizedQuery || searchable.includes(normalizedQuery))
+        && (institution === 'All institutions' || bill.institution === institution)
+        && (stage === 'All stages' || bill.stage === stage)
+        && (category === 'All topics' || getCategory(bill.title) === category);
+    });
+  }, [state.bills, query, institution, stage, category]);
+
+  const groupedBills = categoryMeta.map(item => ({
+    ...item,
+    bills: filteredBills.filter(bill => getCategory(bill.title) === item.name),
+  })).filter(group => group.bills.length > 0);
+  const hasFilters = Boolean(query || institution !== 'All institutions' || stage !== 'All stages' || category !== 'All topics');
+  const clearFilters = () => { setQuery(''); setInstitution('All institutions'); setStage('All stages'); setCategory('All topics'); };
 
   return (
     <div className="space-y-10">
@@ -55,10 +93,41 @@ export function BillsListPage() {
           Tracked <span className="gradient-text">Bills</span>
         </h1>
         <p className="text-lg text-surface-600 max-w-3xl leading-relaxed">
-          Browse legislation being tracked by the platform. Follow submissions, committee reports, and published outcomes.
-          All demo bills are clearly marked as simulated.
+          Find the right bill in seconds. Explore by topic, search by keyword, or narrow the list by institution and stage before opening a bill.
         </p>
       </div>
+
+      <Card className="!p-6 md:!p-8 relative overflow-hidden border-primary-100">
+        <div className="absolute -top-20 -right-16 h-48 w-48 rounded-full bg-primary-100/60 blur-3xl pointer-events-none" />
+        <div className="relative">
+          <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-3 mb-5">
+            <div>
+              <div className="inline-flex items-center gap-2 text-primary-700 text-xs font-black uppercase tracking-[0.18em] mb-2"><Sparkles className="h-4 w-4" /> Bill finder</div>
+              <h2 className="text-2xl md:text-3xl font-black text-surface-900 tracking-tight">What are you looking for?</h2>
+              <p className="text-sm text-surface-500 mt-1">Start with a topic, then refine your results.</p>
+            </div>
+            <div className="text-sm font-bold text-surface-500"><span className="text-2xl font-black text-surface-900">{filteredBills.length}</span> of {state.bills.length} bills visible</div>
+          </div>
+          <div className="relative mb-5">
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-primary-500" />
+            <input
+              value={query}
+              onChange={event => setQuery(event.target.value)}
+              className="input-field !pl-12 !pr-12 !h-14 !text-base !rounded-2xl"
+              placeholder="Try “health”, “traffic”, “farmers”, a bill number, or a phrase..."
+              aria-label="Search bills"
+            />
+            {query && <button onClick={() => setQuery('')} aria-label="Clear search" className="absolute right-4 top-1/2 -translate-y-1/2 text-surface-400 hover:text-surface-700"><X className="h-5 w-5" /></button>}
+          </div>
+          <div className="flex items-center gap-2 mb-3 text-xs font-black uppercase tracking-wider text-surface-500"><SlidersHorizontal className="h-4 w-4" /> Browse by topic</div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+            <button onClick={() => setCategory('All topics')} className={`text-left rounded-2xl border p-3 transition-all ${category === 'All topics' ? 'bg-surface-900 text-white border-surface-900 shadow-lg' : 'bg-white border-surface-200 text-surface-700 hover:border-primary-300 hover:-translate-y-0.5'}`}>
+              <div className="text-xl mb-2">⌘</div><div className="text-xs font-black leading-tight">All topics</div><div className={`text-[11px] mt-1 ${category === 'All topics' ? 'text-white/70' : 'text-surface-400'}`}>{state.bills.length} bills</div>
+            </button>
+            {categoryMeta.slice(0, 5).map(item => { const Icon = item.icon; const count = state.bills.filter(bill => getCategory(bill.title) === item.name).length; return <button key={item.name} onClick={() => setCategory(category === item.name ? 'All topics' : item.name)} className={`text-left rounded-2xl border p-3 transition-all ${category === item.name ? `bg-gradient-to-br ${item.tone} text-white border-transparent shadow-lg -translate-y-0.5` : `bg-white ${item.soft} hover:-translate-y-0.5`}`}><Icon className="h-5 w-5 mb-2" /><div className="text-xs font-black leading-tight">{item.name}</div><div className={`text-[11px] mt-1 ${category === item.name ? 'text-white/75' : 'opacity-70'}`}>{count} {count === 1 ? 'bill' : 'bills'}</div></button>; })}
+          </div>
+        </div>
+      </Card>
 
       <InfoBox className="!p-5 !max-w-5xl">
         <div className="pl-3 flex items-start gap-3">
@@ -72,37 +141,30 @@ export function BillsListPage() {
         </div>
       </InfoBox>
 
-      {/* Search/filter bar */}
       <Card className="!p-5 md:!p-6">
-        <div className="flex flex-col md:flex-row gap-4">
-          <div className="flex-1">
-            <Label>Search bills</Label>
-            <InputField placeholder="Search by title, ID, or institution..." />
-          </div>
-          <div className="w-full md:w-56">
-            <Label>Institution</Label>
-            <select className="input-field">
-              <option>All institutions</option>
-              <option>National Assembly</option>
-              <option>Nairobi County Assembly</option>
-              <option>Trans Nzoia County Assembly</option>
+        <div className="flex flex-col lg:flex-row lg:items-end gap-4">
+          <div className="flex-1"><Label>Institution</Label>
+            <select value={institution} onChange={event => setInstitution(event.target.value)} className="input-field">
+              <option>All institutions</option><option>National Assembly</option><option>Nairobi County Assembly</option><option>Trans Nzoia County Assembly</option>
             </select>
           </div>
-          <div className="w-full md:w-56">
-            <Label>Stage</Label>
-            <select className="input-field">
-              <option>All stages</option>
-              <option>First Reading</option>
-              <option>Second Reading</option>
-              <option>Committee Stage</option>
-              <option>Report Stage</option>
+          <div className="flex-1"><Label>Stage</Label>
+            <select value={stage} onChange={event => setStage(event.target.value)} className="input-field">
+              <option>All stages</option><option>First Reading</option><option>Second Reading</option><option>Public Participation</option><option>Committee Stage</option><option>Report Stage</option>
             </select>
           </div>
+          <div className="flex-1"><Label>Topic</Label>
+            <select value={category} onChange={event => setCategory(event.target.value)} className="input-field"><option>All topics</option>{categoryMeta.map(item => <option key={item.name}>{item.name}</option>)}</select>
+          </div>
+          {hasFilters && <button onClick={clearFilters} className="btn-secondary inline-flex items-center justify-center gap-2 h-[50px] whitespace-nowrap"><X className="h-4 w-4" /> Clear filters</button>}
         </div>
+        {hasFilters && <div className="mt-4 flex flex-wrap items-center gap-2 text-xs font-bold text-surface-500"><span>Showing results for:</span>{query && <span className="rounded-full bg-primary-50 text-primary-700 px-3 py-1">“{query}”</span>}{category !== 'All topics' && <span className="rounded-full bg-accent-50 text-accent-700 px-3 py-1">{category}</span>}{institution !== 'All institutions' && <span className="rounded-full bg-surface-100 text-surface-700 px-3 py-1">{institution}</span>}{stage !== 'All stages' && <span className="rounded-full bg-surface-100 text-surface-700 px-3 py-1">{stage}</span>}</div>}
       </Card>
 
-      <div className="space-y-4">
-        {state.bills.map((bill, idx) => {
+      {groupedBills.length > 0 ? <div className="space-y-8">
+        {groupedBills.map((group) => { const CategoryIcon = group.icon; return <section key={group.name}>
+          <div className="flex items-center gap-3 mb-4"><div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${group.tone} text-white flex items-center justify-center shadow-md`}><CategoryIcon className="h-5 w-5" /></div><div><h2 className="text-xl font-black text-surface-900">{group.name}</h2><p className="text-xs font-semibold text-surface-500">{group.bills.length} {group.bills.length === 1 ? 'bill' : 'bills'} in this topic</p></div><div className="h-px bg-surface-200 flex-1 ml-2" /></div>
+          <div className="space-y-4">{group.bills.map((bill, idx) => {
           const billReceipts = state.receipts.filter(r => r.legislative_item_id === bill.id);
           const billNotices = state.notices.filter(n => n.bill_ref === bill.id);
           const outcomes = (() => {
@@ -135,10 +197,10 @@ export function BillsListPage() {
 
                 <div className="relative flex items-start justify-between gap-4">
                   <div className="flex-1 min-w-0">
-                    <div className="flex flex-wrap items-center gap-2 mb-3">
-                      <h2 className="text-xl md:text-[22px] font-black text-surface-900 tracking-tight leading-snug">
-                        {bill.title}
-                      </h2>
+                        <div className="flex flex-wrap items-center gap-2 mb-3">
+                          <h3 className="text-xl md:text-[22px] font-black text-surface-900 tracking-tight leading-snug">
+                            {bill.title}
+                          </h3>
                       {bill.is_simulated && <Badge variant="gray" className="!text-[10px]">SIMULATED</Badge>}
                     </div>
 
@@ -187,8 +249,9 @@ export function BillsListPage() {
               </Link>
             </motion.div>
           );
-        })}
-      </div>
+        })}</div>
+        </section>; })}
+      </div> : <Card className="!p-12 md:!p-16 text-center"><Search className="h-12 w-12 text-surface-300 mx-auto mb-4" /><h2 className="text-2xl font-black text-surface-900 mb-2">No bills match those filters</h2><p className="text-surface-500 mb-6">Try a broader topic or remove one of the filters.</p><button onClick={clearFilters} className="btn-primary inline-flex items-center gap-2"><X className="h-4 w-4" /> Show all bills</button></Card>}
     </div>
   );
 }

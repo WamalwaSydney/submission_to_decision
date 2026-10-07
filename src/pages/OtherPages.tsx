@@ -1,12 +1,69 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
-import { Download, FileText, BarChart3, Shield, AlertTriangle, Users, Eye, Clock, CheckCircle2, XCircle, Sparkles, Lock, Flag, Info, FileCheck2 } from 'lucide-react';
+import { Download, FileText, BarChart3, Shield, AlertTriangle, Users, Eye, Clock, CheckCircle2, XCircle, Sparkles, Lock, Flag, Info, FileCheck2, TrendingUp, CalendarDays } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { Card, DisclaimerBox, InfoBox, Badge, Label, InputField } from '../components/UI';
-
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  Legend,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
 export function ResearchExportPage() {
   const { state, getSubmissionStatus, getBillOutcomes } = useApp();
+  const outcomeColors: Record<string, string> = {
+    adopted: '#16a34a',
+    amended: '#2563eb',
+    'rejected with reasons': '#dc2626',
+    'not addressed': '#f59e0b',
+    'awaiting committee report': '#94a3b8',
+  };
+  const outcomeLabels: Record<string, string> = {
+    adopted: 'Adopted',
+    amended: 'Amended',
+    'rejected with reasons': 'Rejected',
+    'not addressed': 'Not addressed',
+    'awaiting committee report': 'Awaiting report',
+  };
+  const outcomeStatuses = ['awaiting committee report', 'adopted', 'amended', 'rejected with reasons', 'not addressed'];
+  const billChartData = state.bills.map(bill => {
+    const outcomes = getBillOutcomes(bill.id).reduce((acc, item) => ({ ...acc, [item.status]: item.count }), {} as Record<string, number>);
+    return {
+      name: bill.identifier,
+      title: bill.title,
+      awaiting: outcomes['awaiting committee report'] || 0,
+      adopted: outcomes.adopted || 0,
+      amended: outcomes.amended || 0,
+      rejected: outcomes['rejected with reasons'] || 0,
+      notAddressed: outcomes['not addressed'] || 0,
+    };
+  });
+  const outcomeChartData = outcomeStatuses.map(status => ({
+    name: outcomeLabels[status],
+    value: state.receipts.filter(receipt => getSubmissionStatus(receipt.id) === status).length,
+    status,
+  }));
+  const noticeChartData = state.notices.map(notice => {
+    const start = new Date(notice.window_start);
+    const end = new Date(notice.window_end);
+    const noticeDate = new Date(notice.notice_date);
+    return {
+      name: state.bills.find(bill => bill.id === notice.bill_ref)?.identifier || notice.bill_ref,
+      noticeDays: Math.max(0, Math.ceil((start.getTime() - noticeDate.getTime()) / 86400000)),
+      windowDays: Math.max(0, Math.ceil((end.getTime() - start.getTime()) / 86400000)),
+    };
+  });
+  const totalOutcomes = outcomeChartData.reduce((sum, item) => sum + item.value, 0);
+  const decidedCount = outcomeChartData.filter(item => !['Awaiting report'].includes(item.name)).reduce((sum, item) => sum + item.value, 0);
+  const averageNoticeDays = noticeChartData.length ? Math.round(noticeChartData.reduce((sum, item) => sum + item.noticeDays, 0) / noticeChartData.length) : 0;
 
   const exportOutcomeTrail = () => {
     const data = state.bills.map(bill => {
@@ -68,8 +125,46 @@ export function ResearchExportPage() {
         Research <span className="gradient-text">Export</span>
       </h1>
       <p className="text-lg text-surface-600 leading-relaxed max-w-3xl mb-8">
-        Export public outcome trail and notice-adequacy datasets for research and journalism.
+        Explore public participation and accountability statistics visually, then export the underlying datasets for research and journalism.
       </p>
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+        {[
+          { label: 'Submissions tracked', value: state.receipts.length, icon: FileCheck2, color: 'text-primary-600', bg: 'bg-primary-50' },
+          { label: 'Bills with data', value: state.bills.length, icon: BarChart3, color: 'text-accent-600', bg: 'bg-accent-50' },
+          { label: 'Outcomes decided', value: decidedCount, icon: TrendingUp, color: 'text-green-600', bg: 'bg-green-50' },
+          { label: 'Average notice', value: `${averageNoticeDays} days`, icon: CalendarDays, color: 'text-amber-600', bg: 'bg-amber-50' },
+        ].map(({ label, value, icon: Icon, color, bg }) => (
+          <Card key={label} className="!p-4 md:!p-5">
+            <div className={`w-10 h-10 rounded-xl ${bg} flex items-center justify-center mb-3`}><Icon className={`h-5 w-5 ${color}`} /></div>
+            <div className="text-2xl font-black text-surface-900">{value}</div>
+            <div className="text-xs font-bold uppercase tracking-wider text-surface-500 mt-1">{label}</div>
+          </Card>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-1 xl:grid-cols-5 gap-6 mb-8">
+        <Card className="!p-5 md:!p-6 xl:col-span-2">
+          <div className="flex items-start justify-between mb-4">
+            <div><h2 className="text-xl font-black text-surface-900">Outcome distribution</h2><p className="text-sm text-surface-500 mt-1">All tracked submissions</p></div>
+            <BarChart3 className="h-5 w-5 text-primary-600" />
+          </div>
+          {totalOutcomes > 0 ? <>
+            <div className="h-64"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={outcomeChartData} dataKey="value" nameKey="name" innerRadius={62} outerRadius={92} paddingAngle={3} stroke="none">{outcomeChartData.map(item => <Cell key={item.status} fill={outcomeColors[item.status]} />)}</Pie><Tooltip formatter={(value: number) => [`${value} submissions`, 'Count']} /><Legend verticalAlign="bottom" height={42} iconType="circle" wrapperStyle={{ fontSize: 11 }} /></PieChart></ResponsiveContainer></div>
+            <p className="text-center text-xs text-surface-500">{totalOutcomes} submissions represented in the outcome trail</p>
+          </> : <div className="h-64 flex items-center justify-center text-sm text-surface-500">No outcome data available yet.</div>}
+        </Card>
+
+        <Card className="!p-5 md:!p-6 xl:col-span-3">
+          <div className="flex items-start justify-between mb-4"><div><h2 className="text-xl font-black text-surface-900">Outcomes by bill</h2><p className="text-sm text-surface-500 mt-1">Compare how submissions were treated</p></div><TrendingUp className="h-5 w-5 text-green-600" /></div>
+          <div className="h-72"><ResponsiveContainer width="100%" height="100%"><BarChart data={billChartData} margin={{ top: 8, right: 8, left: -18, bottom: 4 }}><CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" /><XAxis dataKey="name" tick={{ fontSize: 11 }} /><YAxis allowDecimals={false} tick={{ fontSize: 11 }} /><Tooltip labelFormatter={(label, payload) => payload?.[0]?.payload?.title || label} /><Legend wrapperStyle={{ fontSize: 11 }} /><Bar dataKey="adopted" name="Adopted" stackId="a" fill="#16a34a" radius={[3, 3, 0, 0]} /><Bar dataKey="amended" name="Amended" stackId="a" fill="#2563eb" /><Bar dataKey="rejected" name="Rejected" stackId="a" fill="#dc2626" /><Bar dataKey="notAddressed" name="Not addressed" stackId="a" fill="#f59e0b" /><Bar dataKey="awaiting" name="Awaiting report" stackId="a" fill="#94a3b8" /></BarChart></ResponsiveContainer></div>
+        </Card>
+      </div>
+
+      <Card className="!p-5 md:!p-6 mb-8">
+        <div className="flex items-start justify-between mb-4"><div><h2 className="text-xl font-black text-surface-900">Notice timing</h2><p className="text-sm text-surface-500 mt-1">Days between publication and opening, compared with the participation window</p></div><CalendarDays className="h-5 w-5 text-amber-600" /></div>
+        {noticeChartData.length > 0 ? <div className="h-72"><ResponsiveContainer width="100%" height="100%"><BarChart data={noticeChartData} margin={{ top: 8, right: 8, left: -18, bottom: 4 }}><CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" /><XAxis dataKey="name" tick={{ fontSize: 11 }} /><YAxis allowDecimals={false} tick={{ fontSize: 11 }} /><Tooltip formatter={(value: number, name: string) => [`${value} days`, name === 'noticeDays' ? 'Notice before opening' : 'Participation window']} /><Legend formatter={(value) => value === 'noticeDays' ? 'Notice before opening' : 'Participation window'} wrapperStyle={{ fontSize: 11 }} /><Bar dataKey="noticeDays" name="noticeDays" fill="#f59e0b" radius={[4, 4, 0, 0]} /><Bar dataKey="windowDays" name="windowDays" fill="#0ea5e9" radius={[4, 4, 0, 0]} /></BarChart></ResponsiveContainer></div> : <div className="h-48 flex items-center justify-center text-sm text-surface-500">No notice records available yet.</div>}
+      </Card>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
         <motion.div
