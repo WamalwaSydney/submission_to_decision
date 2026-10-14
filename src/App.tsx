@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useCallback, useEffect } from 'react';
 import { HashRouter, Routes, Route } from 'react-router-dom';
 import { AppProvider, useApp } from './context/AppContext';
 import { Layout } from './components/Layout';
@@ -14,25 +14,53 @@ import { ModeratorQueuePage, ReportedContentPage } from './pages/ModeratorPages'
 import { ClerkIngestionPage, ClerkNoticesPage } from './pages/ClerkPages';
 import { AdminPage } from './pages/AdminPage';
 import { ResearchExportPage, CommunityRulesPage, RepresentativeDashboardPage, MyReceiptsPage } from './pages/OtherPages';
+import { api } from './api/endpoints';
+import { getUnsyncedDrafts, markDraftSynced } from './utils/offline';
 
 function OnlineStatusListener() {
-  const { dispatch } = useApp();
+  const { dispatch, state } = useApp();
+
+  const syncDrafts = useCallback(async () => {
+    if (!state.currentUser || !navigator.onLine) return;
+    const drafts = await getUnsyncedDrafts();
+    for (const draft of drafts) {
+      try {
+        const result = await api.createReceipt({
+          legislative_item_id: draft.legislative_item_id,
+          clause_ref: draft.clause_ref,
+          submission_text: draft.submission_text,
+          show_name_publicly: false,
+        });
+        await markDraftSynced(draft.id);
+        dispatch({ type: 'ADD_RECEIPT', payload: {
+          id: String(result.receipt_id), public_id: String(result.public_id),
+          author_id: state.currentUser.id, legislative_item_id: draft.legislative_item_id,
+          clause_ref: draft.clause_ref, submission_text: draft.submission_text,
+          lodging_status: 'pending', timestamp: result.timestamp, hash: result.hash,
+          previous_hash: result.previous_hash,
+        }});
+      } catch {
+        // Keep the draft queued. A later online event or app start retries it.
+        break;
+      }
+    }
+  }, [dispatch, state.currentUser]);
 
   useEffect(() => {
-    const handleOnline = () => dispatch({ type: 'SET_ONLINE', payload: true });
+    const handleOnline = () => {
+      dispatch({ type: 'SET_ONLINE', payload: true });
+      void syncDrafts();
+    };
     const handleOffline = () => dispatch({ type: 'SET_ONLINE', payload: false });
-
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
-
-    // Set initial state
     dispatch({ type: 'SET_ONLINE', payload: navigator.onLine });
-
+    if (navigator.onLine) void syncDrafts();
     return () => {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
     };
-  }, [dispatch]);
+  }, [dispatch, syncDrafts]);
 
   return null;
 }

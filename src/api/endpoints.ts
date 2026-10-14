@@ -30,16 +30,21 @@ export const api = {
     return apiFetch<any>('/receipts', { method: 'POST', body: form });
   },
   verifyChain: () => apiFetch<any>('/receipts/verify'),
-  uploadReport: (file: File, billRef: string, institution: string, dateTabled: string) => {
+  uploadReport: (file: File, billRef: string, institution: string, dateTabled: string, sourceUrl?: string) => {
     const form = new FormData();
     form.append('file', file);
     form.append('bill_ref', billRef);
     form.append('institution', institution);
     form.append('date_tabled', dateTabled);
+    if (sourceUrl) form.append('source_url', sourceUrl);
     return apiFetch<any>('/reports/upload', { method: 'POST', body: form });
   },
   pendingMatches: () => apiFetch<{ matches: any[] }>('/matches/pending'),
+  generateMatches: (billRef: string) => apiFetch<{ matches: any[] }>(`/reports/${encodeURIComponent(billRef)}/generate-matches`, { method: 'POST' }),
   decideMatch: (matchId: string, decision: 'confirm' | 'reject') => apiFetch<any>(`/matches/${matchId}/${decision}`, { method: 'POST' }),
+  report: (reportId: string) => apiFetch<any>(`/reports/${encodeURIComponent(reportId)}`),
+  updateReportEntry: (reportId: string, entryId: string, treatment: string, statedReason?: string) => apiFetch<any>(`/reports/${encodeURIComponent(reportId)}/entries/${encodeURIComponent(entryId)}`, { method: 'PUT', body: JSON.stringify({ treatment, stated_reason: statedReason }) }),
+  verifyReport: (reportId: string) => apiFetch<any>(`/reports/${encodeURIComponent(reportId)}/verify`, { method: 'PUT' }),
   claimProfile: (profileId: string) => apiFetch<any>(`/profiles/${profileId}/claim`, { method: 'POST' }),
   verifyProfile: (profileId: string, status: string) => { const form = new FormData(); form.append('status', status); return apiFetch<any>(`/profiles/${profileId}/verify`, { method: 'POST', body: form }); },
   createNotice: (data: Record<string, string | boolean>) => { const form = new FormData(); Object.entries(data).forEach(([k, v]) => form.append(k, String(v))); return apiFetch<any>('/notices', { method: 'POST', body: form }); },

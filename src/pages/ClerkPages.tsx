@@ -13,6 +13,7 @@ export function ClerkIngestionPage() {
   const [uploading, setUploading] = useState(false);
   const [selectedBill, setSelectedBill] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [sourceUrl, setSourceUrl] = useState('');
   const [uploadSuccess, setUploadSuccess] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -89,7 +90,7 @@ export function ClerkIngestionPage() {
     setUploadError(null);
     setUploadSuccess(false);
     try {
-      const result = await api.uploadReport(selectedFile, selectedBill, institution, dateTabled);
+      const result = await api.uploadReport(selectedFile, selectedBill, institution, dateTabled, sourceUrl || undefined);
       dispatch({
         type: 'ADD_REPORT',
         payload: {
@@ -103,6 +104,9 @@ export function ClerkIngestionPage() {
           is_simulated: false,
         },
       });
+      for (const match of result.match_proposals || []) {
+        dispatch({ type: 'ADD_MATCH', payload: match });
+      }
       setSelectedFile(null);
       setUploadSuccess(true);
       setTimeout(() => setUploadSuccess(false), 4000);
@@ -171,6 +175,19 @@ export function ClerkIngestionPage() {
                   <span>Check the deployed API URL and Neon connection, then refresh this page.</span>
                 </div>
               )}
+            </div>
+
+            <div>
+              <Label className="!text-xs !font-black !uppercase !tracking-[0.15em] !text-surface-600 !mb-2">Official source URL (optional)</Label>
+              <input
+                aria-label="Official source URL"
+                type="url"
+                value={sourceUrl}
+                onChange={(e) => setSourceUrl(e.target.value)}
+                placeholder="https://www.parliament.go.ke/..."
+                className="input-field mb-5"
+              />
+              <p className="text-xs text-surface-500 mt-1 mb-4">Stored as provenance; the uploaded file is also retained with a SHA-256 checksum.</p>
             </div>
 
             <div>
@@ -277,7 +294,7 @@ export function ClerkIngestionPage() {
                 <div className="flex items-start gap-3">
                   <CheckCircle2 className="h-5 w-5 mt-0.5 flex-shrink-0 text-green-600" />
                   <div>
-                    <p className="text-sm font-semibold text-surface-800">Report uploaded. Extraction pending.</p>
+                        <p className="text-sm font-semibold text-surface-800">Report uploaded, extracted, and match proposals generated for moderator review.</p>
                   </div>
                 </div>
               </InfoBox>
