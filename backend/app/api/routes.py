@@ -2,7 +2,7 @@
 
 import os
 import random
-from datetime import date
+from datetime import date, datetime, timedelta
 from typing import Optional
 from uuid import UUID, uuid4
 
@@ -18,7 +18,8 @@ from app.models import (
     CommitteeReport, ReportEntry, SubmissionMatch, RepresentativeProfile, NoticeRecord,
     ModerationAction,
 )
-from app.services import receipt_service, linking_service, ingestion_service
+from app.services import receipt_service, linking_service, ingestion_service, storage_service
+from app.audit import record_audit
 
 router = APIRouter()
 
@@ -33,6 +34,11 @@ class RegisterRequest(BaseModel):
     email: str
     password: str
     role: str = "citizen"
+
+
+class ReportEntryUpdate(BaseModel):
+    treatment: str
+    stated_reason: Optional[str] = None
 
 
 def public_user(user: User) -> dict:
@@ -102,6 +108,9 @@ def to_dict(obj, exclude: set = frozenset()) -> dict:
         for attr in sa_inspect(obj).mapper.column_attrs
         if attr.key not in exclude
     }
+
+
+PUBLIC_RECEIPT_EXCLUDE = {"author_id"}
 
 
 # ============ Bills ============
@@ -194,7 +203,7 @@ async def bootstrap(db: AsyncSession = Depends(get_db)):
 
     return {
         "bills": await all_rows(LegislativeItem),
-        "receipts": await all_rows(ParticipationReceipt),
+        "receipts": await all_rows(ParticipationReceipt, exclude=PUBLIC_RECEIPT_EXCLUDE),
         "reports": await all_rows(CommitteeReport),
         "report_entries": await all_rows(ReportEntry),
         "matches": await all_rows(SubmissionMatch),
@@ -216,6 +225,18 @@ async def create_receipt(
 ):
     if current_user.role != "citizen":
         raise HTTPException(status_code=403, detail="Only citizens can submit views")
+    if not submission_text.strip():
+        raise HTTPException(status_code=422, detail="submission_text must not be empty")
+
+    recent_cutoff = datetime.utcnow() - timedelta(hours=1)
+    recent_result = await db.execute(
+        select(ParticipationReceipt.id).where(
+            ParticipationReceipt.author_id == current_user.id,
+            ParticipationReceipt.timestamp >= recent_cutoff,
+        )
+    )
+    if len(recent_result.scalars().all()) >= 5:
+        raise HTTPException(status_code=429, detail="Submission limit reached; try again later")
 
     try:
         bill_uuid = UUID(legislative_item_id)
@@ -341,8 +362,9 @@ async def confirm_match(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_role("moderator")),
 ):
-    match = await linking_service.confirm_match(db, match_id, current_user.id)
-    if match is None:
+    try:
+        match = await linking_service.confirm_match(db, match_id, current_user.id)
+    except ValueError:
         raise HTTPException(status_code=404, detail="Match not found")
     return {"match": match}
 
@@ -353,8 +375,9 @@ async def reject_match(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_role("moderator")),
 ):
-    match = await linking_service.reject_match(db, match_id, current_user.id)
-    if match is None:
+    try:
+        match = await linking_service.reject_match(db, match_id, current_user.id)
+    except ValueError:
         raise HTTPException(status_code=404, detail="Match not found")
     return {"match": match}
 
@@ -367,34 +390,118 @@ async def upload_report(
     bill_ref: str = Form(...),
     institution: str = Form(...),
     date_tabled: str = Form(...),
+    source_url: Optional[str] = Form(None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_role("clerk")),
 ):
     # Never trust the client filename: strip any path and prefix a random id
-    safe_name = os.path.basename(file.filename or "upload")
-    file_path = f"/tmp/{uuid4().hex}_{safe_name}"
-
-    try:
-        content = await file.read()
-        with open(file_path, "wb") as f:
-            f.write(content)
-
-        report = await ingestion_service.ingest_report(
-            db=db,
-            bill_ref=bill_ref,
-            institution=institution,
-            file_path=file_path,
-            date_tabled=date_tabled,
-        )
-    finally:
-        if os.path.exists(file_path):
-            os.remove(file_path)
+    content = await file.read()
+    provenance = storage_service.persist_report(content, file.filename or "report.pdf")
+    report = await ingestion_service.ingest_report(
+        db=db, bill_ref=bill_ref, institution=institution,
+        file_path=provenance["storage_ref"], date_tabled=date_tabled,
+        source_url=source_url,
+        source_metadata={
+            "original_filename": os.path.basename(file.filename or "report.pdf"),
+            "uploaded_at": datetime.utcnow().isoformat() + "Z",
+            "sha256": provenance["sha256"],
+            "storage_ref": provenance["storage_ref"],
+        }, uploaded_by=current_user.id,
+    )
+    report.source_sha256 = provenance["sha256"]
+    report.source_mime_type = provenance["mime_type"]
+    report.source_size_bytes = provenance["size_bytes"]
+    report.source_storage_ref = provenance["storage_ref"]
+    await record_audit(db, entity_type="committee_report", entity_id=report.id,
+                       action="uploaded", actor_id=current_user.id,
+                       details={"sha256": provenance["sha256"], "source_url": source_url})
+    await db.commit()
+    proposals = await linking_service.propose_matches(db, report.bill_ref)
 
     return {
         "report_id": report.id,
+        "source_sha256": report.source_sha256,
+        "source_url": report.source_url,
+        "source_storage_ref": report.source_storage_ref,
         "extraction_status": report.extraction_status,
         "ocr_used": report.ocr_used,
+        "match_proposals": [to_dict(match) for match in proposals],
     }
+
+
+@router.get("/reports/{report_id}")
+async def get_report(
+    report_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_role("clerk", "moderator", "administrator")),
+):
+    result = await db.execute(select(CommitteeReport).where(CommitteeReport.id == report_id))
+    report = result.scalar_one_or_none()
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+    entries_result = await db.execute(select(ReportEntry).where(ReportEntry.report_ref == report.id))
+    return {"report": to_dict(report), "entries": [to_dict(entry) for entry in entries_result.scalars().all()]}
+
+
+@router.put("/reports/{report_id}/entries/{entry_id}")
+async def update_report_entry(
+    report_id: UUID,
+    entry_id: UUID,
+    payload: ReportEntryUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_role("clerk", "administrator")),
+):
+    allowed_treatments = {"adopted", "amended", "rejected with reasons", "not addressed"}
+    if payload.treatment not in allowed_treatments:
+        raise HTTPException(status_code=422, detail="Unsupported treatment")
+    result = await db.execute(select(ReportEntry).where(ReportEntry.id == entry_id, ReportEntry.report_ref == report_id))
+    entry = result.scalar_one_or_none()
+    if not entry:
+        raise HTTPException(status_code=404, detail="Report entry not found")
+    entry.treatment = payload.treatment
+    entry.stated_reason = payload.stated_reason
+    await record_audit(db, entity_type="report_entry", entity_id=entry.id, action="updated", actor_id=current_user.id, details={"treatment": payload.treatment, "stated_reason": payload.stated_reason})
+    await db.commit()
+    await db.refresh(entry)
+    return {"entry": to_dict(entry)}
+
+
+@router.put("/reports/{report_id}/verify")
+async def verify_report(
+    report_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_role("clerk", "administrator")),
+):
+    result = await db.execute(select(CommitteeReport).where(CommitteeReport.id == report_id))
+    report = result.scalar_one_or_none()
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+    report.extraction_status = "verified"
+    await record_audit(db, entity_type="committee_report", entity_id=report.id, action="verified", actor_id=current_user.id, details={})
+    await db.commit()
+    await db.refresh(report)
+    return {"report": to_dict(report)}
+
+
+@router.post("/reports/{bill_ref}/generate-matches")
+async def generate_match_proposals(
+    bill_ref: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_role("clerk", "moderator", "administrator")),
+):
+    result = await db.execute(select(LegislativeItem.id).where(LegislativeItem.id == bill_ref))
+    if result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail="Bill not found")
+    matches = await linking_service.propose_matches(db, bill_ref)
+    return {"matches": [to_dict(match) for match in matches]}
+
+
+@router.get("/matches/confirmed")
+async def get_confirmed_matches(db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        select(SubmissionMatch).where(SubmissionMatch.reviewer_decision == "confirmed")
+    )
+    return {"matches": [to_dict(match, exclude={"reviewer_id"}) for match in result.scalars().all()]}
 
 
 # ============ Profiles ============
@@ -409,6 +516,15 @@ async def list_profiles(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(RepresentativeProfile))
     profiles = result.scalars().all()
     return {"profiles": [to_dict(p, exclude=PROFILE_PUBLIC_EXCLUDE) for p in profiles]}
+
+
+@router.get("/profiles/{profile_id}")
+async def get_profile(profile_id: UUID, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(RepresentativeProfile).where(RepresentativeProfile.id == profile_id))
+    profile = result.scalar_one_or_none()
+    if not profile:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    return {"profile": to_dict(profile, exclude=PROFILE_PUBLIC_EXCLUDE)}
 
 
 @router.post("/profiles/{profile_id}/claim")
@@ -430,6 +546,7 @@ async def claim_profile(
         raise HTTPException(status_code=404, detail="Profile not found or already claimed")
 
     profile.user_id = current_user.id
+    await record_audit(db, entity_type="representative_profile", entity_id=profile.id, action="claimed", actor_id=current_user.id, details={})
     await db.commit()
 
     return {"profile": to_dict(profile, exclude=PROFILE_PUBLIC_EXCLUDE)}
@@ -454,6 +571,7 @@ async def verify_profile(
     profile.verification_status = verification_status
     profile.verifier_id = current_user.id
     profile.profile_label = "verified"
+    await record_audit(db, entity_type="representative_profile", entity_id=profile.id, action="verified", actor_id=current_user.id, details={"status": verification_status})
 
     await db.commit()
 
@@ -517,6 +635,7 @@ async def report_content(
         reason=reason,
     )
     db.add(action)
+    await record_audit(db, entity_type="moderation_action", entity_id=action.id, action="reported", actor_id=current_user.id, details={"content_type": content_type, "reason": reason})
     await db.commit()
     await db.refresh(action)
 

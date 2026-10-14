@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.models import ParticipationReceipt, ReportEntry, SubmissionMatch, LegislativeItem
+from app.audit import record_audit
 
 async def propose_matches(
     db: AsyncSession,
@@ -34,14 +35,14 @@ async def propose_matches(
     matches = []
     
     for receipt in receipts:
-        # Skip if already has a confirmed match
+        # Do not duplicate proposals when a clerk retries generation.
         existing = await db.execute(
             select(SubmissionMatch).where(
                 SubmissionMatch.receipt_ref == receipt.id,
-                SubmissionMatch.reviewer_decision == "confirmed"
             )
         )
-        if existing.first():
+        existing_matches = existing.scalars().all()
+        if any(match.reviewer_decision == "confirmed" for match in existing_matches):
             continue
         
         best_match = None
@@ -79,6 +80,8 @@ async def propose_matches(
         
         # Create match if found
         if best_match and best_score >= 0.3:
+            if any(match.report_entry_ref == best_match.id for match in existing_matches):
+                continue
             match = SubmissionMatch(
                 receipt_ref=receipt.id,
                 report_entry_ref=best_match.id,
@@ -118,7 +121,7 @@ async def confirm_match(
     
     match.reviewer_decision = "confirmed"
     match.reviewer_id = reviewer_id
-    
+    await record_audit(db, entity_type="submission_match", entity_id=match.id, action="confirmed", actor_id=reviewer_id, details={"decision": "confirmed"})
     await db.commit()
     await db.refresh(match)
     
@@ -140,7 +143,7 @@ async def reject_match(
     
     match.reviewer_decision = "rejected"
     match.reviewer_id = reviewer_id
-    
+    await record_audit(db, entity_type="submission_match", entity_id=match.id, action="rejected", actor_id=reviewer_id, details={"decision": "rejected"})
     await db.commit()
     await db.refresh(match)
     

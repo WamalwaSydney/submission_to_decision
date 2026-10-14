@@ -32,7 +32,7 @@ def compute_receipt_hash(receipt_data: dict) -> str:
 async def get_chain_head(db: AsyncSession) -> str:
     """Get the hash of the most recent receipt (chain head)."""
     result = await db.execute(
-        text("SELECT hash FROM participation_receipts ORDER BY timestamp DESC LIMIT 1")
+        text("SELECT hash FROM participation_receipts ORDER BY chain_sequence DESC NULLS LAST, timestamp DESC, id DESC LIMIT 1")
     )
     row = result.first()
     return row[0] if row else GENESIS_HASH
@@ -48,8 +48,13 @@ async def create_receipt(
     author_name: Optional[str] = None
 ) -> ParticipationReceipt:
     """Create a new receipt with proper hash chaining."""
-    # Get chain head
+    # Serialize chain-head reads within the current transaction. Without this
+    # lock, concurrent submissions could observe the same previous hash and
+    # create competing branches.
+    await db.execute(text("SELECT pg_advisory_xact_lock(hashtext('participation_receipts_chain'))"))
     previous_hash = await get_chain_head(db)
+    sequence_result = await db.execute(text("SELECT COALESCE(MAX(chain_sequence), 0) + 1 FROM participation_receipts"))
+    chain_sequence = int(sequence_result.scalar_one())
     
     # Allocate the primary key before flush so the complete hash payload can
     # be computed before PostgreSQL validates the NOT NULL hash column.
@@ -73,6 +78,7 @@ async def create_receipt(
         submission_text=submission_text,
         timestamp=timestamp,
         previous_hash=previous_hash,
+        chain_sequence=chain_sequence,
         hash=compute_receipt_hash(hash_payload),
         lodging_status="pending",
         author_name_public=author_name if show_name else None
@@ -85,7 +91,8 @@ async def create_receipt(
         entity_type="receipt",
         entity_id=receipt.id,
         action="created",
-        details=f"Receipt {public_id} issued for {legislative_item_id}"
+        details=f"Receipt {public_id} issued for {legislative_item_id}",
+        actor_id=uuid.UUID(str(author_id)) if not isinstance(author_id, uuid.UUID) else author_id,
     )
     db.add(audit)
     
@@ -97,7 +104,7 @@ async def create_receipt(
 async def verify_chain(db: AsyncSession) -> dict:
     """Verify the entire hash chain integrity."""
     result = await db.execute(
-        text("SELECT * FROM participation_receipts ORDER BY timestamp ASC")
+        text("SELECT * FROM participation_receipts ORDER BY chain_sequence ASC NULLS LAST, timestamp ASC, id ASC")
     )
     receipts = result.fetchall()
     
