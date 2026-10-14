@@ -7,7 +7,7 @@ import {
   FileText, Clock, Building2, ArrowRight, ArrowLeft,
   FileCheck, Calendar, FileSearch, Gavel, Users, Download, Search,
   SlidersHorizontal, X, Home, WalletCards, Sprout, HeartPulse,
-  BusFront, Boxes, ChevronDown, Sparkles
+  BusFront, Boxes, ChevronDown, Sparkles, LayoutGrid
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import {
@@ -108,24 +108,71 @@ export function BillsListPage() {
             </div>
             <div className="text-sm font-bold text-surface-500"><span className="text-2xl font-black text-surface-900">{filteredBills.length}</span> of {state.bills.length} bills visible</div>
           </div>
-          <div className="relative mb-5">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-primary-500" />
-            <input
-              value={query}
-              onChange={event => setQuery(event.target.value)}
-              className="input-field !pl-12 !pr-12 !h-14 !text-base !rounded-2xl"
-              placeholder="Try “health”, “traffic”, “farmers”, a bill number, or a phrase..."
-              aria-label="Search bills"
-            />
-            {query && <button onClick={() => setQuery('')} aria-label="Clear search" className="absolute right-4 top-1/2 -translate-y-1/2 text-surface-400 hover:text-surface-700"><X className="h-5 w-5" /></button>}
-          </div>
-          <div className="flex items-center gap-2 mb-3 text-xs font-black uppercase tracking-wider text-surface-500"><SlidersHorizontal className="h-4 w-4" /> Browse by topic</div>
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
-            <button onClick={() => setCategory('All topics')} className={`text-left rounded-2xl border p-3 transition-all ${category === 'All topics' ? 'bg-surface-900 text-white border-surface-900 shadow-lg' : 'bg-white border-surface-200 text-surface-700 hover:border-primary-300 hover:-translate-y-0.5'}`}>
-              <div className="text-xl mb-2">⌘</div><div className="text-xs font-black leading-tight">All topics</div><div className={`text-[11px] mt-1 ${category === 'All topics' ? 'text-white/70' : 'text-surface-400'}`}>{state.bills.length} bills</div>
+          <div className="relative mb-6 w-full">
+          <Search className="absolute left-5 top-1/2 -translate-y-1/2 h-5 w-5 text-primary-500 pointer-events-none" />
+          <input
+            value={query}
+            onChange={event => setQuery(event.target.value)}
+            style={{ width: '100%' }}
+            className="input-field w-full !pl-14 !pr-12 !h-14 !text-base !rounded-2xl border border-surface-200 bg-white shadow-sm focus:border-primary-400 focus:ring-4 focus:ring-primary-100 outline-none transition-all"
+            placeholder="Try “health”, “traffic”, “farmers”, a bill number…"
+            aria-label="Search bills"
+          />
+          {query && (
+            <button
+              onClick={() => setQuery('')}
+              aria-label="Clear search"
+              className="absolute right-4 top-1/2 -translate-y-1/2 p-1 rounded-full text-surface-400 hover:text-surface-700 hover:bg-surface-100"
+            >
+              <X className="h-5 w-5" />
             </button>
-            {categoryMeta.slice(0, 5).map(item => { const Icon = item.icon; const count = state.bills.filter(bill => getCategory(bill.title) === item.name).length; return <button key={item.name} onClick={() => setCategory(category === item.name ? 'All topics' : item.name)} className={`text-left rounded-2xl border p-3 transition-all ${category === item.name ? `bg-gradient-to-br ${item.tone} text-white border-transparent shadow-lg -translate-y-0.5` : `bg-white ${item.soft} hover:-translate-y-0.5`}`}><Icon className="h-5 w-5 mb-2" /><div className="text-xs font-black leading-tight">{item.name}</div><div className={`text-[11px] mt-1 ${category === item.name ? 'text-white/75' : 'opacity-70'}`}>{count} {count === 1 ? 'bill' : 'bills'}</div></button>; })}
-          </div>
+          )}
+        </div>
+          <div className="flex items-center gap-2 mb-3 text-xs font-black uppercase tracking-wider text-surface-500"><SlidersHorizontal className="h-4 w-4" /> Browse by topic</div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+          {/* All topics */}
+          <button
+            onClick={() => setCategory('All topics')}
+            style={category === 'All topics' ? { backgroundColor: '#0f172a', borderColor: '#0f172a', color: '#ffffff' } : undefined}
+            className={`flex flex-col items-start justify-between min-h-[96px] text-left rounded-2xl border p-4 transition-all duration-200 ${
+              category === 'All topics'
+                ? 'shadow-lg -translate-y-0.5'
+                : 'bg-white border-surface-200 text-surface-700 hover:border-primary-300 hover:-translate-y-0.5 hover:shadow-md'
+            }`}
+          >
+            <LayoutGrid className="h-5 w-5" />
+            <div>
+              <div className="text-xs font-black leading-tight">All topics</div>
+              <div className="text-[11px] mt-1 opacity-70">{state.bills.length} {state.bills.length === 1 ? 'bill' : 'bills'}</div>
+            </div>
+          </button>
+
+          {/* Category tiles */}
+          {categoryMeta.slice(0, 5).map(item => {
+            const Icon = item.icon;
+            const count = state.bills.filter(bill => getCategory(bill.title) === item.name).length;
+            const active = category === item.name;
+            return (
+              <button
+                key={item.name}
+                onClick={() => setCategory(active ? 'All topics' : item.name)}
+                className={`flex flex-col items-start justify-between min-h-[96px] text-left rounded-2xl border p-4 transition-all duration-200 hover:-translate-y-0.5 ${
+                  active
+                    ? `bg-gradient-to-br ${item.tone} text-white border-transparent shadow-lg -translate-y-0.5`
+                    : `bg-white ${item.soft} hover:shadow-md`
+                }`}
+              >
+                <Icon className="h-5 w-5" />
+                <div>
+                  <div className="text-xs font-black leading-tight">{item.name}</div>
+                  <div className={`text-[11px] mt-1 ${active ? 'text-white/80' : 'opacity-70'}`}>
+                    {count} {count === 1 ? 'bill' : 'bills'}
+                  </div>
+                </div>
+              </button>
+            );
+          })}
+        </div>
         </div>
       </Card>
 
