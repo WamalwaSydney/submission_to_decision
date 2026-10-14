@@ -1,6 +1,6 @@
 # Database Models
 
-from sqlalchemy import Column, String, Text, Boolean, Float, Date, DateTime, ForeignKey, ARRAY, JSON, Integer
+from sqlalchemy import Column, String, Text, Boolean, Float, Date, DateTime, ForeignKey, ARRAY, JSON, Integer, BigInteger
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -62,6 +62,7 @@ class ParticipationReceipt(Base):
     timestamp = Column(DateTime(timezone=True), nullable=False)
     hash = Column(String(64), nullable=False)
     previous_hash = Column(String(64), nullable=False)
+    chain_sequence = Column(BigInteger, nullable=False, default=0)
     author_name_public = Column(String(255))
 
     author = relationship("User", back_populates="receipts")
@@ -179,4 +180,5 @@ class AuditLog(Base):
     entity_id = Column(UUID(as_uuid=True), nullable=False)
     action = Column(String(50), nullable=False)
     details = Column(Text, nullable=False)
+    actor_id = Column(UUID(as_uuid=True), ForeignKey("users.id"))
     timestamp = Column(DateTime(timezone=True), server_default=func.now())

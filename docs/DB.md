@@ -239,3 +239,7 @@ alembic upgrade head
 - WAL archiving for point-in-time recovery
 - Read replicas for public queries
 - Write master for receipts/matches
+
+## Current implementation note
+
+Migration `20261012_integrity_provenance` adds report checksum/storage/provenance fields, deterministic receipt sequence numbers, actor IDs for audit events, and PostgreSQL triggers that reject updates/deletes on `participation_receipts` and `audit_log`. Apply it with `alembic upgrade head` before using the new fields. `REPORT_STORAGE_DIR` must point to persistent storage in deployment; the default local directory is suitable only for development or a persistent mounted volume.

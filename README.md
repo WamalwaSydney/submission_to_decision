@@ -2,7 +2,7 @@
 
 A web application designed to help citizens trace public submissions on bills in Kenya's National and County Legislatures, from lodging to the committee's recorded treatment.
 
-> **Deployment status:** the app is deployed as three services: **Netlify** (Vite frontend), **Render** (FastAPI API, Docker) and **Neon** (PostgreSQL). The frontend reaches the API through the build-time `VITE_API_URL` variable. The Figma/export ZIP shared for review is a static UI capture, not the complete runnable application; the setup instructions assume the full project source tree described below is present in the repository.
+> **Deployment status:** deployment configuration and public URLs are documented, but live service health and end-to-end behavior are **not verified in this archive review**. The application is tested locally where noted below. The frontend reaches the API through the build-time `VITE_API_URL` variable. The Figma/export ZIP shared for review is a static UI capture, not the complete runnable application; the setup instructions assume the full project source tree described below is present in the repository.
 
 ## Project links
 
@@ -244,7 +244,7 @@ These are demo accounts, not production credentials. Never use real passwords in
 └── package.json
 ```
 
-Adjust this tree to match the repository exactly before submission, and do not list files that have not been committed. Add `netlify.toml`, `render.yaml`, an `alembic/` directory and `.env.example` once they exist.
+This archive includes the Alembic directory and `.env.example`. Deployment configuration should be supplied by the hosting environment or added before production deployment; do not claim a live deployment unless the frontend/API/database smoke test has been completed against the deployed services.
 
 ## Functional requirements (reported status)
 
@@ -254,16 +254,16 @@ Adjust this tree to match the repository exactly before submission, and do not l
 | FR2 | Append-only hash chain | Implemented | Implemented |
 | FR3 | Committee-report ingestion (PDF) | UI | Implemented |
 | FR4 | OCR fallback | — | Implemented |
-| FR5 | Match proposals | UI | Implemented |
+| FR5 | Match proposals generated after report ingestion | Implemented | Implemented |
 | FR6 | Human review | Implemented | Implemented |
 | FR7 | Receipt lookup and outcome trail | Implemented | Implemented |
 | FR8 | Notice adequacy tracker | Implemented | Implemented |
 | FR9 | Representative profiles | Implemented | Implemented |
-| FR10 | Offline drafts | Implemented | — |
+| FR10 | Offline drafts | Implemented; auto-sync added, live API verification pending | — |
 | FR11 | Moderation and appeals | Implemented | Implemented |
 | FR12 | Anonymized export | Implemented | Implemented |
 
-These statuses are based on the previous README. Before submission, verify each item against the pushed source and the live Netlify/Render deployment, and distinguish working end-to-end behavior from UI-only or simulated behavior.
+Report upload now generates idempotent match proposals for moderator review. Report entry correction and report verification are server-backed. Before submission, still distinguish working end-to-end behavior from UI-only or simulated behavior and complete a live smoke test if deployment is claimed.
 
 ## Status vocabulary
 
@@ -280,10 +280,12 @@ npm run build
 
 # Backend
 cd backend
-pytest tests/
+TEST_DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/participation_platform_test pytest tests/
 ```
 
-Key test areas include hash-chain tamper detection, append-only enforcement, role/endpoint permissions, OCR fallback, matching quality, and offline draft behavior. Only claim tests pass after running them in the submitted repository.
+The backend tests require a reachable PostgreSQL test database. If no test database is available, the database-dependent tests are skipped with an explicit reason rather than silently passing.
+
+Key test areas include hash-chain tamper detection, append-only enforcement, role/endpoint permissions, OCR fallback, matching quality, and offline draft behavior. Only claim tests pass after running them against a reachable PostgreSQL test database; tests skipped because of an unavailable database are not passing evidence.
 
 After each deployment, also run a manual smoke test against the live URLs: `/health` returns 200, a demo user can sign in, a receipt can be created and looked up, chain verification passes, and a moderator decision is saved. Authorization must be enforced on the server, not only by hiding UI navigation.
 
@@ -315,3 +317,24 @@ The Constitution of Kenya 2010, including Articles 10(2)(a), 118(1)(b), and 196,
 ## License
 
 © 2026 Participation Traceability Platform — Kenya Pilot. All rights reserved.
+
+## Evidence status (updated 2026-10-12)
+
+The project now distinguishes four evidence states:
+
+- **Implemented:** code path exists and is covered by a local unit/build check.
+- **Simulated:** seed records or synthetic PDF fixtures used only for demonstrations/regression tests.
+- **Evaluated:** a result produced from approved de-identified ground-truth or participant data.
+- **Not yet verified:** requires a PostgreSQL deployment, real source reports, approved labels, or human participants.
+
+### Current status
+
+| Area | Status | Evidence |
+|---|---|---|
+| Offline draft automatic synchronization | Implemented, not yet verified against a live API | `src/App.tsx`, `src/utils/offline.ts` |
+| Durable report storage and SHA-256 provenance | Implemented for configurable persistent storage; production object storage not yet verified | `backend/app/services/storage_service.py`, report metadata fields |
+| Native/scanned extraction fixtures | Implemented as synthetic regression fixtures | `evaluation/fixtures/` |
+| Database-level receipt/audit immutability | Implemented in Alembic migration; requires migration against PostgreSQL | `backend/alembic/versions/20261012_integrity_provenance.py` |
+| Precision/recall and ingestion evaluation | Evaluation scripts and empty approved-data templates implemented; results not yet evaluated | `evaluation/data/`, `evaluation/evaluate_*.py` |
+| Usability/SUS study | Instrument/template implemented; human study and results not yet conducted | `evaluation/data/usability_sessions.csv`, `docs/EVALUATION.md` |
+| Seed bills, profiles, receipts, reports | Simulated | `backend/app/seed.py`, `src/data/seed.ts` |
