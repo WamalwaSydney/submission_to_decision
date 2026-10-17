@@ -12,6 +12,7 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 import { Card, Badge, Label, InputField, DisclaimerBox, InfoBox, StatusBadge } from '../components/UI';
 import { confidenceClasses, confidenceBarClass, confidenceLabel } from '../utils/confidence';
+import { copyText } from '../utils/clipboard';
 
 function SubmissionStatusBadge({ status }: { status: SubmissionStatus }) {
   return StatusBadge({ status });
@@ -23,6 +24,7 @@ export function ReceiptLookupPage() {
   const { state, getSubmissionStatus } = useApp();
   const [remoteReceipt, setRemoteReceipt] = useState<any>(null);
   const [lookupError, setLookupError] = useState('');
+  const [copiedHash, setCopiedHash] = useState(false);
 
   useEffect(() => {
     if (!query) { setRemoteReceipt(null); return; }
@@ -213,9 +215,9 @@ export function ReceiptLookupPage() {
                     <div className="flex items-center justify-between mb-3">
                       <h3 className="text-xs font-black uppercase tracking-widest text-surface-400">Receipt Hash</h3>
                       <button
-                        onClick={() => navigator.clipboard?.writeText(receipt.hash)}
+                        onClick={async () => { const ok = await copyText(receipt.hash); setCopiedHash(ok); setTimeout(() => setCopiedHash(false), 2000); }}
                         className="p-1.5 rounded-lg text-surface-400 hover:text-white hover:bg-white/10 transition-colors"
-                        title="Copy"
+                        title={copiedHash ? 'Copied' : 'Copy receipt hash'}
                       >
                         <Copy className="h-3.5 w-3.5" />
                       </button>

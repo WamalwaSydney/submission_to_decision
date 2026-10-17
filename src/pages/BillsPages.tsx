@@ -1,11 +1,11 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import { getDaysOfNotice, getWindowLength } from '../data/seed';
 import { SubmissionStatus } from '../types';
 import {
   FileText, Clock, Building2, ArrowRight, ArrowLeft,
-  FileCheck, Calendar, FileSearch, Gavel, Users, Download
+  FileCheck, Calendar, FileSearch, Gavel, Users, Download, SlidersHorizontal, RotateCcw
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import {
@@ -44,156 +44,35 @@ function downloadReadableBillDocument(
 
 export function BillsListPage() {
   const { state } = useApp();
+  const [query, setQuery] = useState('');
+  const [committee, setCommittee] = useState('all');
+  const [institution, setInstitution] = useState('all');
+  const [stage, setStage] = useState('all');
+  const [outcome, setOutcome] = useState('all');
+  const [participation, setParticipation] = useState('all');
+  const [simulatedOnly, setSimulatedOnly] = useState(false);
+  const [sortBy, setSortBy] = useState('recent');
 
-  return (
-    <div className="space-y-10">
-      <div>
-        <div className="inline-flex items-center gap-2 mb-4">
-          <span className="w-8 h-px bg-gradient-to-r from-primary-500 to-accent-500 rounded-full" />
-          <span className="text-xs font-black uppercase tracking-[0.18em] text-primary-600">Legislative Tracking</span>
-        </div>
-        <h1 className="text-4xl md:text-5xl font-black tracking-tighter text-surface-900 mb-4">
-          Tracked <span className="gradient-text">Bills</span>
-        </h1>
-        <p className="text-lg text-surface-600 max-w-3xl leading-relaxed">
-          Browse legislation being tracked by the platform. Follow submissions, committee reports, and published outcomes.
-          All demo bills are clearly marked as simulated.
-        </p>
-      </div>
+  const getOutcome = (billId: string) => {
+    const match = state.matches.find(m => m.reviewer_decision === 'confirmed' && state.receipts.some(r => r.id === m.receipt_ref && r.legislative_item_id === billId));
+    return match ? (state.reportEntries.find(e => e.id === match.report_entry_ref)?.treatment || 'awaiting committee report') : 'awaiting committee report';
+  };
+  const committeeName = (bill: typeof state.bills[number]) => state.committees.find(c => c.id === bill.committee_id)?.name || `Unassigned — ${bill.institution}`;
+  const reset = () => { setQuery(''); setCommittee('all'); setInstitution('all'); setStage('all'); setOutcome('all'); setParticipation('all'); setSimulatedOnly(false); setSortBy('recent'); };
+  const bills = state.bills.filter(bill => {
+    const receipts = state.receipts.filter(r => r.legislative_item_id === bill.id);
+    const searchable = `${bill.title} ${bill.identifier} ${bill.institution} ${committeeName(bill)}`.toLowerCase();
+    return (!query || searchable.includes(query.toLowerCase())) && (committee === 'all' || bill.committee_id === committee) && (institution === 'all' || bill.institution === institution) && (stage === 'all' || bill.stage === stage) && (outcome === 'all' || getOutcome(bill.id) === outcome) && (participation === 'all' || (participation === 'with' ? receipts.length > 0 : receipts.length === 0)) && (!simulatedOnly || bill.is_simulated);
+  }).sort((a, b) => sortBy === 'title' ? a.title.localeCompare(b.title) : sortBy === 'submissions' ? state.receipts.filter(r => r.legislative_item_id === b.id).length - state.receipts.filter(r => r.legislative_item_id === a.id).length : (b.status_history?.[b.status_history.length - 1]?.date || '').localeCompare(a.status_history?.[a.status_history.length - 1]?.date || ''));
+  const groups = bills.reduce<Record<string, typeof bills>>((result, bill) => { (result[committeeName(bill)] ||= []).push(bill); return result; }, {});
 
-      <InfoBox className="!p-5 !max-w-5xl">
-        <div className="pl-3 flex items-start gap-3">
-          <div className="w-10 h-10 rounded-xl bg-primary-100 flex items-center justify-center text-primary-700 flex-shrink-0">
-            <Gavel className="h-5 w-5" />
-          </div>
-          <p className="text-sm font-semibold leading-relaxed">
-            <strong className="font-black">Note:</strong> Legislative tracking is national and unbounded.
-            However, citizen activity (submissions, receipts) is confined to the pilot counties: Nairobi and Trans Nzoia.
-          </p>
-        </div>
-      </InfoBox>
-
-      {/* Search/filter bar */}
-      <Card className="!p-5 md:!p-6">
-        <div className="flex flex-col md:flex-row gap-4">
-          <div className="flex-1">
-            <Label>Search bills</Label>
-            <InputField placeholder="Search by title, ID, or institution..." />
-          </div>
-          <div className="w-full md:w-56">
-            <Label>Institution</Label>
-            <select className="input-field">
-              <option>All institutions</option>
-              <option>National Assembly</option>
-              <option>Nairobi County Assembly</option>
-              <option>Trans Nzoia County Assembly</option>
-            </select>
-          </div>
-          <div className="w-full md:w-56">
-            <Label>Stage</Label>
-            <select className="input-field">
-              <option>All stages</option>
-              <option>First Reading</option>
-              <option>Second Reading</option>
-              <option>Committee Stage</option>
-              <option>Report Stage</option>
-            </select>
-          </div>
-        </div>
-      </Card>
-
-      <div className="space-y-4">
-        {state.bills.map((bill, idx) => {
-          const billReceipts = state.receipts.filter(r => r.legislative_item_id === bill.id);
-          const billNotices = state.notices.filter(n => n.bill_ref === bill.id);
-          const outcomes = (() => {
-            const counts: Record<string, number> = {};
-            billReceipts.forEach(r => {
-              const s = state.receipts.find(rr => rr.id === r.id);
-              if (s) {
-                const status = state.matches.find(m => m.receipt_ref === r.id && m.reviewer_decision === 'confirmed')
-                  ? state.reportEntries.find(e => e.id === state.matches.find(m => m.receipt_ref === r.id && m.reviewer_decision === 'confirmed')!.report_entry_ref)?.treatment
-                  : 'awaiting committee report';
-                counts[status || 'awaiting committee report'] = (counts[status || 'awaiting committee report'] || 0) + 1;
-              }
-            });
-            return counts;
-          })();
-          const topOutcome = Object.entries(outcomes).sort((a, b) => b[1] - a[1])[0];
-
-          return (
-            <motion.div
-              key={bill.id}
-              initial={{ opacity: 0, y: 16 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true, margin: '-40px' }}
-              transition={{ duration: 0.4, delay: idx * 0.04 }}
-            >
-              <Link to={`/bills/${bill.id}`} className="card block !p-6 md:!p-7 group relative overflow-hidden">
-                {/* Hover gradient */}
-                <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none"
-                     style={{ background: 'radial-gradient(ellipse at top right, rgb(58 92 255 / 0.06), transparent 55%)' }} />
-
-                <div className="relative flex items-start justify-between gap-4">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex flex-wrap items-center gap-2 mb-3">
-                      <h2 className="text-xl md:text-[22px] font-black text-surface-900 tracking-tight leading-snug">
-                        {bill.title}
-                      </h2>
-                      {bill.is_simulated && <Badge variant="gray" className="!text-[10px]">SIMULATED</Badge>}
-                    </div>
-
-                    <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm mb-5">
-                      <span className="flex items-center gap-1.5 font-semibold text-surface-600">
-                        <Building2 className="h-4 w-4 text-primary-500" />
-                        {bill.institution}
-                      </span>
-                      <span className="flex items-center gap-1.5 font-semibold text-surface-600">
-                        <Clock className="h-4 w-4 text-warm-500" />
-                        {bill.stage}
-                      </span>
-                      <span className="font-mono text-xs font-bold text-surface-500 bg-surface-100 px-2 py-0.5 rounded-md border border-surface-200">
-                        {bill.identifier}
-                      </span>
-                    </div>
-
-                    {/* Stats mini row */}
-                    <div className="flex flex-wrap gap-3">
-                      <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-primary-50/80 border border-primary-100 text-primary-700 text-xs font-bold">
-                        <Users className="h-3.5 w-3.5" />
-                        {billReceipts.length} submission{billReceipts.length !== 1 ? 's' : ''}
-                      </div>
-                      <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-accent-50/80 border border-accent-100 text-accent-700 text-xs font-bold">
-                        <Calendar className="h-3.5 w-3.5" />
-                        {billNotices.length} notice{billNotices.length !== 1 ? 's' : ''}
-                      </div>
-                      <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-warm-50/80 border border-warm-200 text-warm-700 text-xs font-bold">
-                        <FileText className="h-3.5 w-3.5" />
-                        {(bill.documents || []).length} document{(bill.documents || []).length !== 1 ? 's' : ''}
-                      </div>
-                      {topOutcome && (
-                        <div className="ml-auto">
-                          <SubmissionStatusBadge status={topOutcome[0] as SubmissionStatus} />
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="flex-shrink-0 self-center">
-                    <div className="w-11 h-11 md:w-12 md:h-12 rounded-2xl border border-surface-200 flex items-center justify-center text-surface-400 group-hover:bg-gradient-to-br group-hover:from-primary-600 group-hover:to-accent-500 group-hover:border-transparent group-hover:text-white group-hover:shadow-lg group-hover:shadow-primary-500/30 transition-all duration-300 group-hover:-rotate-12">
-                      <ArrowRight className="h-5 w-5" />
-                    </div>
-                  </div>
-                </div>
-              </Link>
-            </motion.div>
-          );
-        })}
-      </div>
-    </div>
-  );
+  return <div className="space-y-10">
+    <div><div className="inline-flex items-center gap-2 mb-4"><span className="w-8 h-px bg-gradient-to-r from-primary-500 to-accent-500 rounded-full" /><span className="text-xs font-black uppercase tracking-[0.18em] text-primary-600">Legislative Tracking</span></div><h1 className="text-4xl md:text-5xl font-black tracking-tighter text-surface-900 mb-4">Tracked <span className="gradient-text">Bills</span></h1><p className="text-lg text-surface-600 max-w-3xl leading-relaxed">Browse legislation organized by committee. Follow submissions, committee reports, matching evidence, and published outcomes.</p></div>
+    <InfoBox className="!p-5 !max-w-5xl"><div className="pl-3 flex items-start gap-3"><div className="w-10 h-10 rounded-xl bg-primary-100 flex items-center justify-center text-primary-700 flex-shrink-0"><Gavel className="h-5 w-5" /></div><p className="text-sm font-semibold leading-relaxed"><strong className="font-black">Note:</strong> Legislative tracking is national and unbounded. Citizen activity is confined to the pilot counties: Nairobi and Trans Nzoia.</p></div></InfoBox>
+    <Card className="!p-5 md:!p-6"><div className="flex items-center justify-between gap-3 mb-5"><div className="flex items-center gap-2"><SlidersHorizontal className="h-5 w-5 text-primary-600" /><h2 className="text-lg font-black">Advanced filters</h2></div><button type="button" onClick={reset} className="btn-secondary !py-2 !px-3 text-xs"><RotateCcw className="h-3.5 w-3.5" /> Reset</button></div><div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4"><div className="lg:col-span-2"><Label>Search</Label><InputField value={query} onChange={e => setQuery(e.target.value)} placeholder="Title, bill ID, institution, or committee" /></div><div><Label>Committee</Label><select className="input-field" value={committee} onChange={e => setCommittee(e.target.value)}><option value="all">All committees</option>{state.committees.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div><div><Label>Institution</Label><select className="input-field" value={institution} onChange={e => setInstitution(e.target.value)}><option value="all">All institutions</option>{Array.from(new Set(state.bills.map(b => b.institution))).map(i => <option key={i} value={i}>{i}</option>)}</select></div><div><Label>Stage</Label><select className="input-field" value={stage} onChange={e => setStage(e.target.value)}><option value="all">All stages</option>{Array.from(new Set(state.bills.map(b => b.stage))).map(s => <option key={s} value={s}>{s}</option>)}</select></div><div><Label>Outcome</Label><select className="input-field" value={outcome} onChange={e => setOutcome(e.target.value)}><option value="all">All outcomes</option>{['awaiting committee report', 'adopted', 'amended', 'rejected with reasons', 'not addressed'].map(o => <option key={o} value={o}>{o}</option>)}</select></div><div><Label>Participation</Label><select className="input-field" value={participation} onChange={e => setParticipation(e.target.value)}><option value="all">All bills</option><option value="with">With submissions</option><option value="without">Without submissions</option></select></div><div><Label>Sort by</Label><select className="input-field" value={sortBy} onChange={e => setSortBy(e.target.value)}><option value="recent">Most recently updated</option><option value="title">Title A–Z</option><option value="submissions">Most submissions</option></select></div></div><label className="inline-flex items-center gap-2 mt-4 text-sm font-semibold text-surface-700"><input type="checkbox" checked={simulatedOnly} onChange={e => setSimulatedOnly(e.target.checked)} className="h-4 w-4 rounded border-surface-300 text-primary-600" /> Show simulated bills only</label></Card>
+    <div className="space-y-10">{Object.entries(groups).map(([name, groupedBills]) => <section key={name}><div className="flex items-center justify-between gap-4 mb-4"><div><p className="text-xs font-black uppercase tracking-[0.18em] text-primary-600">Committee</p><h2 className="text-2xl font-black text-surface-900">{name}</h2></div><span className="rounded-full bg-primary-50 border border-primary-100 px-3 py-1 text-xs font-black text-primary-700">{groupedBills.length} bill{groupedBills.length === 1 ? '' : 's'}</span></div><div className="space-y-4">{groupedBills.map((bill, idx) => { const receipts = state.receipts.filter(r => r.legislative_item_id === bill.id); const notices = state.notices.filter(n => n.bill_ref === bill.id); const status = getOutcome(bill.id); return <motion.div key={bill.id} initial={{ opacity: 0, y: 16 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true, margin: '-40px' }} transition={{ duration: 0.4, delay: idx * 0.04 }}><Link to={`/bills/${bill.id}`} className="card block !p-6 md:!p-7 group relative overflow-hidden"><div className="relative flex items-start justify-between gap-4"><div className="flex-1 min-w-0"><div className="flex flex-wrap items-center gap-2 mb-3"><h2 className="text-xl md:text-[22px] font-black text-surface-900 tracking-tight leading-snug">{bill.title}</h2>{bill.is_simulated && <Badge variant="gray" className="!text-[10px]">SIMULATED</Badge>}</div><div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm mb-5"><span className="flex items-center gap-1.5 font-semibold text-surface-600"><Building2 className="h-4 w-4 text-primary-500" />{bill.institution}</span><span className="flex items-center gap-1.5 font-semibold text-surface-600"><Clock className="h-4 w-4 text-warm-500" />{bill.stage}</span><span className="font-mono text-xs font-bold text-surface-500 bg-surface-100 px-2 py-0.5 rounded-md border border-surface-200">{bill.identifier}</span></div><div className="flex flex-wrap gap-3"><span className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-primary-50/80 border border-primary-100 text-primary-700 text-xs font-bold"><Users className="h-3.5 w-3.5" />{receipts.length} submission{receipts.length !== 1 ? 's' : ''}</span><span className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-accent-50/80 border border-accent-100 text-accent-700 text-xs font-bold"><Calendar className="h-3.5 w-3.5" />{notices.length} notice{notices.length !== 1 ? 's' : ''}</span><span className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-warm-50/80 border border-warm-200 text-warm-700 text-xs font-bold"><FileText className="h-3.5 w-3.5" />{(bill.documents || []).length} document{(bill.documents || []).length !== 1 ? 's' : ''}</span><div className="ml-auto"><SubmissionStatusBadge status={status as SubmissionStatus} /></div></div></div><div className="flex-shrink-0 self-center"><div className="w-11 h-11 md:w-12 md:h-12 rounded-2xl border border-surface-200 flex items-center justify-center text-surface-400 group-hover:bg-gradient-to-br group-hover:from-primary-600 group-hover:to-accent-500 group-hover:border-transparent group-hover:text-white transition-all"><ArrowRight className="h-5 w-5" /></div></div></div></Link></motion.div>; })}</div></section>)}{!bills.length && <Card className="!p-10 text-center"><FileSearch className="h-12 w-12 mx-auto text-surface-300 mb-3" /><h2 className="text-xl font-black">No bills match these filters</h2><p className="text-surface-500 mt-1">Try widening the committee, stage, outcome, or participation filters.</p></Card>}</div>
+  </div>;
 }
-
 export function BillPage() {
   const { id } = useParams<{ id: string }>();
   const { state, getSubmissionStatus, getBillOutcomes } = useApp();
@@ -354,7 +233,7 @@ export function BillPage() {
                     {match && (
                       <span className="text-accent-700 flex items-center gap-1 bg-accent-50 px-2 py-0.5 rounded-md border border-accent-100">
                         <FileCheck className="h-3 w-3" />
-                        <span className={`rounded-full border px-2 py-1 text-xs font-black ${confidenceClasses(match.confidence_score)}`}>{confidenceLabel(match.confidence_score)} confidence · {(match.confidence_score * 100).toFixed(0)}%</span>
+                        Matched ({match.match_method}, {(match.confidence_score * 100).toFixed(0)}%)
                       </span>
                     )}
                   </div>

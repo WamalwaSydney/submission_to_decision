@@ -12,6 +12,7 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 import confetti from 'canvas-confetti';
 import { Card, Label, InputField, DisclaimerBox, InfoBox } from '../components/UI';
+import { copyText } from '../utils/clipboard';
 
 export function SubmitViewPage() {
   const [searchParams] = useSearchParams();
@@ -26,6 +27,7 @@ export function SubmitViewPage() {
   const [offlineDrafts, setOfflineDrafts] = useState<OfflineDraft[]>([]);
   const [savingDraft, setSavingDraft] = useState(false);
   const [draftSaved, setDraftSaved] = useState(false);
+  const [copiedReceipt, setCopiedReceipt] = useState(false);
 
   useEffect(() => {
     getUnsyncedDrafts().then(setOfflineDrafts);
@@ -193,11 +195,11 @@ export function SubmitViewPage() {
                     </p>
                   </div>
                   <button
-                    onClick={() => navigator.clipboard?.writeText(success.publicId)}
+                    onClick={async () => { const ok = await copyText(success.publicId); setCopiedReceipt(ok); setTimeout(() => setCopiedReceipt(false), 2000); }}
                     className="btn-secondary !py-2 !px-3 self-start"
                     title="Copy receipt ID"
                   >
-                    <Copy className="h-4 w-4" /> Copy
+                    <Copy className="h-4 w-4" /> {copiedReceipt ? 'Copied' : 'Copy'}
                   </button>
                 </div>
                 <p className="text-sm font-semibold text-surface-600 leading-relaxed">
@@ -384,8 +386,8 @@ export function SubmitViewPage() {
               id="submission-text"
               value={submissionText}
               onChange={e => setSubmissionText(e.target.value)}
-              rows={7}
-              className="input-field"
+              rows={14}
+              className="input-field min-h-64 resize-y leading-relaxed"
               placeholder="Write your views on this bill here. Be specific, constructive, and clear about what you'd like to see changed or retained."
               required
             />
