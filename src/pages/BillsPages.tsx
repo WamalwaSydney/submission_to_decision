@@ -8,6 +8,7 @@ import {
   FileCheck, Calendar, FileSearch, Gavel, Users, Download, SlidersHorizontal, RotateCcw
 } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, PieChart, Pie, Cell } from 'recharts';
 import {
   Card, Badge, InfoBox, DisclaimerBox, SectionHeader,
   Label, InputField, StatCard, StatusBadge
@@ -95,6 +96,15 @@ export function BillPage() {
   const billNotices = state.notices.filter(n => n.bill_ref === bill.id);
   const billReports = state.reports.filter(r => r.bill_ref === bill.id);
   const outcomes = getBillOutcomes(bill.id);
+  const billMatches = state.matches.filter(m => billReceipts.some(r => r.id === m.receipt_ref));
+  const confirmedMatches = billMatches.filter(m => m.reviewer_decision === 'confirmed');
+  const averageConfidence = billMatches.length ? billMatches.reduce((sum, m) => sum + m.confidence_score, 0) / billMatches.length : 0;
+  const confidenceBands = [
+    { name: 'High', value: billMatches.filter(m => m.confidence_score >= 0.75).length, color: '#22c55e' },
+    { name: 'Moderate', value: billMatches.filter(m => m.confidence_score >= 0.5 && m.confidence_score < 0.75).length, color: '#f59e0b' },
+    { name: 'Low', value: billMatches.filter(m => m.confidence_score < 0.5).length, color: '#ef4444' },
+  ];
+  const outcomeChart = outcomes.map(o => ({ name: o.status.replace(' with reasons', ''), submissions: o.count }));
 
   return (
     <div className="w-full min-w-0 space-y-8">
@@ -164,6 +174,25 @@ export function BillPage() {
           <p className="text-sm font-semibold text-surface-600">
             Total submissions: <span className="font-black text-surface-900">{billReceipts.length}</span>. Each figure links to its underlying basis (bill/clause ref, timestamp, status).
           </p>
+        </div>
+      </Card>
+
+      {/* Bill statistics */}
+      <Card className="!p-7 md:!p-8">
+        <div className="mb-6">
+          <div className="inline-flex items-center gap-2 mb-2"><FileCheck className="h-4 w-4 text-primary-600" /><span className="text-xs font-black uppercase tracking-[0.18em] text-primary-600">Bill analytics</span></div>
+          <h2 className="text-2xl md:text-3xl font-black text-surface-900 tracking-tight">Graphical Statistics</h2>
+          <p className="text-sm text-surface-500 mt-2">A visual summary of participation, recorded outcomes, and matching confidence for this bill.</p>
+        </div>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-8">
+          <div className="rounded-2xl bg-primary-50 border border-primary-100 p-4"><p className="text-xs font-black uppercase tracking-wider text-primary-700">Submissions</p><p className="text-3xl font-black text-primary-900 mt-1">{billReceipts.length}</p></div>
+          <div className="rounded-2xl bg-accent-50 border border-accent-100 p-4"><p className="text-xs font-black uppercase tracking-wider text-accent-700">Matched</p><p className="text-3xl font-black text-accent-900 mt-1">{confirmedMatches.length}</p></div>
+          <div className="rounded-2xl bg-warm-50 border border-warm-100 p-4"><p className="text-xs font-black uppercase tracking-wider text-warm-700">Reports</p><p className="text-3xl font-black text-warm-900 mt-1">{billReports.length}</p></div>
+          <div className="rounded-2xl bg-surface-100 border border-surface-200 p-4"><p className="text-xs font-black uppercase tracking-wider text-surface-600">Avg confidence</p><p className="text-3xl font-black text-surface-900 mt-1">{billMatches.length ? `${Math.round(averageConfidence * 100)}%` : '—'}</p></div>
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          <div><h3 className="font-black text-surface-900 mb-4">Submission outcomes</h3><div className="h-64">{billReceipts.length ? <ResponsiveContainer width="100%" height="100%"><BarChart data={outcomeChart} margin={{ top: 8, right: 12, left: -20, bottom: 8 }}><CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" /><XAxis dataKey="name" tick={{ fontSize: 11 }} interval={0} angle={-15} textAnchor="end" height={45} /><YAxis allowDecimals={false} tick={{ fontSize: 11 }} /><Tooltip /><Bar dataKey="submissions" fill="#3a5cff" radius={[6, 6, 0, 0]} /></BarChart></ResponsiveContainer> : <div className="h-full flex items-center justify-center rounded-2xl bg-surface-50 text-sm text-surface-500">No submission data yet.</div>}</div></div>
+          <div><h3 className="font-black text-surface-900 mb-4">Match confidence bands</h3><div className="h-64">{billMatches.length ? <ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={confidenceBands} dataKey="value" nameKey="name" cx="50%" cy="45%" innerRadius={55} outerRadius={85} paddingAngle={3} label={({ name, value }) => `${name}: ${value}`}><Cell fill="#22c55e" /><Cell fill="#f59e0b" /><Cell fill="#ef4444" /></Pie><Tooltip /></PieChart></ResponsiveContainer> : <div className="h-full flex items-center justify-center rounded-2xl bg-surface-50 text-sm text-surface-500">Matching has not been run yet.</div>}</div><div className="flex justify-center gap-4 text-xs font-bold text-surface-600"><span><i className="inline-block w-2.5 h-2.5 rounded-full bg-green-500 mr-1" />High ≥75%</span><span><i className="inline-block w-2.5 h-2.5 rounded-full bg-amber-500 mr-1" />Moderate</span><span><i className="inline-block w-2.5 h-2.5 rounded-full bg-red-500 mr-1" />Low</span></div></div>
         </div>
       </Card>
 
