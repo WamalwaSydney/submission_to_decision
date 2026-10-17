@@ -25,7 +25,15 @@ export const api = {
   committees: () => apiFetch<{ committees: any[] }>('/committees'),
   createCommittee: (data: { name: string; institution: string; description?: string; contact_email?: string; account_name: string; account_email: string; account_password: string }) => apiFetch<any>('/committees', { method: 'POST', body: JSON.stringify(data) }),
   committeeBills: () => apiFetch<{ bills: any[] }>('/committees/me/bills'),
-  ingestBill: (data: { title: string; identifier: string; stage: string; source_url?: string }) => apiFetch<any>('/committees/me/bills', { method: 'POST', body: JSON.stringify(data) }),
+  ingestBill: (data: { title: string; identifier: string; stage: string; source_url?: string; file?: File | null }) => {
+    const form = new FormData();
+    form.append('title', data.title);
+    form.append('identifier', data.identifier);
+    form.append('stage', data.stage);
+    if (data.source_url) form.append('source_url', data.source_url);
+    if (data.file) form.append('file', data.file);
+    return apiFetch<any>('/committees/me/bills', { method: 'POST', body: form });
+  },
   billFlow: (billId: string) => apiFetch<any>(`/bills/${encodeURIComponent(billId)}/flow`),
   users: () => apiFetch<{ users: User[] }>('/users'),
   login: (email: string, password: string) => apiFetch<LoginResponse>('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),

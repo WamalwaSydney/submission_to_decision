@@ -62,6 +62,15 @@ const publicLinks = [
   { to: '/research/export', label: 'Public Data', icon: Database },
 ];
 
+const publicLinksByRole: Record<string, typeof publicLinks> = {
+  citizen: publicLinks,
+  // Officers need to see the public bill record, but not public verification
+  // and research tools that are unrelated to their operational workspace.
+  committee_officer: publicLinks.filter(link => ['/','/bills','/notices'].includes(link.to)),
+  reviewer: publicLinks.filter(link => ['/','/bills','/receipt-lookup'].includes(link.to)),
+  administrator: publicLinks.filter(link => ['/','/bills'].includes(link.to)),
+};
+
 const authenticatedLinksMap: Record<string, { to: string; label: string; icon: any }[]> = {
   citizen: [
     { to: '/submit', label: 'Submit View', icon: MessageSquarePlus },
@@ -97,8 +106,11 @@ export function Layout({ children }: { children: React.ReactNode }) {
     ? authenticatedLinksMap[state.currentUser.role] || []
     : [];
 
+  const visiblePublicLinks = state.currentUser
+    ? publicLinksByRole[state.currentUser.role] || []
+    : publicLinks;
   const allNavLinks = [
-    ...publicLinks.slice(0, 4),
+    ...visiblePublicLinks,
     ...currentRoleLinks,
   ];
 

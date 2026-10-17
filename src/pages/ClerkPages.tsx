@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { api } from '../api/endpoints';
-import { Upload, FileText, CheckCircle2, AlertTriangle, ChevronDown, Plus, Database, FileCheck2, X } from 'lucide-react';
+import { Upload, FileUp, FileText, CheckCircle2, AlertTriangle, ChevronDown, Plus, Database, FileCheck2, X } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { Card, InfoBox, Badge, Label, InputField, SelectField } from '../components/UI';
 
@@ -271,7 +271,7 @@ export function CommitteeOfficerIngestionPage() {
                 type="button"
                 onClick={handleUpload}
                 disabled={!selectedBill || !selectedFile || uploading}
-                className="btn-primary inline-flex items-center gap-2"
+                className="btn-primary inline-flex items-center justify-center gap-2 min-w-48"
               >
                 {uploading ? (
                   <>
@@ -280,7 +280,7 @@ export function CommitteeOfficerIngestionPage() {
                   </>
                 ) : (
                   <>
-                    <Upload className="h-4 w-4" /> Upload &amp; Extract
+                    <FileUp className="h-4 w-4 shrink-0" strokeWidth={2.5} /> Upload &amp; Extract
                   </>
                 )}
               </button>

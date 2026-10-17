@@ -387,7 +387,7 @@ export function SubmitViewPage() {
               value={submissionText}
               onChange={e => setSubmissionText(e.target.value)}
               rows={14}
-              className="input-field min-h-64 resize-y leading-relaxed"
+              className="input-field w-full min-h-64 resize-y leading-relaxed"
               placeholder="Write your views on this bill here. Be specific, constructive, and clear about what you'd like to see changed or retained."
               required
             />

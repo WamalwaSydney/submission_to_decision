@@ -222,16 +222,53 @@ async def committee_bills(db: AsyncSession = Depends(get_db), current_user: User
     return {"bills": [to_dict(b) for b in result.scalars().all()]}
 
 @router.post("/committees/me/bills")
-async def committee_ingest_bill(payload: BillCreate, db: AsyncSession = Depends(get_db), current_user: User = Depends(require_role("committee_officer"))):
+async def committee_ingest_bill(
+    title: str = Form(...),
+    identifier: str = Form(...),
+    stage: str = Form("Introduced"),
+    source_url: Optional[str] = Form(None),
+    file: Optional[UploadFile] = File(None),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_role("committee_officer")),
+):
     if not current_user.committee_id:
         raise HTTPException(status_code=409, detail="Committee account is not linked to a committee")
-    duplicate = await db.execute(select(LegislativeItem).where(LegislativeItem.identifier == payload.identifier.strip()))
+    clean_title = title.strip()
+    clean_identifier = identifier.strip()
+    if not clean_title or not clean_identifier:
+        raise HTTPException(status_code=422, detail="Bill title and identifier are required")
+    duplicate = await db.execute(select(LegislativeItem).where(LegislativeItem.identifier == clean_identifier))
     if duplicate.scalar_one_or_none():
         raise HTTPException(status_code=409, detail="A bill with this identifier already exists")
     committee_result = await db.execute(select(Committee).where(Committee.id == current_user.committee_id))
     committee = committee_result.scalar_one_or_none()
-    bill = LegislativeItem(title=payload.title.strip(), identifier=payload.identifier.strip(), institution=committee.institution, stage=payload.stage, documents=payload.documents, source_url=payload.source_url, source_status=payload.source_status or "committee-ingested", source_updated_at=date.today(), committee_id=committee.id, is_simulated=False)
-    bill.status_history = [{"date": date.today().isoformat(), "stage": payload.stage, "note": "Bill ingested by committee"}]
+    if not committee:
+        raise HTTPException(status_code=409, detail="The linked committee no longer exists")
+
+    documents = []
+    if file:
+        is_pdf = file.content_type == "application/pdf" or (file.filename or "").lower().endswith(".pdf")
+        if not is_pdf:
+            raise HTTPException(status_code=422, detail="Bill documents must be PDF files")
+        content = await file.read()
+        if len(content) > 50 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="The bill document must be 50 MB or smaller")
+        stored = storage_service.persist_report(content, file.filename or "bill.pdf")
+        documents.append({"name": file.filename or "bill.pdf", **stored})
+
+    bill = LegislativeItem(
+        title=clean_title,
+        identifier=clean_identifier,
+        institution=committee.institution,
+        stage=stage,
+        documents=documents,
+        source_url=source_url.strip() if source_url else None,
+        source_status="committee-ingested",
+        source_updated_at=date.today(),
+        committee_id=committee.id,
+        is_simulated=False,
+    )
+    bill.status_history = [{"date": date.today().isoformat(), "stage": stage, "note": "Bill ingested by committee"}]
     db.add(bill); await db.flush()
     await record_audit(db, entity_type="legislative_item", entity_id=bill.id, action="ingested_by_committee", actor_id=current_user.id, details={"committee_id": str(committee.id), "identifier": bill.identifier})
     await db.commit(); await db.refresh(bill)

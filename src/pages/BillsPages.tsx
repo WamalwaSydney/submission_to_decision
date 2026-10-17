@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import { getDaysOfNotice, getWindowLength } from '../data/seed';
@@ -14,6 +14,7 @@ import {
   Label, InputField, StatCard, StatusBadge
 } from '../components/UI';
 import { confidenceClasses, confidenceLabel } from '../utils/confidence';
+import { api } from '../api/endpoints';
 
 function SubmissionStatusBadge({ status }: { status: SubmissionStatus }) {
   return StatusBadge({ status });
@@ -44,7 +45,7 @@ function downloadReadableBillDocument(
 }
 
 export function BillsListPage() {
-  const { state } = useApp();
+  const { state, dispatch } = useApp();
   const [query, setQuery] = useState('');
   const [committee, setCommittee] = useState('all');
   const [institution, setInstitution] = useState('all');
@@ -53,6 +54,21 @@ export function BillsListPage() {
   const [participation, setParticipation] = useState('all');
   const [simulatedOnly, setSimulatedOnly] = useState(false);
   const [sortBy, setSortBy] = useState('recent');
+
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([api.committees(), api.bills()]).then(([committeeResponse, billResponse]) => {
+      if (cancelled) return;
+      const payload: { committees?: typeof committeeResponse.committees; bills?: typeof billResponse.bills } = {};
+      if (committeeResponse.committees?.length) payload.committees = committeeResponse.committees;
+      if (billResponse.bills?.length) payload.bills = billResponse.bills;
+      dispatch({
+        type: 'HYDRATE',
+        payload,
+      });
+    }).catch(() => { /* The cached/bootstrap data remains usable. */ });
+    return () => { cancelled = true; };
+  }, [dispatch]);
 
   const getOutcome = (billId: string) => {
     const match = state.matches.find(m => m.reviewer_decision === 'confirmed' && state.receipts.some(r => r.id === m.receipt_ref && r.legislative_item_id === billId));
