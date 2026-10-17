@@ -34,6 +34,10 @@ class RegisterRequest(BaseModel):
     email: str
     password: str
     role: str = "citizen"
+    committee_name: Optional[str] = None
+    institution: Optional[str] = None
+    committee_description: Optional[str] = None
+    committee_contact_email: Optional[str] = None
 
 
 class CommitteeCreate(BaseModel):
@@ -95,20 +99,70 @@ async def login(payload: LoginRequest, db: AsyncSession = Depends(get_db)):
 
 @router.post("/auth/register")
 async def register(payload: RegisterRequest, db: AsyncSession = Depends(get_db)):
-    if payload.role not in {"citizen"}:
-        raise HTTPException(status_code=400, detail="Only citizen accounts can self-register")
+    allowed_roles = {"citizen", "committee_officer", "reviewer", "administrator"}
+    if payload.role not in allowed_roles:
+        raise HTTPException(status_code=400, detail="Unsupported account role")
     if len(payload.password) < 8:
         raise HTTPException(status_code=422, detail="Password must be at least 8 characters")
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="Name is required")
     email = payload.email.strip().lower()
+    if not email:
+        raise HTTPException(status_code=422, detail="Email is required")
     result = await db.execute(select(User).where(User.email == email))
     if result.scalar_one_or_none():
         raise HTTPException(status_code=409, detail="An account with that email already exists")
-    user = User(name=payload.name.strip(), email=email, role=payload.role, password_hash=get_password_hash(payload.password), status="active")
+
+    # A committee is an organization; the registering committee officer is the
+    # human account linked to it. Provisioning it here prevents an officer from
+    # being created without the organization needed by the committee workspace.
+    committee = None
+    if payload.role == "committee_officer":
+        committee_name = (payload.committee_name or f"{name}'s Committee").strip()
+        institution = (payload.institution or "National Assembly").strip()
+        if not committee_name or not institution:
+            raise HTTPException(status_code=422, detail="Committee name and institution are required for committee officers")
+        existing_committee = await db.execute(select(Committee).where(Committee.name == committee_name))
+        if existing_committee.scalar_one_or_none():
+            raise HTTPException(status_code=409, detail="A committee with that name already exists")
+        committee = Committee(
+            name=committee_name,
+            institution=institution,
+            description=payload.committee_description,
+            contact_email=(payload.committee_contact_email or email).strip(),
+            status="active",
+        )
+        db.add(committee)
+        await db.flush()
+
+    user = User(
+        name=name,
+        email=email,
+        role=payload.role,
+        password_hash=get_password_hash(payload.password),
+        status="active",
+        committee_id=committee.id if committee else None,
+    )
     db.add(user)
+    await db.flush()
+    if committee:
+        committee.created_by = user.id
+        await record_audit(
+            db,
+            entity_type="committee",
+            entity_id=committee.id,
+            action="created_during_registration",
+            actor_id=user.id,
+            details={"name": committee.name, "institution": committee.institution},
+        )
     await db.commit()
     await db.refresh(user)
     token = create_access_token({"sub": str(user.id)})
-    return {"access_token": token, "token_type": "bearer", "user": public_user(user)}
+    response = {"access_token": token, "token_type": "bearer", "user": public_user(user)}
+    if committee:
+        response["committee"] = to_dict(committee)
+    return response
 
 
 @router.get("/auth/me")

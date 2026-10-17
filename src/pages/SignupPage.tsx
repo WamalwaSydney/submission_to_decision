@@ -4,15 +4,18 @@ import { Alert, Box, IconButton, InputAdornment, MenuItem, TextField, Typography
 import { ArrowRight, Eye, EyeOff, LockKeyhole, UserRoundPlus } from 'lucide-react';
 import { Card } from '../components/UI';
 import { useApp } from '../context/AppContext';
-import { api } from '../api/endpoints';
+import { api, SignupRole } from '../api/endpoints';
 
-type PublicSignupRole = 'citizen' | 'citizen';
+type PublicSignupRole = SignupRole;
 
 const ROLE_OPTIONS: { value: PublicSignupRole; label: string }[] = [
   { value: 'citizen', label: 'Citizen / public participant' },
+  { value: 'committee_officer', label: 'Committee Officer' },
+  { value: 'reviewer', label: 'Independent Reviewer' },
+  { value: 'administrator', label: 'Platform Administrator' },
 ];
 
-const ELEVATED: PublicSignupRole[] = [];
+const ELEVATED: PublicSignupRole[] = ['committee_officer', 'reviewer', 'administrator'];
 
 export function SignupPage() {
   const { dispatch } = useApp();
@@ -20,6 +23,9 @@ export function SignupPage() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [role, setRole] = useState<PublicSignupRole>('citizen');
+  const [committeeName, setCommitteeName] = useState('');
+  const [institution, setInstitution] = useState('National Assembly');
+  const [committeeDescription, setCommitteeDescription] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -48,7 +54,12 @@ export function SignupPage() {
 
     setSubmitting(true);
     try {
-      const response = await api.register(normalizedName, normalizedEmail, password, role);
+      const response = await api.register(normalizedName, normalizedEmail, password, role, role === 'committee_officer' ? {
+        committee_name: committeeName.trim() || undefined,
+        institution,
+        committee_description: committeeDescription.trim() || undefined,
+        committee_contact_email: normalizedEmail,
+      } : undefined);
       localStorage.setItem('access_token', response.access_token);
       localStorage.setItem('current_user', JSON.stringify(response.user));
       dispatch({ type: 'SET_USER', payload: response.user });
@@ -123,10 +134,45 @@ export function SignupPage() {
             ))}
           </TextField>
 
+          {role === 'committee_officer' && (
+            <>
+              <Alert severity="info" sx={{ borderRadius: '12px' }}>
+                Your committee organization and officer workspace will be created automatically when you sign up.
+              </Alert>
+              <TextField
+                label="Committee name"
+                value={committeeName}
+                onChange={event => setCommitteeName(event.target.value)}
+                placeholder="e.g. Budget and Appropriations Committee"
+                required
+                fullWidth
+              />
+              <TextField
+                select
+                label="Institution"
+                value={institution}
+                onChange={event => setInstitution(event.target.value)}
+                fullWidth
+              >
+                <MenuItem value="National Assembly">National Assembly</MenuItem>
+                <MenuItem value="Nairobi County Assembly">Nairobi County Assembly</MenuItem>
+                <MenuItem value="Trans Nzoia County Assembly">Trans Nzoia County Assembly</MenuItem>
+              </TextField>
+              <TextField
+                label="Committee description"
+                value={committeeDescription}
+                onChange={event => setCommitteeDescription(event.target.value)}
+                multiline
+                minRows={2}
+                fullWidth
+              />
+            </>
+          )}
+
           {ELEVATED.includes(role) && (
             <Alert severity="warning" sx={{ borderRadius: '12px' }}>
-              This role needs approval. Your account starts with citizen access until an
-              administrator verifies you.
+              This role has elevated platform permissions. Use it only for the responsibilities
+              described in the platform workflow.
             </Alert>
           )}
 
