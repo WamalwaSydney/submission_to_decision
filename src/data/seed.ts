@@ -10,11 +10,10 @@ export const GENESIS_HASH = '000000000000000000000000000000000000000000000000000
 // Seed users (one per role, all labeled simulated)
 export const seedUsers: User[] = [
   { id: 'u-citizen-001', role: 'citizen', name: 'Jane Citizen', email: 'jane@example.com', status: 'active', created_date: '2026-01-15T08:00:00Z' },
-  { id: 'u-rep-001', role: 'representative', name: 'Hon. Simulated Rep', email: 'rep@example.com', status: 'active', created_date: '2026-01-10T08:00:00Z' },
-  { id: 'u-committee-001', role: 'committee', name: 'Simulated Finance Committee', email: 'committee@example.com', status: 'active', committee_id: 'committee-001', created_date: '2026-01-12T08:00:00Z' },
-  { id: 'u-moderator-001', role: 'moderator', name: 'Mod User', email: 'mod@example.com', status: 'active', created_date: '2026-01-08T08:00:00Z' },
+  { id: 'u-rep-001', role: 'citizen', name: 'Public Participant', email: 'rep@example.com', status: 'active', created_date: '2026-01-10T08:00:00Z' },
+  { id: 'u-committee-001', role: 'committee_officer', name: 'Simulated Finance Committee', email: 'committee@example.com', status: 'active', committee_id: 'committee-001', created_date: '2026-01-12T08:00:00Z' },
+  { id: 'u-reviewer-001', role: 'reviewer', name: 'Independent Reviewer', email: 'mod@example.com', status: 'active', created_date: '2026-01-08T08:00:00Z' },
   { id: 'u-admin-001', role: 'administrator', name: 'Admin User', email: 'admin@example.com', status: 'active', created_date: '2026-01-05T08:00:00Z' },
-  { id: 'u-clerk-001', role: 'clerk', name: 'Clerk User', email: 'clerk@example.com', status: 'active', created_date: '2026-01-06T08:00:00Z' },
 ];
 
 export const seedCommittees: Committee[] = [
@@ -116,8 +115,8 @@ export const seedReportEntries: ReportEntry[] = [
 
 // Seed submission matches
 export const seedMatches: SubmissionMatch[] = [
-  { id: 'm-001', receipt_ref: 'r-003', report_entry_ref: 're-001', match_method: 'clause', confidence_score: 0.95, explanation: 'Exact clause reference match: both reference Clause 7 of the Trans Nzoia Agriculture Development Bill.', reviewer_decision: 'confirmed', reviewer_id: 'u-moderator-001', timestamp: '2026-03-16T10:00:00Z' },
-  { id: 'm-002', receipt_ref: 'r-001', report_entry_ref: 're-004', match_method: 'text-similarity', confidence_score: 0.72, explanation: 'Text similarity: submission discusses "small business relocation" which matches the report entry about "small business relocation assistance for zoning changes". Key tokens: small business, relocation, zoning.', reviewer_decision: 'confirmed', reviewer_id: 'u-moderator-001', timestamp: '2026-03-21T14:30:00Z' },
+  { id: 'm-001', receipt_ref: 'r-003', report_entry_ref: 're-001', match_method: 'clause', confidence_score: 0.95, explanation: 'Exact clause reference match: both reference Clause 7 of the Trans Nzoia Agriculture Development Bill.', reviewer_decision: 'confirmed', reviewer_id: 'u-reviewer-001', timestamp: '2026-03-16T10:00:00Z' },
+  { id: 'm-002', receipt_ref: 'r-001', report_entry_ref: 're-004', match_method: 'text-similarity', confidence_score: 0.72, explanation: 'Text similarity: submission discusses "small business relocation" which matches the report entry about "small business relocation assistance for zoning changes". Key tokens: small business, relocation, zoning.', reviewer_decision: 'confirmed', reviewer_id: 'u-reviewer-001', timestamp: '2026-03-21T14:30:00Z' },
   { id: 'm-003', receipt_ref: 'r-004', report_entry_ref: 're-004', match_method: 'text-similarity', confidence_score: 0.45, explanation: 'Weak text similarity: submission mentions "environmental impact" and "zoning change" but report entry focuses on business relocation.', reviewer_decision: 'pending', timestamp: '2026-03-21T14:35:00Z' },
 ];
 
@@ -139,8 +138,8 @@ export const seedAuditLog: AuditLogEntry[] = [
   { id: 'al-001', entity_type: 'receipt', entity_id: 'r-001', action: 'created', details: 'Receipt RCT-KN8X2M issued for bill-001', timestamp: '2026-02-05T10:30:00Z' },
   { id: 'al-002', entity_type: 'receipt', entity_id: 'r-002', action: 'created', details: 'Receipt RCT-PQ7Y3N issued for bill-002', timestamp: '2026-03-02T14:15:00Z' },
   { id: 'al-003', entity_type: 'receipt', entity_id: 'r-003', action: 'created', details: 'Receipt RCT-AB4Z9K issued for bill-003', timestamp: '2026-02-25T09:00:00Z' },
-  { id: 'al-004', entity_type: 'match', entity_id: 'm-001', action: 'confirmed', details: 'Match confirmed by moderator u-moderator-001', timestamp: '2026-03-16T10:00:00Z' },
-  { id: 'al-005', entity_type: 'match', entity_id: 'm-002', action: 'confirmed', details: 'Match confirmed by moderator u-moderator-001', timestamp: '2026-03-21T14:30:00Z' },
+  { id: 'al-004', entity_type: 'match', entity_id: 'm-001', action: 'confirmed', details: 'Match confirmed by reviewer u-reviewer-001', timestamp: '2026-03-16T10:00:00Z' },
+  { id: 'al-005', entity_type: 'match', entity_id: 'm-002', action: 'confirmed', details: 'Match confirmed by reviewer u-reviewer-001', timestamp: '2026-03-21T14:30:00Z' },
 ];
 
 // Utility functions

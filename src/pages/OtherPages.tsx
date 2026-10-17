@@ -225,7 +225,7 @@ export function CommunityRulesPage() {
               If you encounter content that violates these rules, you can report it. Reporting creates a moderation case — content is never automatically deleted.
             </p>
             <ul className="text-sm text-surface-700 space-y-2 list-disc list-inside leading-relaxed pl-1">
-              <li>A moderator will review the report and record the rule applied, action taken, and any appeal.</li>
+              <li>A reviewer will review the report and record the rule applied, action taken, and any appeal.</li>
               <li>Moderation logs are preserved for accountability.</li>
               <li>Appeals are handled through a defined process.</li>
               <li>Representatives can report content but get no special power to remove criticism.</li>
@@ -360,14 +360,14 @@ export function CommunityRulesPage() {
 export function RepresentativeDashboardPage() {
   const { state, getBillOutcomes, getSubmissionStatus } = useApp();
   
-  if (!state.currentUser || state.currentUser.role !== 'representative') {
+  if (!state.currentUser || state.currentUser.role !== 'committee_officer') {
     return (
       <div className="text-center py-16">
         <div className="mx-auto w-20 h-20 rounded-full bg-gradient-to-br from-surface-100 to-surface-200 flex items-center justify-center mb-5">
           <Shield className="h-10 w-10 text-surface-400" />
         </div>
         <p className="text-lg font-semibold text-surface-700 mb-1">Sign in required</p>
-        <p className="text-surface-500">Sign in as a representative to view your dashboard.</p>
+        <p className="text-surface-500">Sign in as a committee officer to view your dashboard.</p>
       </div>
     );
   }

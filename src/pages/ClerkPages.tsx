@@ -7,7 +7,7 @@ import { Card, InfoBox, Badge, Label, InputField, SelectField } from '../compone
 
 const MAX_UPLOAD_MB = 50;
 
-export function ClerkIngestionPage() {
+export function CommitteeOfficerIngestionPage() {
   const { state, dispatch } = useApp();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
@@ -294,7 +294,7 @@ export function ClerkIngestionPage() {
                 <div className="flex items-start gap-3">
                   <CheckCircle2 className="h-5 w-5 mt-0.5 flex-shrink-0 text-green-600" />
                   <div>
-                        <p className="text-sm font-semibold text-surface-800">Report uploaded, extracted, and match proposals generated for moderator review.</p>
+                        <p className="text-sm font-semibold text-surface-800">Report uploaded, extracted, and match proposals generated for reviewer review.</p>
                   </div>
                 </div>
               </InfoBox>
@@ -440,7 +440,7 @@ export function ClerkIngestionPage() {
             <h3 className="font-bold text-surface-900 mb-1.5">Ingestion Pipeline</h3>
             <p className="text-sm text-surface-700 leading-relaxed">
               1. Upload PDF → 2. Try native text extraction (pdfplumber/PyMuPDF) → 3. If text layer is missing/insufficient, rasterize + Tesseract OCR → 
-              4. Parse into structured entries (clause ref, summary, treatment, reason) → 5. Clerk verifies completeness and formatting.
+              4. Parse into structured entries (clause ref, summary, treatment, reason) → 5. Committee Officer verifies completeness and formatting.
             </p>
           </div>
         </div>
@@ -449,7 +449,7 @@ export function ClerkIngestionPage() {
   );
 }
 
-export function ClerkNoticesPage() {
+export function CommitteeOfficerNoticesPage() {
   const { state, dispatch } = useApp();
   const [showForm, setShowForm] = useState(false);
   const [formData, setFormData] = useState({

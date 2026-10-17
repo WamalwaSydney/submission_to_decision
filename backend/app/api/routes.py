@@ -95,8 +95,8 @@ async def login(payload: LoginRequest, db: AsyncSession = Depends(get_db)):
 
 @router.post("/auth/register")
 async def register(payload: RegisterRequest, db: AsyncSession = Depends(get_db)):
-    if payload.role not in {"citizen", "representative"}:
-        raise HTTPException(status_code=400, detail="Only citizen and representative accounts can self-register")
+    if payload.role not in {"citizen"}:
+        raise HTTPException(status_code=400, detail="Only citizen accounts can self-register")
     if len(payload.password) < 8:
         raise HTTPException(status_code=422, detail="Password must be at least 8 characters")
     email = payload.email.strip().lower()
@@ -156,19 +156,19 @@ async def create_committee(payload: CommitteeCreate, db: AsyncSession = Depends(
         raise HTTPException(status_code=409, detail="Committee account email already exists")
     committee = Committee(name=payload.name.strip(), institution=payload.institution.strip(), description=payload.description, contact_email=payload.contact_email, created_by=current_user.id)
     db.add(committee); await db.flush()
-    account = User(name=payload.account_name.strip(), email=payload.account_email.strip().lower(), role="committee", password_hash=get_password_hash(payload.account_password), committee_id=committee.id, status="active")
+    account = User(name=payload.account_name.strip(), email=payload.account_email.strip().lower(), role="committee_officer", password_hash=get_password_hash(payload.account_password), committee_id=committee.id, status="active")
     db.add(account)
     await record_audit(db, entity_type="committee", entity_id=committee.id, action="created", actor_id=current_user.id, details={"name": committee.name, "institution": committee.institution})
     await db.commit(); await db.refresh(committee)
     return {"committee": to_dict(committee), "account": public_user(account)}
 
 @router.get("/committees/me/bills")
-async def committee_bills(db: AsyncSession = Depends(get_db), current_user: User = Depends(require_role("committee"))):
+async def committee_bills(db: AsyncSession = Depends(get_db), current_user: User = Depends(require_role("committee_officer"))):
     result = await db.execute(select(LegislativeItem).where(LegislativeItem.committee_id == current_user.committee_id).order_by(LegislativeItem.source_updated_at.desc().nullslast(), LegislativeItem.title.asc()))
     return {"bills": [to_dict(b) for b in result.scalars().all()]}
 
 @router.post("/committees/me/bills")
-async def committee_ingest_bill(payload: BillCreate, db: AsyncSession = Depends(get_db), current_user: User = Depends(require_role("committee"))):
+async def committee_ingest_bill(payload: BillCreate, db: AsyncSession = Depends(get_db), current_user: User = Depends(require_role("committee_officer"))):
     if not current_user.committee_id:
         raise HTTPException(status_code=409, detail="Committee account is not linked to a committee")
     duplicate = await db.execute(select(LegislativeItem).where(LegislativeItem.identifier == payload.identifier.strip()))
@@ -315,7 +315,7 @@ async def bill_flow(bill_id: UUID, db: AsyncSession = Depends(get_db)):
 
 @router.get("/messages")
 async def list_messages(db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
-    if current_user.role == "committee":
+    if current_user.role == "committee_officer":
         query = select(Message).where((Message.committee_id == current_user.committee_id) | (Message.sender_id == current_user.id))
     else:
         query = select(Message).where((Message.recipient_user_id == current_user.id) | (Message.sender_id == current_user.id))
@@ -328,7 +328,7 @@ async def send_message(payload: MessageCreate, db: AsyncSession = Depends(get_db
         raise HTTPException(status_code=422, detail="Specify a recipient user or committee")
     if not payload.body.strip() or not payload.subject.strip():
         raise HTTPException(status_code=422, detail="Subject and body are required")
-    if current_user.role == "committee":
+    if current_user.role == "committee_officer":
         if payload.committee_id and payload.committee_id != current_user.committee_id:
             raise HTTPException(status_code=403, detail="Committee may only send from its own account")
         target_committee = current_user.committee_id
@@ -345,7 +345,7 @@ async def mark_message_read(message_id: UUID, db: AsyncSession = Depends(get_db)
     result = await db.execute(select(Message).where(Message.id == message_id))
     message = result.scalar_one_or_none()
     if not message: raise HTTPException(status_code=404, detail="Message not found")
-    allowed = (message.recipient_user_id == current_user.id) or (current_user.role == "committee" and message.committee_id == current_user.committee_id)
+    allowed = (message.recipient_user_id == current_user.id) or (current_user.role == "committee_officer" and message.committee_id == current_user.committee_id)
     if not allowed: raise HTTPException(status_code=403, detail="Message is not addressed to this account")
     message.is_read = True
     await record_audit(db, entity_type="message", entity_id=message.id, action="viewed", actor_id=current_user.id, details={})
@@ -490,7 +490,7 @@ async def get_receipt(public_id: str, db: AsyncSession = Depends(get_db)):
 @router.get("/matches/pending")
 async def get_pending_matches(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_role("moderator")),
+    current_user: User = Depends(require_role("reviewer")),
 ):
     matches = await linking_service.get_pending_matches(db)
     return {"matches": matches}
@@ -500,7 +500,7 @@ async def get_pending_matches(
 async def confirm_match(
     match_id: UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_role("moderator")),
+    current_user: User = Depends(require_role("reviewer")),
 ):
     try:
         match = await linking_service.confirm_match(db, match_id, current_user.id)
@@ -513,7 +513,7 @@ async def confirm_match(
 async def reject_match(
     match_id: UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_role("moderator")),
+    current_user: User = Depends(require_role("reviewer")),
 ):
     try:
         match = await linking_service.reject_match(db, match_id, current_user.id)
@@ -532,7 +532,7 @@ async def upload_report(
     date_tabled: str = Form(...),
     source_url: Optional[str] = Form(None),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_role("clerk")),
+    current_user: User = Depends(require_role("committee_officer")),
 ):
     # Never trust the client filename: strip any path and prefix a random id
     content = await file.read()
@@ -573,7 +573,7 @@ async def upload_report(
 async def get_report(
     report_id: UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_role("clerk", "moderator", "administrator")),
+    current_user: User = Depends(require_role("committee_officer", "reviewer", "administrator")),
 ):
     result = await db.execute(select(CommitteeReport).where(CommitteeReport.id == report_id))
     report = result.scalar_one_or_none()
@@ -589,7 +589,7 @@ async def update_report_entry(
     entry_id: UUID,
     payload: ReportEntryUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_role("clerk", "administrator")),
+    current_user: User = Depends(require_role("committee_officer", "administrator")),
 ):
     allowed_treatments = {"adopted", "amended", "rejected with reasons", "not addressed"}
     if payload.treatment not in allowed_treatments:
@@ -610,7 +610,7 @@ async def update_report_entry(
 async def verify_report(
     report_id: UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_role("clerk", "administrator")),
+    current_user: User = Depends(require_role("committee_officer", "administrator")),
 ):
     result = await db.execute(select(CommitteeReport).where(CommitteeReport.id == report_id))
     report = result.scalar_one_or_none()
@@ -627,7 +627,7 @@ async def verify_report(
 async def generate_match_proposals(
     bill_ref: UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_role("clerk", "moderator", "administrator")),
+    current_user: User = Depends(require_role("committee_officer", "reviewer", "administrator")),
 ):
     result = await db.execute(select(LegislativeItem.id).where(LegislativeItem.id == bill_ref))
     if result.scalar_one_or_none() is None:
@@ -671,7 +671,7 @@ async def get_profile(profile_id: UUID, db: AsyncSession = Depends(get_db)):
 async def claim_profile(
     profile_id: UUID,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_role("representative")),
+    current_user: User = Depends(require_role("committee_officer")),
 ):
     result = await db.execute(
         select(RepresentativeProfile).where(
@@ -737,7 +737,7 @@ async def create_notice(
     mode: str = Form(...),
     bill_text_accessible: bool = Form(False),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_role("clerk", "administrator")),
+    current_user: User = Depends(require_role("committee_officer", "administrator")),
 ):
     if window_end < window_start:
         raise HTTPException(status_code=422, detail="window_end must not be before window_start")
@@ -785,7 +785,7 @@ async def report_content(
 @router.get("/moderation/cases")
 async def list_moderation_cases(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_role("moderator")),
+    current_user: User = Depends(require_role("reviewer")),
 ):
     result = await db.execute(select(ModerationAction))
     actions = result.scalars().all()

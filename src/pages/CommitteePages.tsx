@@ -10,7 +10,7 @@ export function CommitteeDashboardPage() {
   const [bills, setBills] = useState<any[]>([]);
   const [form, setForm] = useState({ title: '', identifier: '', stage: 'Introduced', source_url: '' });
   const [message, setMessage] = useState('');
-  const isCommittee = state.currentUser?.role === 'committee';
+  const isCommittee = state.currentUser?.role === 'committee_officer';
 
   const load = () => { if (isCommittee) api.committeeBills().then(r => setBills(r.bills)).catch(e => setMessage(e instanceof Error ? e.message : 'Unable to load committee bills.')); };
   useEffect(load, [isCommittee]);

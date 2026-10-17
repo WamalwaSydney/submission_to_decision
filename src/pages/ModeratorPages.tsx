@@ -8,7 +8,7 @@ import { motion } from 'framer-motion';
 import { Card, DisclaimerBox, InfoBox, Badge, Label, SelectField, BtnPrimary, BtnSecondary, BtnDanger } from '../components/UI';
 import { confidenceClasses, confidenceBarClass, confidenceLabel } from '../utils/confidence';
 
-export function ModeratorQueuePage() {
+export function ReviewerQueuePage() {
   const { state, dispatch } = useApp();
   const pendingMatches = state.matches.filter(m => m.reviewer_decision === 'pending');
   const reviewedMatches = state.matches.filter(m => m.reviewer_decision !== 'pending');
@@ -56,7 +56,7 @@ export function ModeratorQueuePage() {
         <DisclaimerBox className="!p-5 mb-6">
           <div className="flex items-start gap-3">
             <Shield className="h-5 w-5 mt-0.5 flex-shrink-0 text-warm-600" />
-            <p className="text-sm text-surface-700 font-medium">Sign in as a moderator to review matches.</p>
+            <p className="text-sm text-surface-700 font-medium">Sign in as a reviewer to review matches.</p>
           </div>
         </DisclaimerBox>
       )}
@@ -249,7 +249,7 @@ export function ReportedContentPage() {
     if (!state.currentUser) return;
     dispatch({
       type: 'UPDATE_MODERATION',
-      payload: { id, decision, moderatorId: state.currentUser.id }
+      payload: { id, decision, reviewerId: state.currentUser.id }
     });
   };
 

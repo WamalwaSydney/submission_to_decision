@@ -130,6 +130,7 @@ class SubmissionMatch(Base):
     receipt_ref = Column(UUID(as_uuid=True), ForeignKey("participation_receipts.id"), nullable=False)
     report_entry_ref = Column(UUID(as_uuid=True), ForeignKey("report_entries.id"), nullable=False)
     match_method = Column(String(20), nullable=False)
+    actor_type = Column(String(30), nullable=False, default="automated_system")
     confidence_score = Column(Float, nullable=False)
     explanation = Column(Text, nullable=False)
     reviewer_decision = Column(String(20), default="pending")
@@ -187,7 +188,7 @@ class ModerationAction(Base):
     content_id = Column(UUID(as_uuid=True), nullable=False)
     reason = Column(Text, nullable=False)
     decision = Column(String(20), default="pending")
-    moderator_id = Column(UUID(as_uuid=True), ForeignKey("users.id"))
+    reviewer_id = Column(UUID(as_uuid=True), ForeignKey("users.id"))
     appeal_status = Column(String(20), default="none")
     timestamp = Column(DateTime(timezone=True), server_default=func.now())
 

@@ -8,12 +8,12 @@ import { ReceiptLookupPage, ReceiptVerifyPage } from './pages/ReceiptPages';
 import { SubmitViewPage } from './pages/SubmitViewPage';
 import { LoginPage } from './pages/LoginPage';
 import { NoticesPage } from './pages/NoticesPage';
-import { ProfilesPage, ProfileDetailPage, ClaimProfilePage } from './pages/ProfilesPages';
+import { ProfilesPage, ProfileDetailPage } from './pages/ProfilesPages';
 import { SignupPage } from './pages/SignupPage';
-import { ModeratorQueuePage, ReportedContentPage } from './pages/ModeratorPages';
-import { ClerkIngestionPage, ClerkNoticesPage } from './pages/ClerkPages';
+import { ReviewerQueuePage, ReportedContentPage } from './pages/ModeratorPages';
+import { CommitteeOfficerIngestionPage, CommitteeOfficerNoticesPage } from './pages/ClerkPages';
 import { AdminPage } from './pages/AdminPage';
-import { ResearchExportPage, CommunityRulesPage, RepresentativeDashboardPage, MyReceiptsPage } from './pages/OtherPages';
+import { ResearchExportPage, CommunityRulesPage, MyReceiptsPage } from './pages/OtherPages';
 import { CommitteeDashboardPage, BillFlowPage } from './pages/CommitteePages';
 import { MessagesPage } from './pages/MessagesPage';
 import { api } from './api/endpoints';
@@ -85,12 +85,11 @@ function AppRoutes() {
         <Route path="/profiles" element={<ProfilesPage />} />
         <Route path="/profiles/:id" element={<ProfileDetailPage />} />
         <Route path="/my-receipts" element={<MyReceiptsPage />} />
-        <Route path="/rep-dashboard" element={<RepresentativeDashboardPage />} />
-        <Route path="/claim-profile" element={<ClaimProfilePage />} />
-        <Route path="/moderator/queue" element={<ModeratorQueuePage />} />
-        <Route path="/moderator/reports" element={<ReportedContentPage />} />
-        <Route path="/clerk/ingestion" element={<ClerkIngestionPage />} />
-        <Route path="/clerk/notices" element={<ClerkNoticesPage />} />
+        
+        <Route path="/reviewer/queue" element={<ReviewerQueuePage />} />
+        <Route path="/reviewer/reports" element={<ReportedContentPage />} />
+        <Route path="/committee/ingestion" element={<CommitteeOfficerIngestionPage />} />
+        <Route path="/committee/notices" element={<CommitteeOfficerNoticesPage />} />
         <Route path="/admin" element={<AdminPage />} />
         <Route path="/research/export" element={<ResearchExportPage />} />
         <Route path="/community-rules" element={<CommunityRulesPage />} />

@@ -67,24 +67,18 @@ const authenticatedLinksMap: Record<string, { to: string; label: string; icon: a
     { to: '/submit', label: 'Submit View', icon: MessageSquarePlus },
     { to: '/my-receipts', label: 'My Receipts', icon: Receipt },
   ],
-  representative: [
-    { to: '/rep-dashboard', label: 'My Dashboard', icon: LayoutDashboard },
-    { to: '/claim-profile', label: 'Claim Profile', icon: UserCheck },
+  reviewer: [
+    { to: '/reviewer/queue', label: 'Match Review', icon: ClipboardList },
+    { to: '/reviewer/reports', label: 'Reported Content', icon: Flag },
   ],
-  moderator: [
-    { to: '/moderator/queue', label: 'Match Queue', icon: ClipboardList },
-    { to: '/moderator/reports', label: 'Reported Content', icon: Flag },
-  ],
-  clerk: [
-    { to: '/clerk/ingestion', label: 'Report Ingestion', icon: FileUp },
-    { to: '/clerk/notices', label: 'Notice Records', icon: FolderOpen },
+  committee_officer: [
+    { to: '/committee', label: 'Committee Dashboard', icon: Database },
+    { to: '/committee/ingestion', label: 'Report Ingestion', icon: FileUp },
+    { to: '/committee/notices', label: 'Notice Records', icon: FolderOpen },
+    { to: '/messages', label: 'Messages', icon: MessageSquarePlus },
   ],
   administrator: [
     { to: '/admin', label: 'Administration', icon: Settings2 },
-  ],
-  committee: [
-    { to: '/committee', label: 'Committee Dashboard', icon: Database },
-    { to: '/messages', label: 'Messages', icon: MessageSquarePlus },
   ],
 };
 

@@ -25,13 +25,11 @@ export type MatchMethod = 'clause' | 'text-similarity' | 'llm';
 
 export type ReviewerDecision = 'confirmed' | 'rejected' | 'pending';
 
-export type UserRole = 
+export type UserRole =
   | 'citizen'
-  | 'representative'
-  | 'committee'
-  | 'moderator'
-  | 'administrator'
-  | 'clerk';
+  | 'committee_officer'
+  | 'reviewer'
+  | 'administrator';
 
 export type Institution = 
   | 'National Assembly'
@@ -167,7 +165,7 @@ export interface ModerationAction {
   content_id: string;
   reason: string;
   decision: 'pending' | 'upheld' | 'dismissed';
-  moderator_id?: string;
+  reviewer_id?: string;
   appeal_status: 'none' | 'appealed' | 'resolved';
   timestamp: string;
 }

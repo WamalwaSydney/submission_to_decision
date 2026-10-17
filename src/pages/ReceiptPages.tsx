@@ -293,7 +293,7 @@ export function ReceiptLookupPage() {
                           <p className="font-bold text-surface-900">
                             {new Date(match.timestamp).toLocaleDateString(undefined, { weekday: 'short', year: 'numeric', month: 'long', day: 'numeric' })}
                           </p>
-                          <p className="text-xs font-semibold text-surface-500">By a human moderator</p>
+                          <p className="text-xs font-semibold text-surface-500">By a human reviewer</p>
                         </div>
                         {entry.stated_reason && (
                           <div className="rounded-xl p-5 bg-gradient-to-br from-warm-50/80 to-white border border-warm-200 md:col-span-2">

@@ -6,14 +6,13 @@ import { Card } from '../components/UI';
 import { useApp } from '../context/AppContext';
 import { api } from '../api/endpoints';
 
-type PublicSignupRole = 'citizen' | 'representative';
+type PublicSignupRole = 'citizen' | 'citizen';
 
 const ROLE_OPTIONS: { value: PublicSignupRole; label: string }[] = [
-  { value: 'citizen', label: 'Citizen' },
-  { value: 'representative', label: 'Representative / office holder' },
+  { value: 'citizen', label: 'Citizen / public participant' },
 ];
 
-const ELEVATED: PublicSignupRole[] = ['representative'];
+const ELEVATED: PublicSignupRole[] = [];
 
 export function SignupPage() {
   const { dispatch } = useApp();

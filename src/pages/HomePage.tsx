@@ -463,7 +463,7 @@ export function HomePage() {
               { n: 1, title: 'Submit Your View', desc: 'Choose a tracked bill, optionally reference a clause, and write your submission.', icon: <Send size={22} />, tone: 'primary' as const },
               { n: 2, title: 'Receive a Receipt', desc: 'Get a timestamped, hash-chained proof of submission you can independently verify.', icon: <Fingerprint size={22} />, tone: 'accent' as const },
               { n: 3, title: 'Report Ingested', desc: 'When a committee report is published, it is extracted and matches are proposed.', icon: <BookOpen size={22} />, tone: 'warm' as const },
-              { n: 4, title: 'Outcome Published', desc: 'A human moderator confirms matches. Outcomes are published with stated reasons.', icon: <CheckCircle2 size={22} />, tone: 'purple' as const },
+              { n: 4, title: 'Outcome Published', desc: 'A human reviewer confirms matches. Outcomes are published with stated reasons.', icon: <CheckCircle2 size={22} />, tone: 'purple' as const },
             ].map((step, i) => {
               const tone = tonePalette[step.tone];
               return (

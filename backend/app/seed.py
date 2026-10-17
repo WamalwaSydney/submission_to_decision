@@ -34,14 +34,13 @@ async def seed():
         # Users (one per role)
         users = [
             User(id=uuid.UUID("00000000-0000-0000-0000-000000000001"), role="citizen", name="Jane Citizen", email="jane@example.com", password_hash=get_password_hash("password123"), status="active"),
-            User(id=uuid.UUID("00000000-0000-0000-0000-000000000002"), role="representative", name="Hon. Simulated Rep", email="rep@example.com", password_hash=get_password_hash("password123"), status="active"),
-            User(id=uuid.UUID("00000000-0000-0000-0000-000000000003"), role="moderator", name="Mod User", email="mod@example.com", password_hash=get_password_hash("password123"), status="active"),
+            User(id=uuid.UUID("00000000-0000-0000-0000-000000000002"), role="reviewer", name="Independent Reviewer", email="rep@example.com", password_hash=get_password_hash("password123"), status="active"),
+            User(id=uuid.UUID("00000000-0000-0000-0000-000000000003"), role="reviewer", name="Mod User", email="mod@example.com", password_hash=get_password_hash("password123"), status="active"),
             User(id=uuid.UUID("00000000-0000-0000-0000-000000000004"), role="administrator", name="Admin User", email="admin@example.com", password_hash=get_password_hash("password123"), status="active"),
-            User(id=uuid.UUID("00000000-0000-0000-0000-000000000005"), role="clerk", name="Clerk User", email="clerk@example.com", password_hash=get_password_hash("password123"), status="active"),
         ]
         session.add_all(users)
         committee = Committee(id=uuid.UUID("80000000-0000-0000-0000-000000000001"), name="Simulated Finance Committee", institution="National Assembly", description="Demo committee account; all records are simulated.", contact_email="committee@example.com", created_by=users[3].id)
-        committee_user = User(id=uuid.UUID("00000000-0000-0000-0000-000000000006"), role="committee", name="Simulated Finance Committee", email="committee@example.com", password_hash=get_password_hash("password123"), committee_id=committee.id, status="active")
+        committee_user = User(id=uuid.UUID("00000000-0000-0000-0000-000000000006"), role="committee_officer", name="Simulated Finance Committee", email="committee@example.com", password_hash=get_password_hash("password123"), committee_id=committee.id, status="active")
         session.add(committee)
         session.add(committee_user)
         await session.flush()
@@ -110,8 +109,8 @@ async def seed():
             AuditLog(entity_type="receipt", entity_id=receipts[0].id, action="created", details=f"Receipt {receipts[0].public_id} issued for {bills[0].id}", timestamp=receipts[0].timestamp),
             AuditLog(entity_type="receipt", entity_id=receipts[1].id, action="created", details=f"Receipt {receipts[1].public_id} issued for {bills[1].id}", timestamp=receipts[1].timestamp),
             AuditLog(entity_type="receipt", entity_id=receipts[2].id, action="created", details=f"Receipt {receipts[2].public_id} issued for {bills[2].id}", timestamp=receipts[2].timestamp),
-            AuditLog(entity_type="match", entity_id=matches[0].id, action="confirmed", details="Match confirmed by moderator", timestamp=matches[0].timestamp),
-            AuditLog(entity_type="match", entity_id=matches[1].id, action="confirmed", details="Match confirmed by moderator", timestamp=matches[1].timestamp),
+            AuditLog(entity_type="match", entity_id=matches[0].id, action="confirmed", details="Match confirmed by reviewer", timestamp=matches[0].timestamp),
+            AuditLog(entity_type="match", entity_id=matches[1].id, action="confirmed", details="Match confirmed by reviewer", timestamp=matches[1].timestamp),
         ]
         session.add_all(audit_entries)
         

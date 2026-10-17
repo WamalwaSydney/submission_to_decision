@@ -49,7 +49,7 @@ async def propose_matches(db: AsyncSession, bill_id: str, use_llm: bool = True) 
                 receipt_ref=receipt.id, report_entry_ref=entry.id, match_method="llm",
                 confidence_score=candidate["confidence"],
                 explanation=f"Gemini proposal ({candidate['confidence'] * 100:.1f}%): {candidate['explanation']}",
-                reviewer_decision="pending",
+                reviewer_decision="pending", actor_type="automated_system",
             )
             db.add(match); matches.append(match)
     else:
@@ -70,7 +70,7 @@ async def propose_matches(db: AsyncSession, bill_id: str, use_llm: bool = True) 
                     best_score, best_method, best_explanation, best_match = score, method, explanation, entry
             if best_match and not any(m.report_entry_ref == best_match.id for m in existing):
                 match = SubmissionMatch(receipt_ref=receipt.id, report_entry_ref=best_match.id, match_method=best_method,
-                                         confidence_score=best_score, explanation=best_explanation, reviewer_decision="pending")
+                                         confidence_score=best_score, explanation=best_explanation, reviewer_decision="pending", actor_type="automated_system")
                 db.add(match); matches.append(match)
     await db.commit()
     await _send_automated_feedback(db, receipts, entries)
@@ -116,7 +116,7 @@ async def _send_automated_feedback(db: AsyncSession, receipts: list[Participatio
             percentage = match.confidence_score * 100
             subject = f"Submission matching alert — {percentage:.1f}% proposed confidence"
             body = (f"The automated comparison found a proposed {percentage:.1f}% match to a committee report entry. "
-                    "A moderator must still confirm or reject this proposal, so no final outcome has been assigned yet. "
+                    "An independent reviewer must still confirm or reject this proposal, so no final outcome has been assigned yet. "
                     f"Matching explanation: {match.explanation}")
         db.add(Message(sender_id=None, recipient_user_id=receipt.author_id, bill_id=receipt.legislative_item_id,
                        receipt_id=receipt.id, subject=subject, body=body, message_type=message_type,

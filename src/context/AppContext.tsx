@@ -44,7 +44,7 @@ type Action =
   | { type: 'VERIFY_PROFILE'; payload: { profileId: string; verifierId: string; status: RepresentativeStatus } }
   | { type: 'UPDATE_RECEIPT_LODGING'; payload: { receiptId: string; status: LodgingStatus } }
   | { type: 'ADD_MODERATION'; payload: ModerationAction }
-  | { type: 'UPDATE_MODERATION'; payload: { id: string; decision: ModerationAction['decision']; moderatorId: string } }
+  | { type: 'UPDATE_MODERATION'; payload: { id: string; decision: ModerationAction['decision']; reviewerId: string } }
   | { type: 'ADD_USER'; payload: User }
   | { type: 'SET_USER'; payload: User | null }
   | { type: 'SET_ONLINE'; payload: boolean }
@@ -134,7 +134,7 @@ function reducer(state: AppState, action: Action): AppState {
       return {
         ...state,
         moderationActions: state.moderationActions.map(m =>
-          m.id === action.payload.id ? { ...m, decision: action.payload.decision, moderator_id: action.payload.moderatorId } : m
+          m.id === action.payload.id ? { ...m, decision: action.payload.decision, reviewer_id: action.payload.reviewerId } : m
         ),
       };
     case 'ADD_USER':
