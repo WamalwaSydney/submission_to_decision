@@ -7,7 +7,7 @@ from sqlalchemy import select
 
 from app.database import async_session, engine, Base
 from app.models import (
-    User, LegislativeItem, ParticipationReceipt, CommitteeReport,
+    User, Committee, LegislativeItem, ParticipationReceipt, CommitteeReport,
     ReportEntry, SubmissionMatch, RepresentativeProfile, NoticeRecord,
     AuditLog
 )
@@ -35,16 +35,19 @@ async def seed():
         users = [
             User(id=uuid.UUID("00000000-0000-0000-0000-000000000001"), role="citizen", name="Jane Citizen", email="jane@example.com", password_hash=get_password_hash("password123"), status="active"),
             User(id=uuid.UUID("00000000-0000-0000-0000-000000000002"), role="representative", name="Hon. Simulated Rep", email="rep@example.com", password_hash=get_password_hash("password123"), status="active"),
-            User(id=uuid.UUID("00000000-0000-0000-0000-000000000003"), role="researcher", name="Dr. Researcher", email="researcher@example.com", password_hash=get_password_hash("password123"), status="active"),
-            User(id=uuid.UUID("00000000-0000-0000-0000-000000000004"), role="moderator", name="Mod User", email="mod@example.com", password_hash=get_password_hash("password123"), status="active"),
-            User(id=uuid.UUID("00000000-0000-0000-0000-000000000005"), role="administrator", name="Admin User", email="admin@example.com", password_hash=get_password_hash("password123"), status="active"),
-            User(id=uuid.UUID("00000000-0000-0000-0000-000000000006"), role="clerk", name="Clerk User", email="clerk@example.com", password_hash=get_password_hash("password123"), status="active"),
+            User(id=uuid.UUID("00000000-0000-0000-0000-000000000003"), role="moderator", name="Mod User", email="mod@example.com", password_hash=get_password_hash("password123"), status="active"),
+            User(id=uuid.UUID("00000000-0000-0000-0000-000000000004"), role="administrator", name="Admin User", email="admin@example.com", password_hash=get_password_hash("password123"), status="active"),
+            User(id=uuid.UUID("00000000-0000-0000-0000-000000000005"), role="clerk", name="Clerk User", email="clerk@example.com", password_hash=get_password_hash("password123"), status="active"),
         ]
         session.add_all(users)
-        
+        committee = Committee(id=uuid.UUID("80000000-0000-0000-0000-000000000001"), name="Simulated Finance Committee", institution="National Assembly", description="Demo committee account; all records are simulated.", contact_email="committee@example.com", created_by=users[3].id)
+        committee_user = User(id=uuid.UUID("00000000-0000-0000-0000-000000000006"), role="committee", name="Simulated Finance Committee", email="committee@example.com", password_hash=get_password_hash("password123"), committee_id=committee.id, status="active")
+        session.add(committee)
+        session.add(committee_user)
+        await session.flush()
         # Legislative Items (Bills)
         bills = [
-            LegislativeItem(id=uuid.UUID("10000000-0000-0000-0000-000000000001"), title="Nairobi Urban Planning (Amendment) Bill, 2026", identifier="NA/2026/Bill-014", institution="National Assembly", stage="Committee Stage", documents=[{"name": "Bill Text (Simulated)"}], status_history=[{"date": "2026-01-10", "stage": "First Reading", "note": "Introduced"}, {"date": "2026-02-01", "stage": "Committee Stage", "note": "Referred to Departmental Committee"}], is_simulated=True),
+            LegislativeItem(id=uuid.UUID("10000000-0000-0000-0000-000000000001"), title="Nairobi Urban Planning (Amendment) Bill, 2026", identifier="NA/2026/Bill-014", institution="National Assembly", committee_id=committee.id, stage="Committee Stage", documents=[{"name": "Bill Text (Simulated)"}], status_history=[{"date": "2026-01-10", "stage": "First Reading", "note": "Introduced"}, {"date": "2026-02-01", "stage": "Committee Stage", "note": "Referred to Departmental Committee"}], is_simulated=True),
             LegislativeItem(id=uuid.UUID("10000000-0000-0000-0000-000000000002"), title="Nairobi County Finance Bill, 2026", identifier="NCA/2026/Bill-003", institution="Nairobi County Assembly", stage="Public Participation", documents=[{"name": "Bill Text (Simulated)"}], status_history=[{"date": "2026-02-15", "stage": "First Reading", "note": "Introduced"}, {"date": "2026-03-01", "stage": "Public Participation", "note": "Call for views issued"}], is_simulated=True),
             LegislativeItem(id=uuid.UUID("10000000-0000-0000-0000-000000000003"), title="Trans Nzoia Agriculture Development Bill, 2026", identifier="TNCA/2026/Bill-007", institution="Trans Nzoia County Assembly", stage="Second Reading", documents=[{"name": "Bill Text (Simulated)"}], status_history=[{"date": "2026-01-20", "stage": "First Reading", "note": "Introduced"}, {"date": "2026-02-28", "stage": "Public Participation", "note": "Views collected"}, {"date": "2026-03-15", "stage": "Second Reading", "note": "Committee report tabled"}], is_simulated=True),
             LegislativeItem(id=uuid.UUID("10000000-0000-0000-0000-000000000004"), title="National Health Insurance (Amendment) Bill, 2026", identifier="NA/2026/Bill-022", institution="National Assembly", stage="First Reading", documents=[{"name": "Bill Text (Simulated)"}], status_history=[{"date": "2026-03-01", "stage": "First Reading", "note": "Introduced"}], is_simulated=True),
@@ -87,8 +90,8 @@ async def seed():
         
         # Submission Matches
         matches = [
-            SubmissionMatch(id=uuid.UUID("60000000-0000-0000-0000-000000000001"), receipt_ref=receipts[2].id, report_entry_ref=entries[0].id, match_method="clause", confidence_score=0.95, explanation="Exact clause reference match: both reference Clause 7 of the Trans Nzoia Agriculture Development Bill.", reviewer_decision="confirmed", reviewer_id=users[3].id, timestamp=datetime(2026, 3, 16, 10, 0, 0)),
-            SubmissionMatch(id=uuid.UUID("60000000-0000-0000-0000-000000000002"), receipt_ref=receipts[0].id, report_entry_ref=entries[3].id, match_method="text-similarity", confidence_score=0.72, explanation="Text similarity: submission discusses 'small business relocation' which matches the report entry about 'small business relocation assistance for zoning changes'. Key tokens: small business, relocation, zoning.", reviewer_decision="confirmed", reviewer_id=users[3].id, timestamp=datetime(2026, 3, 21, 14, 30, 0)),
+            SubmissionMatch(id=uuid.UUID("60000000-0000-0000-0000-000000000001"), receipt_ref=receipts[2].id, report_entry_ref=entries[0].id, match_method="clause", confidence_score=0.95, explanation="Exact clause reference match: both reference Clause 7 of the Trans Nzoia Agriculture Development Bill.", reviewer_decision="confirmed", reviewer_id=users[2].id, timestamp=datetime(2026, 3, 16, 10, 0, 0)),
+            SubmissionMatch(id=uuid.UUID("60000000-0000-0000-0000-000000000002"), receipt_ref=receipts[0].id, report_entry_ref=entries[3].id, match_method="text-similarity", confidence_score=0.72, explanation="Text similarity: submission discusses 'small business relocation' which matches the report entry about 'small business relocation assistance for zoning changes'. Key tokens: small business, relocation, zoning.", reviewer_decision="confirmed", reviewer_id=users[2].id, timestamp=datetime(2026, 3, 21, 14, 30, 0)),
             SubmissionMatch(id=uuid.UUID("60000000-0000-0000-0000-000000000003"), receipt_ref=receipts[3].id, report_entry_ref=entries[3].id, match_method="text-similarity", confidence_score=0.45, explanation="Weak text similarity: submission mentions 'environmental impact' and 'zoning change' but report entry focuses on business relocation.", reviewer_decision="pending", timestamp=datetime(2026, 3, 21, 14, 35, 0)),
         ]
         session.add_all(matches)

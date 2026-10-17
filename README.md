@@ -186,7 +186,6 @@ Sign in at `/login` using a simulated account:
 
 - Jane Citizen — citizen
 - Hon. Simulated Rep — representative
-- Dr. Researcher — researcher
 - Mod User — moderator
 - Admin User — administrator
 - Clerk User — clerk
@@ -338,3 +337,19 @@ The project now distinguishes four evidence states:
 | Precision/recall and ingestion evaluation | Evaluation scripts and empty approved-data templates implemented; results not yet evaluated | `evaluation/data/`, `evaluation/evaluate_*.py` |
 | Usability/SUS study | Instrument/template implemented; human study and results not yet conducted | `evaluation/data/usability_sessions.csv`, `docs/EVALUATION.md` |
 | Seed bills, profiles, receipts, reports | Simulated | `backend/app/seed.py`, `src/data/seed.ts` |
+
+## Committee and public-flow features
+
+The current implementation includes first-class `committees`. An administrator can create a committee and its committee account through `POST /api/v1/committees`. A committee account can ingest bills through `POST /api/v1/committees/me/bills` and can see only bills assigned to that committee through `GET /api/v1/committees/me/bills`.
+
+Citizens can submit views against public bills. The receipt remains hash-chained and append-only. `GET /api/v1/bills/{bill_id}/flow` exposes the public bill timeline, committee reports, confirmed outcome status, and match percentage without exposing citizen account IDs. Citizens can contact the responsible committee through the messages interface when an outcome requires clarification. Committee accounts can read and reply through the same message system; message sends and reads are audited.
+
+Matching uses an optional free hosted Gemini proposal layer. Configure `GEMINI_API_KEY`, `GEMINI_API_BASE`, and `GEMINI_MATCH_MODEL` to enable it. The configured default is `gemini-2.5-flash-lite`, which Google currently lists with free input/output tokens on its free tier. LLM proposals return a percentage-style score and explanation, but remain `pending` until a human moderator confirms them. Free-tier quota errors and provider outages automatically fall back to the deterministic clause/text matcher. No AI system can honestly guarantee perfect matching; the system therefore abstains below its confidence threshold and keeps human moderation as the final decision.
+
+The `researcher` role has been removed from registration, seed data, frontend role types, and navigation. Legacy researcher accounts are migrated to citizens by `20261015_committees_messages`. Public identifier-free outcome export is available without a researcher account.
+
+## Automated matching alerts and confidence colors
+
+After each matching run, the backend automatically sends a system-generated alert to the citizen who owns each receipt. A no-match alert explains that no defensible report link met the threshold. A pending-match alert reports the proposed percentage and evidence while clearly stating that moderator confirmation is still required. After a moderator confirms a report treatment, the citizen receives a separate final outcome alert containing the percentage, treatment, and committee-stated reason. Alerts are idempotent per receipt and outcome phase, so rerunning matching does not send duplicates.
+
+Confidence is shown consistently as **red / Low** below 50%, **amber / Moderate** from 50% through 74.9%, and **green / High** at 75% or above. These bands are communication thresholds, not proof of correctness; the score remains an evidence-weighted proposal and not an automated legal or legislative decision.

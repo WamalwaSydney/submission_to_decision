@@ -14,6 +14,8 @@ import { ModeratorQueuePage, ReportedContentPage } from './pages/ModeratorPages'
 import { ClerkIngestionPage, ClerkNoticesPage } from './pages/ClerkPages';
 import { AdminPage } from './pages/AdminPage';
 import { ResearchExportPage, CommunityRulesPage, RepresentativeDashboardPage, MyReceiptsPage } from './pages/OtherPages';
+import { CommitteeDashboardPage, BillFlowPage } from './pages/CommitteePages';
+import { MessagesPage } from './pages/MessagesPage';
 import { api } from './api/endpoints';
 import { getUnsyncedDrafts, markDraftSynced } from './utils/offline';
 
@@ -72,6 +74,7 @@ function AppRoutes() {
         <Route path="/" element={<HomePage />} />
         <Route path="/bills" element={<BillsListPage />} />
         <Route path="/bills/:id" element={<BillPage />} />
+        <Route path="/bill-flow/:id" element={<BillFlowPage />} />
         <Route path="/receipt-lookup" element={<ReceiptLookupPage />} />
         <Route path="/receipt-verify" element={<ReceiptVerifyPage />} />
         <Route path="/submit" element={<SubmitViewPage />} />
@@ -91,6 +94,8 @@ function AppRoutes() {
         <Route path="/admin" element={<AdminPage />} />
         <Route path="/research/export" element={<ResearchExportPage />} />
         <Route path="/community-rules" element={<CommunityRulesPage />} />
+        <Route path="/committee" element={<CommitteeDashboardPage />} />
+        <Route path="/messages" element={<MessagesPage />} />
       </Routes>
     </Layout>
   );

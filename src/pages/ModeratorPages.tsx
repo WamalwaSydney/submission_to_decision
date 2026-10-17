@@ -6,6 +6,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { CheckCircle2, XCircle, Clock, AlertTriangle, Flag, Shield, Gavel, Users, FileText, Sparkles } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { Card, DisclaimerBox, InfoBox, Badge, Label, SelectField, BtnPrimary, BtnSecondary, BtnDanger } from '../components/UI';
+import { confidenceClasses, confidenceBarClass, confidenceLabel } from '../utils/confidence';
 
 export function ModeratorQueuePage() {
   const { state, dispatch } = useApp();
@@ -107,11 +108,11 @@ export function ModeratorQueuePage() {
                             <span className="text-xs font-bold uppercase tracking-wider text-surface-500">Confidence</span>
                             <div className="flex-1 h-2.5 rounded-full bg-surface-100 overflow-hidden">
                               <div
-                                className="h-full rounded-full bg-gradient-to-r from-primary-500 to-accent-500 transition-all"
+                                className={`h-full rounded-full ${confidenceBarClass(match.confidence_score)} transition-all`}
                                 style={{ width: `${confidencePct}%` }}
                               />
                             </div>
-                            <span className="text-sm font-black text-surface-900 tabular-nums">{confidencePct}%</span>
+                            <span className={`rounded-full border px-2.5 py-1 text-xs font-black ${confidenceClasses(match.confidence_score)}`}>{confidenceLabel(match.confidence_score)} · {confidencePct}%</span>
                           </div>
                         </div>
 

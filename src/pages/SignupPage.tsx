@@ -4,34 +4,23 @@ import { Alert, Box, IconButton, InputAdornment, MenuItem, TextField, Typography
 import { ArrowRight, Eye, EyeOff, LockKeyhole, UserRoundPlus } from 'lucide-react';
 import { Card } from '../components/UI';
 import { useApp } from '../context/AppContext';
-import { UserRole } from '../types';
 import { api } from '../api/endpoints';
 
-const ROLE_OPTIONS: { value: UserRole; label: string }[] = [
+type PublicSignupRole = 'citizen' | 'representative';
+
+const ROLE_OPTIONS: { value: PublicSignupRole; label: string }[] = [
   { value: 'citizen', label: 'Citizen' },
   { value: 'representative', label: 'Representative / office holder' },
-  { value: 'clerk', label: 'Clerk' },
-  { value: 'cso', label: 'Civil society organisation (CSO)' },
-  { value: 'journalist', label: 'Journalist' },
-  { value: 'moderator', label: 'Moderator' },
-  { value: 'administrator', label: 'Administrator' },
 ];
 
-const ELEVATED: UserRole[] = [
-  'representative',
-  'clerk',
-  'moderator',
-  'administrator',
-  'cso',
-  'journalist',
-];
+const ELEVATED: PublicSignupRole[] = ['representative'];
 
 export function SignupPage() {
   const { dispatch } = useApp();
   const navigate = useNavigate();
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
-  const [role, setRole] = useState<UserRole>('citizen');
+  const [role, setRole] = useState<PublicSignupRole>('citizen');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -125,7 +114,7 @@ export function SignupPage() {
             select
             label="Account type"
             value={role}
-            onChange={event => setRole(event.target.value as UserRole)}
+            onChange={event => setRole(event.target.value as PublicSignupRole)}
             fullWidth
           >
             {ROLE_OPTIONS.map(option => (

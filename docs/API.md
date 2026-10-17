@@ -180,10 +180,13 @@ All endpoints require authentication except those marked **Public**.
 ```json
 {
   "report_id": "uuid",
-  "extraction_status": "pending",
-  "ocr_used": false
+  "extraction_status": "extracted",
+  "ocr_used": false,
+  "match_proposals": []
 }
 ```
+
+After extraction, idempotent match proposals are generated for the selected bill. Re-uploading or explicitly regenerating proposals does not duplicate an existing receipt-to-entry proposal.
 
 ### GET /reports/{id}
 **Clerk, Moderator, Admin** — Get report with entries.
@@ -201,6 +204,9 @@ All endpoints require authentication except those marked **Public**.
 
 ### PUT /reports/{id}/verify
 **Clerk** — Mark report as verified.
+
+### POST /reports/{bill_ref}/generate-matches
+**Clerk, Moderator, Administrator** — Explicitly generate idempotent match proposals for receipts and report entries associated with a bill.
 
 ---
 

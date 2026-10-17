@@ -8,7 +8,9 @@ import { Badge, DisclaimerBox, InfoBox, Card } from '../components/UI';
 
 export function AdminPage() {
   const { state, dispatch } = useApp();
-  const [activeTab, setActiveTab] = useState<'profiles' | 'roles' | 'export' | 'settings'>('profiles');
+  const [activeTab, setActiveTab] = useState<'profiles' | 'roles' | 'committees' | 'export' | 'settings'>('profiles');
+  const [committeeForm, setCommitteeForm] = useState({ name: '', institution: 'National Assembly', description: '', contact_email: '', account_name: '', account_email: '', account_password: '' });
+  const [committeeMessage, setCommitteeMessage] = useState('');
   const [adminUsers, setAdminUsers] = useState(state.users);
   const [userPage, setUserPage] = useState(1);
 
@@ -102,6 +104,7 @@ export function AdminPage() {
         {[
           { key: 'profiles', label: 'Profile Verification', icon: Shield },
           { key: 'roles', label: 'Role Management', icon: Users },
+          { key: 'committees', label: 'Committees', icon: Users },
           { key: 'export', label: 'Data Export', icon: Download },
           { key: 'settings', label: 'Settings', icon: Settings },
         ].map(tab => (
@@ -327,6 +330,24 @@ export function AdminPage() {
             </div>
           </DisclaimerBox>
         </div>
+      )}
+
+      {activeTab === 'committees' && (
+        <Card className="!p-6">
+          <h2 className="text-2xl font-black text-surface-900 mb-2">Create a committee</h2>
+          <p className="text-sm text-surface-600 mb-5">This creates the committee record and its committee login account.</p>
+          <form className="grid gap-3 md:grid-cols-2" onSubmit={async (event) => { event.preventDefault(); setCommitteeMessage(''); try { await api.createCommittee(committeeForm); setCommitteeMessage('Committee and account created.'); setCommitteeForm({ name: '', institution: 'National Assembly', description: '', contact_email: '', account_name: '', account_email: '', account_password: '' }); } catch (e) { setCommitteeMessage(e instanceof Error ? e.message : 'Unable to create committee.'); } }}>
+            <input className="input-field" required placeholder="Committee name" value={committeeForm.name} onChange={e => setCommitteeForm({ ...committeeForm, name: e.target.value })} />
+            <select className="input-field" value={committeeForm.institution} onChange={e => setCommitteeForm({ ...committeeForm, institution: e.target.value })}><option>National Assembly</option><option>Nairobi County Assembly</option><option>Trans Nzoia County Assembly</option></select>
+            <input className="input-field" placeholder="Contact email" type="email" value={committeeForm.contact_email} onChange={e => setCommitteeForm({ ...committeeForm, contact_email: e.target.value })} />
+            <input className="input-field" placeholder="Committee description" value={committeeForm.description} onChange={e => setCommitteeForm({ ...committeeForm, description: e.target.value })} />
+            <input className="input-field" required placeholder="Account display name" value={committeeForm.account_name} onChange={e => setCommitteeForm({ ...committeeForm, account_name: e.target.value })} />
+            <input className="input-field" required placeholder="Account email" type="email" value={committeeForm.account_email} onChange={e => setCommitteeForm({ ...committeeForm, account_email: e.target.value })} />
+            <input className="input-field" required minLength={8} placeholder="Temporary password (8+ characters)" type="password" value={committeeForm.account_password} onChange={e => setCommitteeForm({ ...committeeForm, account_password: e.target.value })} />
+            <button className="btn-primary" type="submit">Create committee</button>
+          </form>
+          {committeeMessage && <p className="text-sm mt-4">{committeeMessage}</p>}
+        </Card>
       )}
 
       {activeTab === 'export' && (

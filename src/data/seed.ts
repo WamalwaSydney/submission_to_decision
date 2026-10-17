@@ -1,7 +1,7 @@
 import { 
   LegislativeItem, ParticipationReceipt, CommitteeReport, ReportEntry, 
   SubmissionMatch, NoticeRecord, RepresentativeProfile, User, 
-  ModerationAction, AuditLogEntry, Institution 
+  ModerationAction, AuditLogEntry, Institution, Committee 
 } from '../types';
 
 // Genesis hash for the chain (first receipt's previous_hash)
@@ -11,16 +11,20 @@ export const GENESIS_HASH = '000000000000000000000000000000000000000000000000000
 export const seedUsers: User[] = [
   { id: 'u-citizen-001', role: 'citizen', name: 'Jane Citizen', email: 'jane@example.com', status: 'active', created_date: '2026-01-15T08:00:00Z' },
   { id: 'u-rep-001', role: 'representative', name: 'Hon. Simulated Rep', email: 'rep@example.com', status: 'active', created_date: '2026-01-10T08:00:00Z' },
-  { id: 'u-researcher-001', role: 'researcher', name: 'Dr. Researcher', email: 'researcher@example.com', status: 'active', created_date: '2026-01-12T08:00:00Z' },
+  { id: 'u-committee-001', role: 'committee', name: 'Simulated Finance Committee', email: 'committee@example.com', status: 'active', committee_id: 'committee-001', created_date: '2026-01-12T08:00:00Z' },
   { id: 'u-moderator-001', role: 'moderator', name: 'Mod User', email: 'mod@example.com', status: 'active', created_date: '2026-01-08T08:00:00Z' },
   { id: 'u-admin-001', role: 'administrator', name: 'Admin User', email: 'admin@example.com', status: 'active', created_date: '2026-01-05T08:00:00Z' },
   { id: 'u-clerk-001', role: 'clerk', name: 'Clerk User', email: 'clerk@example.com', status: 'active', created_date: '2026-01-06T08:00:00Z' },
 ];
 
+export const seedCommittees: Committee[] = [
+  { id: 'committee-001', name: 'Simulated Finance Committee', institution: 'National Assembly', description: 'Demo committee; all records are simulated.', contact_email: 'committee@example.com', status: 'active', created_at: '2026-01-12T08:00:00Z' },
+];
+
 // Seed legislative items (bills) - clearly marked simulated
 export const seedBills: LegislativeItem[] = [
   {
-    id: 'bill-001', title: 'Nairobi Urban Planning (Amendment) Bill, 2026', identifier: 'NA/2026/Bill-014',
+    id: 'bill-001', title: 'Nairobi Urban Planning (Amendment) Bill, 2026', identifier: 'NA/2026/Bill-014', committee_id: 'committee-001',
     institution: 'National Assembly', stage: 'Committee Stage',
     documents: [{ name: 'Bill Text (Simulated)', url: '#' }, { name: 'Memorandum (Simulated)', url: '#' }],
     status_history: [

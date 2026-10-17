@@ -10,7 +10,7 @@ import { api } from '../api/endpoints';
 const roleIcons: Record<UserRole, React.ReactNode> = {
   citizen: <Users size={17} />,
   representative: <Gavel size={17} />,
-  researcher: <Search size={17} />,
+  committee: <Gavel size={17} />,
   moderator: <ShieldCheck size={17} />,
   clerk: <FileCheck size={17} />,
   administrator: <Settings size={17} />,
@@ -19,7 +19,7 @@ const roleIcons: Record<UserRole, React.ReactNode> = {
 const roleColors: Record<UserRole, string> = {
   citizen: '#a52d29',
   representative: '#176b2b',
-  researcher: '#155f78',
+  committee: '#155f78',
   moderator: '#a66e0b',
   clerk: '#526060',
   administrator: '#641b19',

@@ -73,7 +73,7 @@ This document records every choice made where the specification was silent on im
 |---|---|---|
 | Research export | JSON + CSV | JSON for programmatic use, CSV for spreadsheet analysis |
 | Anonymization | Strip author_id, reviewer_id, auth_data | Spec requirement (FR12) |
-| Public export | Outcome trail + notice data | Available to journalists/researchers |
+| Public export | Outcome trail + notice data | Available to all public users |
 
 ## Open Questions
 

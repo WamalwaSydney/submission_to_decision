@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.auth import get_current_user, require_role, verify_password, get_password_hash, create_access_token
 from app.models import (
-    User, LegislativeItem, ParticipationReceipt,
+    User, Committee, LegislativeItem, ParticipationReceipt, Message,
     CommitteeReport, ReportEntry, SubmissionMatch, RepresentativeProfile, NoticeRecord,
     ModerationAction,
 )
@@ -36,6 +36,32 @@ class RegisterRequest(BaseModel):
     role: str = "citizen"
 
 
+class CommitteeCreate(BaseModel):
+    name: str
+    institution: str
+    description: Optional[str] = None
+    contact_email: Optional[str] = None
+    account_name: str
+    account_email: str
+    account_password: str
+
+class BillCreate(BaseModel):
+    title: str
+    identifier: str
+    stage: str = "Introduced"
+    source_url: Optional[str] = None
+    source_status: Optional[str] = None
+    documents: list[dict] = []
+
+class MessageCreate(BaseModel):
+    recipient_user_id: Optional[UUID] = None
+    committee_id: Optional[UUID] = None
+    bill_id: Optional[UUID] = None
+    receipt_id: Optional[UUID] = None
+    subject: str
+    body: str
+    message_type: str = "general"
+
 class ReportEntryUpdate(BaseModel):
     treatment: str
     stated_reason: Optional[str] = None
@@ -48,6 +74,7 @@ def public_user(user: User) -> dict:
         "name": user.name,
         "email": user.email,
         "status": user.status,
+        "committee_id": str(user.committee_id) if user.committee_id else None,
         "created_date": user.created_date,
     }
 
@@ -112,6 +139,49 @@ def to_dict(obj, exclude: set = frozenset()) -> dict:
 
 PUBLIC_RECEIPT_EXCLUDE = {"author_id"}
 
+
+# ============ Committees ============
+
+@router.get("/committees")
+async def list_committees(db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Committee).where(Committee.status == "active").order_by(Committee.name.asc()))
+    return {"committees": [to_dict(c) for c in result.scalars().all()]}
+
+@router.post("/committees")
+async def create_committee(payload: CommitteeCreate, db: AsyncSession = Depends(get_db), current_user: User = Depends(require_role("administrator"))):
+    if len(payload.account_password) < 8:
+        raise HTTPException(status_code=422, detail="Committee account password must be at least 8 characters")
+    existing = await db.execute(select(User).where(User.email == payload.account_email.strip().lower()))
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail="Committee account email already exists")
+    committee = Committee(name=payload.name.strip(), institution=payload.institution.strip(), description=payload.description, contact_email=payload.contact_email, created_by=current_user.id)
+    db.add(committee); await db.flush()
+    account = User(name=payload.account_name.strip(), email=payload.account_email.strip().lower(), role="committee", password_hash=get_password_hash(payload.account_password), committee_id=committee.id, status="active")
+    db.add(account)
+    await record_audit(db, entity_type="committee", entity_id=committee.id, action="created", actor_id=current_user.id, details={"name": committee.name, "institution": committee.institution})
+    await db.commit(); await db.refresh(committee)
+    return {"committee": to_dict(committee), "account": public_user(account)}
+
+@router.get("/committees/me/bills")
+async def committee_bills(db: AsyncSession = Depends(get_db), current_user: User = Depends(require_role("committee"))):
+    result = await db.execute(select(LegislativeItem).where(LegislativeItem.committee_id == current_user.committee_id).order_by(LegislativeItem.source_updated_at.desc().nullslast(), LegislativeItem.title.asc()))
+    return {"bills": [to_dict(b) for b in result.scalars().all()]}
+
+@router.post("/committees/me/bills")
+async def committee_ingest_bill(payload: BillCreate, db: AsyncSession = Depends(get_db), current_user: User = Depends(require_role("committee"))):
+    if not current_user.committee_id:
+        raise HTTPException(status_code=409, detail="Committee account is not linked to a committee")
+    duplicate = await db.execute(select(LegislativeItem).where(LegislativeItem.identifier == payload.identifier.strip()))
+    if duplicate.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail="A bill with this identifier already exists")
+    committee_result = await db.execute(select(Committee).where(Committee.id == current_user.committee_id))
+    committee = committee_result.scalar_one_or_none()
+    bill = LegislativeItem(title=payload.title.strip(), identifier=payload.identifier.strip(), institution=committee.institution, stage=payload.stage, documents=payload.documents, source_url=payload.source_url, source_status=payload.source_status or "committee-ingested", source_updated_at=date.today(), committee_id=committee.id, is_simulated=False)
+    bill.status_history = [{"date": date.today().isoformat(), "stage": payload.stage, "note": "Bill ingested by committee"}]
+    db.add(bill); await db.flush()
+    await record_audit(db, entity_type="legislative_item", entity_id=bill.id, action="ingested_by_committee", actor_id=current_user.id, details={"committee_id": str(committee.id), "identifier": bill.identifier})
+    await db.commit(); await db.refresh(bill)
+    return {"bill": to_dict(bill)}
 
 # ============ Bills ============
 
@@ -187,8 +257,14 @@ async def get_bill(bill_id: UUID, db: AsyncSession = Depends(get_db)):
         else:
             outcome_counts["awaiting committee report"] += 1
 
+    committee = None
+    if bill.committee_id:
+        c_result = await db.execute(select(Committee).where(Committee.id == bill.committee_id))
+        c = c_result.scalar_one_or_none()
+        committee = to_dict(c) if c else None
     return {
         **to_dict(bill),
+        "committee": committee,
         "outcome_counts": outcome_counts,
         "total_submissions": len(receipts),
     }
@@ -202,6 +278,7 @@ async def bootstrap(db: AsyncSession = Depends(get_db)):
         return [to_dict(row, exclude=exclude) for row in result.scalars().all()]
 
     return {
+        "committees": await all_rows(Committee),
         "bills": await all_rows(LegislativeItem),
         "receipts": await all_rows(ParticipationReceipt, exclude=PUBLIC_RECEIPT_EXCLUDE),
         "reports": await all_rows(CommitteeReport),
@@ -211,6 +288,69 @@ async def bootstrap(db: AsyncSession = Depends(get_db)):
         "profiles": await all_rows(RepresentativeProfile, exclude=PROFILE_PUBLIC_EXCLUDE),
     }
 
+
+# ============ Public bill flow ============
+
+@router.get("/bills/{bill_id}/flow")
+async def bill_flow(bill_id: UUID, db: AsyncSession = Depends(get_db)):
+    bill_result = await db.execute(select(LegislativeItem).where(LegislativeItem.id == bill_id))
+    bill = bill_result.scalar_one_or_none()
+    if not bill: raise HTTPException(status_code=404, detail="Bill not found")
+    reports_result = await db.execute(select(CommitteeReport).where(CommitteeReport.bill_ref == bill.id).order_by(CommitteeReport.date_tabled.asc()))
+    reports = list(reports_result.scalars().all())
+    entries = []
+    for report in reports:
+        entry_result = await db.execute(select(ReportEntry).where(ReportEntry.report_ref == report.id))
+        entries.extend(entry_result.scalars().all())
+    receipt_result = await db.execute(select(ParticipationReceipt).where(ParticipationReceipt.legislative_item_id == bill.id).order_by(ParticipationReceipt.timestamp.asc()))
+    submissions = []
+    for receipt in receipt_result.scalars().all():
+        match_result = await db.execute(select(SubmissionMatch).where(SubmissionMatch.receipt_ref == receipt.id).order_by(SubmissionMatch.confidence_score.desc()))
+        match = match_result.scalars().first()
+        entry = next((e for e in entries if match and e.id == match.report_entry_ref), None)
+        submissions.append({"public_id": receipt.public_id, "timestamp": receipt.timestamp, "clause_ref": receipt.clause_ref, "status": entry.treatment if entry and match and match.reviewer_decision == "confirmed" else "awaiting committee report", "match_percentage": round(match.confidence_score * 100, 1) if match else None, "match_decision": match.reviewer_decision if match else None, "reason": entry.stated_reason if entry and match and match.reviewer_decision == "confirmed" else None})
+    return {"bill": to_dict(bill), "flow": [{"stage": h.get("stage"), "date": h.get("date"), "note": h.get("note")} for h in (bill.status_history or [])], "reports": [to_dict(r) for r in reports], "report_entries": [to_dict(e) for e in entries], "submissions": submissions}
+
+# ============ Messages ============
+
+@router.get("/messages")
+async def list_messages(db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+    if current_user.role == "committee":
+        query = select(Message).where((Message.committee_id == current_user.committee_id) | (Message.sender_id == current_user.id))
+    else:
+        query = select(Message).where((Message.recipient_user_id == current_user.id) | (Message.sender_id == current_user.id))
+    result = await db.execute(query.order_by(Message.created_at.desc()))
+    return {"messages": [to_dict(m) for m in result.scalars().all()]}
+
+@router.post("/messages")
+async def send_message(payload: MessageCreate, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+    if not payload.recipient_user_id and not payload.committee_id:
+        raise HTTPException(status_code=422, detail="Specify a recipient user or committee")
+    if not payload.body.strip() or not payload.subject.strip():
+        raise HTTPException(status_code=422, detail="Subject and body are required")
+    if current_user.role == "committee":
+        if payload.committee_id and payload.committee_id != current_user.committee_id:
+            raise HTTPException(status_code=403, detail="Committee may only send from its own account")
+        target_committee = current_user.committee_id
+    else:
+        target_committee = payload.committee_id
+    message = Message(sender_id=current_user.id, recipient_user_id=payload.recipient_user_id, committee_id=target_committee, bill_id=payload.bill_id, receipt_id=payload.receipt_id, subject=payload.subject.strip(), body=payload.body.strip(), message_type=payload.message_type)
+    db.add(message); await db.flush()
+    await record_audit(db, entity_type="message", entity_id=message.id, action="sent", actor_id=current_user.id, details={"message_type": message.message_type, "bill_id": str(payload.bill_id) if payload.bill_id else None, "receipt_id": str(payload.receipt_id) if payload.receipt_id else None})
+    await db.commit(); await db.refresh(message)
+    return {"message": to_dict(message)}
+
+@router.put("/messages/{message_id}/read")
+async def mark_message_read(message_id: UUID, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+    result = await db.execute(select(Message).where(Message.id == message_id))
+    message = result.scalar_one_or_none()
+    if not message: raise HTTPException(status_code=404, detail="Message not found")
+    allowed = (message.recipient_user_id == current_user.id) or (current_user.role == "committee" and message.committee_id == current_user.committee_id)
+    if not allowed: raise HTTPException(status_code=403, detail="Message is not addressed to this account")
+    message.is_read = True
+    await record_audit(db, entity_type="message", entity_id=message.id, action="viewed", actor_id=current_user.id, details={})
+    await db.commit()
+    return {"message": to_dict(message)}
 
 # ============ Receipts ============
 
@@ -416,7 +556,7 @@ async def upload_report(
                        action="uploaded", actor_id=current_user.id,
                        details={"sha256": provenance["sha256"], "source_url": source_url})
     await db.commit()
-    proposals = await linking_service.propose_matches(db, report.bill_ref)
+    proposals = await linking_service.propose_matches(db, report.bill_ref, use_llm=True)
 
     return {
         "report_id": report.id,
@@ -492,7 +632,7 @@ async def generate_match_proposals(
     result = await db.execute(select(LegislativeItem.id).where(LegislativeItem.id == bill_ref))
     if result.scalar_one_or_none() is None:
         raise HTTPException(status_code=404, detail="Bill not found")
-    matches = await linking_service.propose_matches(db, bill_ref)
+    matches = await linking_service.propose_matches(db, bill_ref, use_llm=True)
     return {"matches": [to_dict(match) for match in matches]}
 
 
@@ -657,8 +797,8 @@ async def list_moderation_cases(
 @router.get("/export/anonymized")
 async def export_anonymized(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_role("administrator")),
 ):
+    """Public, identifier-free outcome data; the former researcher role is unnecessary."""
     receipts_result = await db.execute(select(ParticipationReceipt))
     receipts = receipts_result.scalars().all()
 

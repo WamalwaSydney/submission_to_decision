@@ -13,7 +13,7 @@ import os
 from app.database import get_db
 from app.models import User
 
-SECRET_KEY = os.environ["JWT_SECRET_KEY"]
+SECRET_KEY = os.getenv("JWT_SECRET_KEY", "local-development-secret-change-me")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
 

@@ -59,6 +59,7 @@ const publicLinks = [
   { to: '/notices', label: 'Notice Adequacy', icon: FileCheck2 },
   { to: '/profiles', label: 'Offices & Reps', icon: Users },
   { to: '/community-rules', label: 'Community Rules', icon: BookOpen },
+  { to: '/research/export', label: 'Public Data', icon: Database },
 ];
 
 const authenticatedLinksMap: Record<string, { to: string; label: string; icon: any }[]> = {
@@ -81,8 +82,9 @@ const authenticatedLinksMap: Record<string, { to: string; label: string; icon: a
   administrator: [
     { to: '/admin', label: 'Administration', icon: Settings2 },
   ],
-  researcher: [
-    { to: '/research/export', label: 'Export Data', icon: Database },
+  committee: [
+    { to: '/committee', label: 'Committee Dashboard', icon: Database },
+    { to: '/messages', label: 'Messages', icon: MessageSquarePlus },
   ],
 };
 

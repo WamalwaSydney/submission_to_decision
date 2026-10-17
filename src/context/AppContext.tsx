@@ -3,16 +3,17 @@ import {
   User, LegislativeItem, ParticipationReceipt, CommitteeReport,
   ReportEntry, SubmissionMatch, NoticeRecord, RepresentativeProfile,
   ModerationAction, AuditLogEntry, UserRole, SubmissionStatus,
-  RepresentativeStatus, ReviewerDecision, LodgingStatus
+  RepresentativeStatus, ReviewerDecision, LodgingStatus, Committee
 } from '../types';
 import {
   seedUsers, seedBills, seedReceipts, seedReports, seedReportEntries,
-  seedMatches, seedNotices, seedProfiles, seedModerationActions, seedAuditLog
+  seedMatches, seedNotices, seedProfiles, seedModerationActions, seedAuditLog, seedCommittees
 } from '../data/seed';
 import { api } from '../api/endpoints';
 
 interface AppState {
   users: User[];
+  committees: Committee[];
   bills: LegislativeItem[];
   receipts: ParticipationReceipt[];
   reports: CommitteeReport[];
@@ -51,6 +52,7 @@ type Action =
 
 const initialState: AppState = {
   users: seedUsers,
+  committees: seedCommittees,
   bills: seedBills,
   receipts: seedReceipts,
   reports: seedReports,
@@ -176,6 +178,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         // has not been seeded yet. This is especially important for clerk
         // report ingestion, which must always have a bill to attach to.
         bills: data.bills.length > 0 ? data.bills : seedBills,
+        committees: data.committees?.length ? data.committees : seedCommittees,
         receipts: data.receipts,
         reports: data.reports,
         reportEntries: data.report_entries,

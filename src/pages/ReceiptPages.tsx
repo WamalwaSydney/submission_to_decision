@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Card, Badge, Label, InputField, DisclaimerBox, InfoBox, StatusBadge } from '../components/UI';
+import { confidenceClasses, confidenceBarClass, confidenceLabel } from '../utils/confidence';
 
 function SubmissionStatusBadge({ status }: { status: SubmissionStatus }) {
   return StatusBadge({ status });
@@ -270,11 +271,11 @@ export function ReceiptLookupPage() {
                           <div className="flex items-center gap-3">
                             <div className="flex-1 h-2.5 rounded-full bg-surface-100 overflow-hidden">
                               <div
-                                className="h-full rounded-full bg-gradient-to-r from-accent-500 to-primary-500"
+                                className={`h-full rounded-full ${confidenceBarClass(match.confidence_score)}`}
                                 style={{ width: `${match.confidence_score * 100}%` }}
                               />
                             </div>
-                            <span className="font-black text-surface-900">{(match.confidence_score * 100).toFixed(0)}%</span>
+                            <span className={`rounded-full border px-2.5 py-1 text-xs font-black ${confidenceClasses(match.confidence_score)}`}>{confidenceLabel(match.confidence_score)} · {(match.confidence_score * 100).toFixed(0)}%</span>
                           </div>
                         </div>
                         <div className="rounded-xl p-4 bg-white/80 backdrop-blur-sm border border-surface-200/80 md:col-span-2">

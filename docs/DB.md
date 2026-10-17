@@ -10,7 +10,7 @@ PostgreSQL 15+ with UUID primary keys, full-text search, and append-only enforce
 ```sql
 CREATE TABLE users (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    role VARCHAR(20) NOT NULL CHECK (role IN ('citizen', 'representative', 'researcher', 'moderator', 'administrator', 'clerk')),
+    role VARCHAR(20) NOT NULL CHECK (role IN ('citizen', 'representative', 'committee', 'moderator', 'administrator', 'clerk')),
     name VARCHAR(255) NOT NULL,
     email VARCHAR(255) UNIQUE NOT NULL,
     password_hash VARCHAR(255) NOT NULL,

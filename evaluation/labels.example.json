@@ -1,0 +1,19 @@
+{
+  "items": [
+    {
+      "receipt_id": "RCT-DEMO1",
+      "predicted_entry_id": "entry-1",
+      "gold_entry_id": "entry-1"
+    },
+    {
+      "receipt_id": "RCT-DEMO2",
+      "predicted_entry_id": "entry-3",
+      "gold_entry_id": "entry-2"
+    },
+    {
+      "receipt_id": "RCT-DEMO3",
+      "predicted_entry_id": null,
+      "gold_entry_id": "entry-4"
+    }
+  ]
+}

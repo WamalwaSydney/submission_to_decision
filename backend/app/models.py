@@ -8,6 +8,21 @@ import uuid
 
 from app.database import Base
 
+class Committee(Base):
+    __tablename__ = "committees"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(String(255), nullable=False, unique=True)
+    institution = Column(String(100), nullable=False)
+    description = Column(Text)
+    contact_email = Column(String(255))
+    status = Column(String(20), default="active")
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    users = relationship("User", foreign_keys="User.committee_id", back_populates="committee")
+    bills = relationship("LegislativeItem", back_populates="committee")
+
 class User(Base):
     __tablename__ = "users"
 
@@ -18,9 +33,11 @@ class User(Base):
     password_hash = Column(String(255), nullable=False)
     privacy_prefs = Column(JSON, default={"show_name_publicly": False})
     status = Column(String(20), default="active")
+    committee_id = Column(UUID(as_uuid=True), ForeignKey("committees.id"))
     created_date = Column(DateTime(timezone=True), server_default=func.now())
 
     receipts = relationship("ParticipationReceipt", back_populates="author")
+    committee = relationship("Committee", foreign_keys=[committee_id], back_populates="users")
     profiles = relationship(
         "RepresentativeProfile",
         foreign_keys="RepresentativeProfile.user_id",
@@ -47,7 +64,9 @@ class LegislativeItem(Base):
 
     receipts = relationship("ParticipationReceipt", back_populates="legislative_item")
     reports = relationship("CommitteeReport", back_populates="bill")
+    committee_id = Column(UUID(as_uuid=True), ForeignKey("committees.id"))
     notices = relationship("NoticeRecord", back_populates="bill")
+    committee = relationship("Committee", back_populates="bills")
 
 class ParticipationReceipt(Base):
     __tablename__ = "participation_receipts"
@@ -171,6 +190,23 @@ class ModerationAction(Base):
     moderator_id = Column(UUID(as_uuid=True), ForeignKey("users.id"))
     appeal_status = Column(String(20), default="none")
     timestamp = Column(DateTime(timezone=True), server_default=func.now())
+
+class Message(Base):
+    __tablename__ = "messages"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    sender_id = Column(UUID(as_uuid=True), ForeignKey("users.id"))
+    recipient_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"))
+    committee_id = Column(UUID(as_uuid=True), ForeignKey("committees.id"))
+    bill_id = Column(UUID(as_uuid=True), ForeignKey("legislative_items.id"))
+    receipt_id = Column(UUID(as_uuid=True), ForeignKey("participation_receipts.id"))
+    subject = Column(String(255), nullable=False)
+    body = Column(Text, nullable=False)
+    message_type = Column(String(40), nullable=False, default="general")
+    sender_type = Column(String(20), nullable=False, default="user")
+    is_read = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
 
 class AuditLog(Base):
     __tablename__ = "audit_log"

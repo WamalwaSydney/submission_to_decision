@@ -4,6 +4,7 @@ import { User } from '../types';
 export interface LoginResponse { access_token: string; token_type: string; user: User; }
 export interface BootstrapResponse {
   bills: any[];
+  committees: any[];
   receipts: any[];
   reports: any[];
   report_entries: any[];
@@ -14,6 +15,11 @@ export interface BootstrapResponse {
 
 export const api = {
   bootstrap: () => apiFetch<BootstrapResponse>('/bootstrap'),
+  committees: () => apiFetch<{ committees: any[] }>('/committees'),
+  createCommittee: (data: { name: string; institution: string; description?: string; contact_email?: string; account_name: string; account_email: string; account_password: string }) => apiFetch<any>('/committees', { method: 'POST', body: JSON.stringify(data) }),
+  committeeBills: () => apiFetch<{ bills: any[] }>('/committees/me/bills'),
+  ingestBill: (data: { title: string; identifier: string; stage: string; source_url?: string }) => apiFetch<any>('/committees/me/bills', { method: 'POST', body: JSON.stringify(data) }),
+  billFlow: (billId: string) => apiFetch<any>(`/bills/${encodeURIComponent(billId)}/flow`),
   users: () => apiFetch<{ users: User[] }>('/users'),
   login: (email: string, password: string) => apiFetch<LoginResponse>('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
   register: (name: string, email: string, password: string, role: 'citizen' | 'representative') => apiFetch<LoginResponse>('/auth/register', { method: 'POST', body: JSON.stringify({ name, email, password, role }) }),
@@ -51,4 +57,7 @@ export const api = {
   reportContent: (contentType: string, contentId: string, reason: string) => { const form = new FormData(); form.append('content_type', contentType); form.append('content_id', contentId); form.append('reason', reason); return apiFetch<any>('/reports/content', { method: 'POST', body: form }); },
   moderationCases: () => apiFetch<{ cases: any[] }>('/moderation/cases'),
   exportAnonymized: () => apiFetch<any>('/export/anonymized'),
+  messages: () => apiFetch<{ messages: any[] }>('/messages'),
+  sendMessage: (data: { recipient_user_id?: string; committee_id?: string; bill_id?: string; receipt_id?: string; subject: string; body: string; message_type?: string }) => apiFetch<any>('/messages', { method: 'POST', body: JSON.stringify(data) }),
+  markMessageRead: (messageId: string) => apiFetch<any>(`/messages/${encodeURIComponent(messageId)}/read`, { method: 'PUT' }),
 };

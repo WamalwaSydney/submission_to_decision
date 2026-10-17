@@ -21,14 +21,14 @@ export type ExtractionStatus =
   | 'needs_review'
   | 'verified';
 
-export type MatchMethod = 'clause' | 'text-similarity';
+export type MatchMethod = 'clause' | 'text-similarity' | 'llm';
 
 export type ReviewerDecision = 'confirmed' | 'rejected' | 'pending';
 
 export type UserRole = 
   | 'citizen'
   | 'representative'
-  | 'researcher'
+  | 'committee'
   | 'moderator'
   | 'administrator'
   | 'clerk';
@@ -48,7 +48,33 @@ export interface User {
   name: string;
   email: string;
   status: 'active' | 'suspended';
+  committee_id?: string;
   created_date: string;
+}
+
+export interface Committee {
+  id: string;
+  name: string;
+  institution: Institution;
+  description?: string;
+  contact_email?: string;
+  status: string;
+  created_at: string;
+}
+
+export interface Message {
+  id: string;
+  sender_id: string;
+  recipient_user_id?: string;
+  committee_id?: string;
+  bill_id?: string;
+  receipt_id?: string;
+  subject: string;
+  body: string;
+  message_type: string;
+  sender_type?: 'user' | 'system';
+  is_read: boolean;
+  created_at: string;
 }
 
 export interface RepresentativeProfile {
@@ -74,6 +100,7 @@ export interface LegislativeItem {
   documents: { name: string; url?: string }[];
   status_history: { date: string; stage: string; note: string }[];
   is_simulated: boolean;
+  committee_id?: string;
 }
 
 export interface ParticipationReceipt {
