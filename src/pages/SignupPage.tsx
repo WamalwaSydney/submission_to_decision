@@ -23,6 +23,7 @@ export function SignupPage() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [role, setRole] = useState<PublicSignupRole>('citizen');
+  const [notificationLanguage, setNotificationLanguage] = useState<'en' | 'sw'>('en');
   const [committeeName, setCommitteeName] = useState('');
   const [institution, setInstitution] = useState('National Assembly');
   const [committeeDescription, setCommitteeDescription] = useState('');
@@ -54,12 +55,15 @@ export function SignupPage() {
 
     setSubmitting(true);
     try {
-      const response = await api.register(normalizedName, normalizedEmail, password, role, role === 'committee_officer' ? {
-        committee_name: committeeName.trim() || undefined,
-        institution,
-        committee_description: committeeDescription.trim() || undefined,
-        committee_contact_email: normalizedEmail,
-      } : undefined);
+      const response = await api.register(normalizedName, normalizedEmail, password, role, {
+        notification_language: notificationLanguage,
+        ...(role === 'committee_officer' ? {
+          committee_name: committeeName.trim() || undefined,
+          institution,
+          committee_description: committeeDescription.trim() || undefined,
+          committee_contact_email: normalizedEmail,
+        } : {}),
+      });
       localStorage.setItem('access_token', response.access_token);
       localStorage.setItem('current_user', JSON.stringify(response.user));
       dispatch({ type: 'SET_USER', payload: response.user });
@@ -132,6 +136,17 @@ export function SignupPage() {
                 {option.label}
               </MenuItem>
             ))}
+          </TextField>
+          <TextField
+            select
+            label="Notification language"
+            value={notificationLanguage}
+            onChange={event => setNotificationLanguage(event.target.value as 'en' | 'sw')}
+            fullWidth
+            helperText="Automated in-app updates will use this language. You can change it later."
+          >
+            <MenuItem value="en">English</MenuItem>
+            <MenuItem value="sw">Kiswahili</MenuItem>
           </TextField>
 
           {role === 'committee_officer' && (

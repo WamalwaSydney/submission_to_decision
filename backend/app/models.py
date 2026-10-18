@@ -206,6 +206,11 @@ class Message(Base):
     message_type = Column(String(40), nullable=False, default="general")
     sender_type = Column(String(20), nullable=False, default="user")
     is_read = Column(Boolean, nullable=False, default=False)
+    event_key = Column(String(255), unique=True)
+    language = Column(String(2), nullable=False, default="en")
+    generation_source = Column(String(20), nullable=False, default="template")
+    source_snapshot = Column(JSON, nullable=False, default=dict)
+    delivery_status = Column(String(20), nullable=False, default="delivered")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 

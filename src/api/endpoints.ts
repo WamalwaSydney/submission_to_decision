@@ -8,6 +8,7 @@ export interface SignupOptions {
   institution?: string;
   committee_description?: string;
   committee_contact_email?: string;
+  notification_language?: 'en' | 'sw';
 }
 export interface BootstrapResponse {
   bills: any[];
@@ -73,6 +74,6 @@ export const api = {
   moderationCases: () => apiFetch<{ cases: any[] }>('/moderation/cases'),
   exportAnonymized: () => apiFetch<any>('/export/anonymized'),
   messages: () => apiFetch<{ messages: any[] }>('/messages'),
-  sendMessage: (data: { recipient_user_id?: string; committee_id?: string; bill_id?: string; receipt_id?: string; subject: string; body: string; message_type?: string }) => apiFetch<any>('/messages', { method: 'POST', body: JSON.stringify(data) }),
+  updateNotificationLanguage: (language: 'en' | 'sw') => apiFetch<{ notification_language: 'en' | 'sw' }>('/messages/preferences', { method: 'PUT', body: JSON.stringify({ language }) }),
   markMessageRead: (messageId: string) => apiFetch<any>(`/messages/${encodeURIComponent(messageId)}/read`, { method: 'PUT' }),
 };

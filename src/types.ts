@@ -47,6 +47,7 @@ export interface User {
   email: string;
   status: 'active' | 'suspended';
   committee_id?: string;
+  notification_language?: 'en' | 'sw';
   created_date: string;
 }
 
@@ -71,6 +72,8 @@ export interface Message {
   body: string;
   message_type: string;
   sender_type?: 'user' | 'system';
+  language?: 'en' | 'sw';
+  generation_source?: 'gemini' | 'template';
   is_read: boolean;
   created_at: string;
 }

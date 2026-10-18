@@ -18,7 +18,7 @@ from app.models import (
     CommitteeReport, ReportEntry, SubmissionMatch, RepresentativeProfile, NoticeRecord,
     ModerationAction,
 )
-from app.services import receipt_service, linking_service, ingestion_service, storage_service
+from app.services import receipt_service, linking_service, ingestion_service, storage_service, notification_service
 from app.audit import record_audit
 
 router = APIRouter()
@@ -38,6 +38,7 @@ class RegisterRequest(BaseModel):
     institution: Optional[str] = None
     committee_description: Optional[str] = None
     committee_contact_email: Optional[str] = None
+    notification_language: str = "en"
 
 
 class CommitteeCreate(BaseModel):
@@ -57,14 +58,8 @@ class BillCreate(BaseModel):
     source_status: Optional[str] = None
     documents: list[dict] = []
 
-class MessageCreate(BaseModel):
-    recipient_user_id: Optional[UUID] = None
-    committee_id: Optional[UUID] = None
-    bill_id: Optional[UUID] = None
-    receipt_id: Optional[UUID] = None
-    subject: str
-    body: str
-    message_type: str = "general"
+class NotificationPreferenceUpdate(BaseModel):
+    language: str
 
 class ReportEntryUpdate(BaseModel):
     treatment: str
@@ -80,6 +75,7 @@ def public_user(user: User) -> dict:
         "status": user.status,
         "committee_id": str(user.committee_id) if user.committee_id else None,
         "created_date": user.created_date,
+        "notification_language": ((user.privacy_prefs or {}).get("notification_language", "en")),
     }
 
 
@@ -136,6 +132,7 @@ async def register(payload: RegisterRequest, db: AsyncSession = Depends(get_db))
         db.add(committee)
         await db.flush()
 
+    notification_language = "sw" if payload.notification_language == "sw" else "en"
     user = User(
         name=name,
         email=email,
@@ -143,6 +140,7 @@ async def register(payload: RegisterRequest, db: AsyncSession = Depends(get_db))
         password_hash=get_password_hash(payload.password),
         status="active",
         committee_id=committee.id if committee else None,
+        privacy_prefs={"show_name_publicly": False, "notification_language": notification_language},
     )
     db.add(user)
     await db.flush()
@@ -406,37 +404,34 @@ async def bill_flow(bill_id: UUID, db: AsyncSession = Depends(get_db)):
 
 @router.get("/messages")
 async def list_messages(db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
-    if current_user.role == "committee_officer":
-        query = select(Message).where((Message.committee_id == current_user.committee_id) | (Message.sender_id == current_user.id))
-    else:
-        query = select(Message).where((Message.recipient_user_id == current_user.id) | (Message.sender_id == current_user.id))
+    if current_user.role != "citizen":
+        raise HTTPException(status_code=403, detail="Automated notification inbox is for citizen accounts")
+    query = select(Message).where(Message.recipient_user_id == current_user.id)
     result = await db.execute(query.order_by(Message.created_at.desc()))
     return {"messages": [to_dict(m) for m in result.scalars().all()]}
 
-@router.post("/messages")
-async def send_message(payload: MessageCreate, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
-    if not payload.recipient_user_id and not payload.committee_id:
-        raise HTTPException(status_code=422, detail="Specify a recipient user or committee")
-    if not payload.body.strip() or not payload.subject.strip():
-        raise HTTPException(status_code=422, detail="Subject and body are required")
-    if current_user.role == "committee_officer":
-        if payload.committee_id and payload.committee_id != current_user.committee_id:
-            raise HTTPException(status_code=403, detail="Committee may only send from its own account")
-        target_committee = current_user.committee_id
-    else:
-        target_committee = payload.committee_id
-    message = Message(sender_id=current_user.id, recipient_user_id=payload.recipient_user_id, committee_id=target_committee, bill_id=payload.bill_id, receipt_id=payload.receipt_id, subject=payload.subject.strip(), body=payload.body.strip(), message_type=payload.message_type)
-    db.add(message); await db.flush()
-    await record_audit(db, entity_type="message", entity_id=message.id, action="sent", actor_id=current_user.id, details={"message_type": message.message_type, "bill_id": str(payload.bill_id) if payload.bill_id else None, "receipt_id": str(payload.receipt_id) if payload.receipt_id else None})
-    await db.commit(); await db.refresh(message)
-    return {"message": to_dict(message)}
-
+@router.put("/messages/preferences")
+async def update_message_preferences(
+    payload: NotificationPreferenceUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if current_user.role != "citizen":
+        raise HTTPException(status_code=403, detail="Only citizen accounts have notification preferences")
+    if payload.language not in {"en", "sw"}:
+        raise HTTPException(status_code=422, detail="Language must be en or sw")
+    preferences = dict(current_user.privacy_prefs or {})
+    preferences["notification_language"] = payload.language
+    current_user.privacy_prefs = preferences
+    await db.commit()
+    await db.refresh(current_user)
+    return {"notification_language": payload.language}
 @router.put("/messages/{message_id}/read")
 async def mark_message_read(message_id: UUID, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
     result = await db.execute(select(Message).where(Message.id == message_id))
     message = result.scalar_one_or_none()
     if not message: raise HTTPException(status_code=404, detail="Message not found")
-    allowed = (message.recipient_user_id == current_user.id) or (current_user.role == "committee_officer" and message.committee_id == current_user.committee_id)
+    allowed = current_user.role == "citizen" and message.recipient_user_id == current_user.id
     if not allowed: raise HTTPException(status_code=403, detail="Message is not addressed to this account")
     message.is_read = True
     await record_audit(db, entity_type="message", entity_id=message.id, action="viewed", actor_id=current_user.id, details={})
@@ -494,6 +489,9 @@ async def create_receipt(
         author_name=current_user.name if show_name_publicly else None,
     )
 
+    await notification_service.notify_receipt_event(
+        db, receipt, f"receipt:{receipt.id}:submitted", "submission_received",
+    )
     return {
         "receipt_id": receipt.id,
         "public_id": receipt.public_id,
@@ -647,6 +645,11 @@ async def upload_report(
                        action="uploaded", actor_id=current_user.id,
                        details={"sha256": provenance["sha256"], "source_url": source_url})
     await db.commit()
+    report_receipts = await db.execute(select(ParticipationReceipt).where(ParticipationReceipt.legislative_item_id == report.bill_ref))
+    for receipt in report_receipts.scalars().all():
+        await notification_service.notify_receipt_event(
+            db, receipt, f"report:{report.id}:receipt:{receipt.id}:received", "report_received",
+        )
     proposals = await linking_service.propose_matches(db, report.bill_ref, use_llm=True)
 
     return {
@@ -691,9 +694,21 @@ async def update_report_entry(
         raise HTTPException(status_code=404, detail="Report entry not found")
     entry.treatment = payload.treatment
     entry.stated_reason = payload.stated_reason
-    await record_audit(db, entity_type="report_entry", entity_id=entry.id, action="updated", actor_id=current_user.id, details={"treatment": payload.treatment, "stated_reason": payload.stated_reason})
+    outcome_change = await record_audit(db, entity_type="report_entry", entity_id=entry.id, action="updated", actor_id=current_user.id, details={"treatment": payload.treatment, "stated_reason": payload.stated_reason})
     await db.commit()
     await db.refresh(entry)
+    matches_result = await db.execute(select(SubmissionMatch).where(
+        SubmissionMatch.report_entry_ref == entry.id,
+        SubmissionMatch.reviewer_decision == "confirmed",
+    ))
+    for match in matches_result.scalars().all():
+        receipt_result = await db.execute(select(ParticipationReceipt).where(ParticipationReceipt.id == match.receipt_ref))
+        receipt = receipt_result.scalar_one_or_none()
+        if receipt:
+            await notification_service.notify_receipt_event(
+                db, receipt, f"entry:{entry.id}:change:{outcome_change.id}:receipt:{receipt.id}",
+                "outcome_updated", {"treatment": entry.treatment, "reason": entry.stated_reason or ""},
+            )
     return {"entry": to_dict(entry)}
 
 
@@ -845,6 +860,12 @@ async def create_notice(
     db.add(notice)
     await db.commit()
     await db.refresh(notice)
+    receipts_result = await db.execute(select(ParticipationReceipt).where(ParticipationReceipt.legislative_item_id == notice.bill_ref))
+    for receipt in receipts_result.scalars().all():
+        await notification_service.notify_receipt_event(
+            db, receipt, f"notice:{notice.id}:receipt:{receipt.id}:published", "notice_published",
+            {"window_start": notice.window_start.isoformat(), "window_end": notice.window_end.isoformat()},
+        )
 
     return {"notice": to_dict(notice)}
 

@@ -133,6 +133,21 @@ React Router routes such as `/login` or `/receipts/<id>` need a fallback rule, o
 6. A moderator confirms or rejects each match and records the decision.
 7. Public receipt and bill pages display the trace, confirmed status, and stated committee reason.
 
+### Automated in-app notifications
+
+Citizen notifications are generated for meaningful workflow events: submission receipt, a public notice or committee report becoming available, a proposed match awaiting human review, a human-confirmed or rejected match, and a later correction to a confirmed outcome. Proposed matches remain provisional until a human reviewer decides; AI does not determine the match or outcome. Citizens choose English or Kiswahili at signup and can change the preference on the Automated Updates page.
+
+When `GEMINI_API_KEY` is configured, Gemini drafts concise wording from the event facts (not the citizen's raw submission text). If the provider is unavailable or returns unusable output, the backend uses built-in English/Kiswahili templates. Notifications are stored in the citizen-only in-app inbox with event keys for retry deduplication, language, generator, delivery state, source snapshot/references, and an audit event. The manual message-creation endpoint has been removed.
+
+Apply the new database migration before running the updated backend against an existing database:
+
+```bash
+cd backend
+alembic upgrade head
+```
+
+`GEMINI_NOTIFICATION_MODEL` optionally selects the drafting model; without a configured Gemini key, the bilingual templates continue to send notifications.
+
 ## Quick start — local development
 
 ### Frontend
@@ -310,7 +325,7 @@ The Constitution of Kenya 2010, including Articles 10(2)(a), 118(1)(b), and 196,
 - It cannot guarantee that a concern is resolved.
 - Online submissions are not statistically representative of the public.
 - Device and connectivity gaps remain a pilot limitation.
-- The current interface is English-only; Kiswahili is a future milestone.
+- Most of the application interface remains English-only. Automated citizen notifications support English and Kiswahili.
 - Free tiers on Netlify, Render and Neon are limited and can change; they are not a production availability or backup guarantee, and the API may have cold-start delays.
 
 ## License
