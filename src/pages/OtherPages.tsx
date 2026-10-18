@@ -3,11 +3,30 @@ import { Link } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import { Download, FileText, BarChart3, Shield, AlertTriangle, Users, Eye, Clock, CheckCircle2, XCircle, Sparkles, Lock, Flag, Info, FileCheck2 } from 'lucide-react';
 import { motion } from 'framer-motion';
+import {
+  ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
+  PieChart, Pie, Cell,
+} from 'recharts';
 import { Card, DisclaimerBox, InfoBox, Badge, Label, InputField } from '../components/UI';
 
 export function ResearchExportPage() {
   const { state, getSubmissionStatus, getBillOutcomes } = useApp();
 
+  const outcomeTotals = ['adopted', 'amended', 'rejected with reasons', 'not addressed', 'awaiting committee report'].map(status => ({
+    name: status.replace(' with reasons', ''),
+    count: state.bills.reduce((total, bill) => total + getBillOutcomes(bill.id).filter(item => item.status === status).reduce((sum, item) => sum + item.count, 0), 0),
+  }));
+  const outcomeTotal = outcomeTotals.reduce((sum, item) => sum + item.count, 0);
+  const noticeMetrics = state.notices.map(notice => {
+    const start = new Date(notice.window_start);
+    const end = new Date(notice.window_end);
+    const published = new Date(notice.notice_date);
+    return {
+      bill: (state.bills.find(bill => bill.id === notice.bill_ref)?.title || 'Untitled bill').slice(0, 28),
+      windowDays: Math.max(0, Math.ceil((end.getTime() - start.getTime()) / 86400000)),
+      noticeDays: Math.max(0, Math.ceil((start.getTime() - published.getTime()) / 86400000)),
+    };
+  });
   const exportOutcomeTrail = () => {
     const data = state.bills.map(bill => {
       const outcomes = getBillOutcomes(bill.id);
@@ -83,7 +102,7 @@ export function ResearchExportPage() {
             <div className="absolute -bottom-24 -left-24 w-56 h-56 rounded-full bg-accent-100/40 blur-3xl pointer-events-none" />
             <div className="relative">
               <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-primary-500 to-accent-500 flex items-center justify-center text-white shadow-xl shadow-primary-500/30 mb-5">
-                <BarChart3 className="h-8 w-8" />
+                <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-white/40 bg-white/15"><BarChart3 className="h-8 w-8" /></div>
               </div>
               <h2 className="text-2xl font-black text-surface-900 tracking-tight mb-3">Outcome Trail Dataset</h2>
               <p className="text-sm text-surface-600 leading-relaxed mb-6">
@@ -127,6 +146,30 @@ export function ResearchExportPage() {
         </motion.div>
       </div>
 
+      <section className="space-y-5" aria-labelledby="public-data-charts">
+        <div>
+          <div className="inline-flex items-center gap-2 mb-2"><BarChart3 className="h-4 w-4 text-primary-600" /><span className="text-xs font-black uppercase tracking-[0.18em] text-primary-600">Data visualizations</span></div>
+          <h2 id="public-data-charts" className="text-2xl md:text-3xl font-black text-surface-900 tracking-tight">Public data at a glance</h2>
+          <p className="mt-2 text-sm text-surface-600">Charts below use the same currently loaded public records as the downloadable datasets.</p>
+        </div>
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+          <Card className="!p-6">
+            <h3 className="text-lg font-black text-surface-900 mb-1">Recorded outcome totals</h3>
+            <p className="text-xs text-surface-500 mb-4">Counts across tracked bills</p>
+            {outcomeTotal ? <div className="h-72"><ResponsiveContainer width="100%" height="100%"><BarChart data={outcomeTotals} margin={{ top: 8, right: 12, left: -15, bottom: 12 }}><CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" /><XAxis dataKey="name" tick={{ fontSize: 10 }} interval={0} angle={-18} textAnchor="end" height={52} /><YAxis allowDecimals={false} tick={{ fontSize: 11 }} /><Tooltip /><Bar dataKey="count" name="Submissions" fill="#3a5cff" radius={[6, 6, 0, 0]} /></BarChart></ResponsiveContainer></div> : <div className="h-72 flex items-center justify-center rounded-xl bg-surface-50 text-sm text-surface-500">No outcome records are available yet.</div>}
+          </Card>
+          <Card className="!p-6">
+            <h3 className="text-lg font-black text-surface-900 mb-1">Outcome mix</h3>
+            <p className="text-xs text-surface-500 mb-4">Distribution of recorded statuses</p>
+            {outcomeTotal ? <div className="h-72"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={outcomeTotals.filter(item => item.count > 0)} dataKey="count" nameKey="name" cx="50%" cy="48%" outerRadius={92} label={({ name, percent }) => `${name}: ${Math.round((percent || 0) * 100)}%`}><Cell fill="#3a5cff" /><Cell fill="#8b5cf6" /><Cell fill="#ef4444" /><Cell fill="#f59e0b" /><Cell fill="#94a3b8" /></Pie><Tooltip /></PieChart></ResponsiveContainer></div> : <div className="h-72 flex items-center justify-center rounded-xl bg-surface-50 text-sm text-surface-500">No outcome records are available yet.</div>}
+          </Card>
+          <Card className="!p-6 xl:col-span-2">
+            <h3 className="text-lg font-black text-surface-900 mb-1">Public notice periods</h3>
+            <p className="text-xs text-surface-500 mb-4">Notice lead time and participation-window length, in days</p>
+            {noticeMetrics.length ? <div className="h-72"><ResponsiveContainer width="100%" height="100%"><BarChart data={noticeMetrics} margin={{ top: 8, right: 12, left: -15, bottom: 12 }}><CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" /><XAxis dataKey="bill" tick={{ fontSize: 10 }} interval={0} angle={-15} textAnchor="end" height={60} /><YAxis allowDecimals={false} tick={{ fontSize: 11 }} /><Tooltip /><Bar dataKey="noticeDays" name="Days of notice" fill="#3a5cff" radius={[5, 5, 0, 0]} /><Bar dataKey="windowDays" name="Window length (days)" fill="#22c55e" radius={[5, 5, 0, 0]} /></BarChart></ResponsiveContainer></div> : <div className="h-56 flex items-center justify-center rounded-xl bg-surface-50 text-sm text-surface-500">No notice records are available yet.</div>}
+          </Card>
+        </div>
+      </section>
       <InfoBox className="!p-5">
         <div className="flex items-start gap-3">
           <Info className="h-5 w-5 mt-0.5 flex-shrink-0 text-accent-600" />

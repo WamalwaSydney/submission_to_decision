@@ -57,7 +57,6 @@ const publicLinks = [
   { to: '/receipt-lookup', label: 'Receipt Lookup', icon: FileSearch },
   { to: '/receipt-verify', label: 'Verify Chain', icon: Link2 },
   { to: '/notices', label: 'Notice Adequacy', icon: FileCheck2 },
-  { to: '/profiles', label: 'Offices & Reps', icon: Users },
   { to: '/community-rules', label: 'Community Rules', icon: BookOpen },
   { to: '/research/export', label: 'Public Data', icon: Database },
 ];
@@ -75,6 +74,7 @@ const authenticatedLinksMap: Record<string, { to: string; label: string; icon: a
   citizen: [
     { to: '/submit', label: 'Submit View', icon: MessageSquarePlus },
     { to: '/my-receipts', label: 'My Receipts', icon: Receipt },
+    { to: '/messages', label: 'Automated Updates', icon: MessageSquarePlus },
   ],
   reviewer: [
     { to: '/reviewer/queue', label: 'Match Review', icon: ClipboardList },
@@ -84,7 +84,6 @@ const authenticatedLinksMap: Record<string, { to: string; label: string; icon: a
     { to: '/committee', label: 'Committee Dashboard', icon: Database },
     { to: '/committee/ingestion', label: 'Report Ingestion', icon: FileUp },
     { to: '/committee/notices', label: 'Notice Records', icon: FolderOpen },
-    { to: '/messages', label: 'Messages', icon: MessageSquarePlus },
   ],
   administrator: [
     { to: '/admin', label: 'Administration', icon: Settings2 },

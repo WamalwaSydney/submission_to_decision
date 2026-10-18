@@ -8,7 +8,6 @@ import { ReceiptLookupPage, ReceiptVerifyPage } from './pages/ReceiptPages';
 import { SubmitViewPage } from './pages/SubmitViewPage';
 import { LoginPage } from './pages/LoginPage';
 import { NoticesPage } from './pages/NoticesPage';
-import { ProfilesPage, ProfileDetailPage } from './pages/ProfilesPages';
 import { SignupPage } from './pages/SignupPage';
 import { ReviewerQueuePage, ReportedContentPage } from './pages/ModeratorPages';
 import { CommitteeOfficerIngestionPage, CommitteeOfficerNoticesPage } from './pages/ClerkPages';
@@ -82,8 +81,6 @@ function AppRoutes() {
         <Route path="/signin" element={<LoginPage />} />
         <Route path="/signup" element={<SignupPage />} />
         <Route path="/notices" element={<NoticesPage />} />
-        <Route path="/profiles" element={<ProfilesPage />} />
-        <Route path="/profiles/:id" element={<ProfileDetailPage />} />
         <Route path="/my-receipts" element={<MyReceiptsPage />} />
         
         <Route path="/reviewer/queue" element={<ReviewerQueuePage />} />
