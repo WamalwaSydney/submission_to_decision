@@ -452,9 +452,15 @@ export function CommitteeOfficerIngestionPage() {
 export function CommitteeOfficerNoticesPage() {
   const { state, dispatch } = useApp();
   const [showForm, setShowForm] = useState(false);
+  const [noticePage, setNoticePage] = useState(1);
   const [formData, setFormData] = useState({
     bill_ref: '', institution: '' as string, notice_date: '', window_start: '', window_end: '', mode: '', bill_text_accessible: false
   });
+  const noticesPerPage = 10;
+  const noticePageCount = Math.max(1, Math.ceil(state.notices.length / noticesPerPage));
+  const visibleNotices = state.notices.slice((noticePage - 1) * noticesPerPage, noticePage * noticesPerPage);
+  const noticeRangeStart = state.notices.length === 0 ? 0 : (noticePage - 1) * noticesPerPage + 1;
+  const noticeRangeEnd = Math.min(noticePage * noticesPerPage, state.notices.length);
 
   const handleAdd = async () => {
     if (!formData.bill_ref || !formData.notice_date) return;
@@ -465,6 +471,7 @@ export function CommitteeOfficerNoticesPage() {
         window_end: formData.window_end || formData.notice_date,
       });
       dispatch({ type: 'ADD_NOTICE', payload: result.notice });
+      setNoticePage(Math.max(1, Math.ceil((state.notices.length + 1) / noticesPerPage)));
       setShowForm(false);
       setFormData({ bill_ref: '', institution: '', notice_date: '', window_start: '', window_end: '', mode: '', bill_text_accessible: false });
     } catch (error) {
@@ -636,7 +643,7 @@ export function CommitteeOfficerNoticesPage() {
                     <span>Add a notice record to see it listed here.</span>
                   </td>
                 </tr>
-              ) : state.notices.map(n => {
+              ) : visibleNotices.map(n => {
                 const bill = state.bills.find(b => b.id === n.bill_ref);
                 return (
                   <tr key={n.id}>
@@ -664,6 +671,41 @@ export function CommitteeOfficerNoticesPage() {
             </tbody>
           </table>
         </div>
+        {state.notices.length > noticesPerPage && (
+          <div className="committee-notice-pagination">
+            <p>Showing {noticeRangeStart}–{noticeRangeEnd} of {state.notices.length} records</p>
+            <div className="committee-notice-page-controls" aria-label="Notice record pages">
+              <button
+                type="button"
+                onClick={() => setNoticePage(page => Math.max(1, page - 1))}
+                disabled={noticePage === 1}
+                aria-label="Previous page"
+              >
+                Previous
+              </button>
+              {Array.from({ length: noticePageCount }, (_, index) => index + 1).map(page => (
+                <button
+                  type="button"
+                  key={page}
+                  onClick={() => setNoticePage(page)}
+                  className={page === noticePage ? 'is-active' : ''}
+                  aria-current={page === noticePage ? 'page' : undefined}
+                  aria-label={`Page ${page}`}
+                >
+                  {page}
+                </button>
+              ))}
+              <button
+                type="button"
+                onClick={() => setNoticePage(page => Math.min(noticePageCount, page + 1))}
+                disabled={noticePage === noticePageCount}
+                aria-label="Next page"
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        )}
       </Card>
     </div>
   );

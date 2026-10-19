@@ -57,5 +57,13 @@
   .committee-notice-empty strong,.committee-notice-empty span { display:block; }
   .committee-notice-empty strong { color:#182020; font-size:.95rem; }
   .committee-notice-empty span { margin-top:4px; font-size:.8rem; }
+  .committee-notice-pagination { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:16px 20px; border-top:1px solid #e2ded5; background:#fff; }
+  .committee-notice-pagination > p { margin:0; color:#526060; font-size:.78rem; font-weight:600; }
+  .committee-notice-page-controls { display:flex; align-items:center; gap:6px; }
+  .committee-notice-page-controls button { min-width:36px; height:36px; padding:0 10px; border:1px solid #e2ded5; border-radius:10px; background:#fff; color:#293232; font:inherit; font-size:.78rem; font-weight:700; cursor:pointer; transition:all .16s ease; }
+  .committee-notice-page-controls button:hover:not(:disabled) { border-color:#a52d29; color:#83211e; background:#fff8f7; }
+  .committee-notice-page-controls button.is-active { border-color:#a52d29; background:#a52d29; color:#fff; box-shadow:0 3px 8px rgba(165,45,41,.2); }
+  .committee-notice-page-controls button:disabled { cursor:not-allowed; opacity:.42; }
+  @media (max-width:640px) { .committee-notice-pagination { align-items:flex-start; flex-direction:column; } .committee-notice-page-controls { max-width:100%; flex-wrap:wrap; } }
   @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration:.01ms !important; transition-duration:.01ms !important; scroll-behavior:auto !important; } }
 }
