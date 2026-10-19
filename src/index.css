@@ -40,5 +40,22 @@
   .MuiTabs-root .MuiTab-root.Mui-selected { background:transparent; color:#83211e; font-weight:800; }
   .MuiAlert-root { border-radius:12px; }
   .MuiDialog-paper { border:1px solid #e2ded5; box-shadow:0 24px 70px rgba(24,32,32,.18); }
+  .committee-notice-table-wrap { overflow-x:auto; border-top:1px solid #e2ded5; }
+  .committee-notice-table { width:100%; min-width:850px; border-collapse:separate; border-spacing:0; text-align:left; }
+  .committee-notice-table th { padding:14px 20px; color:#526060; background:#f7f5f0; border-bottom:1px solid #e2ded5; font-size:.68rem; font-weight:800; letter-spacing:.12em; text-transform:uppercase; white-space:nowrap; }
+  .committee-notice-table td { padding:16px 20px; color:#293232; border-bottom:1px solid #eeeae2; vertical-align:middle; }
+  .committee-notice-table tbody tr { transition:background-color .16s ease; }
+  .committee-notice-table tbody tr:hover { background:#f5f9f5; }
+  .committee-notice-table tbody tr:last-child td { border-bottom:0; }
+  .committee-notice-bill { min-width:240px; max-width:390px; font-size:.82rem; font-weight:700; line-height:1.5; }
+  .committee-notice-date { font-size:.82rem; font-weight:700; font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .committee-notice-window { white-space:nowrap; font-size:.75rem; font-weight:600; font-variant-numeric:tabular-nums; color:#526060 !important; }
+  .committee-notice-arrow { padding:0 8px; color:#a52d29; font-weight:800; }
+  .committee-notice-mode { min-width:140px; max-width:220px; font-size:.78rem; font-weight:600; color:#526060 !important; }
+  .committee-notice-empty { height:210px; text-align:center; color:#778181 !important; }
+  .committee-notice-empty svg { display:block; margin:0 auto 10px; color:#a52d29; }
+  .committee-notice-empty strong,.committee-notice-empty span { display:block; }
+  .committee-notice-empty strong { color:#182020; font-size:.95rem; }
+  .committee-notice-empty span { margin-top:4px; font-size:.8rem; }
   @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration:.01ms !important; transition-duration:.01ms !important; scroll-behavior:auto !important; } }
 }

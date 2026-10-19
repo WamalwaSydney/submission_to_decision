@@ -606,12 +606,17 @@ export function CommitteeOfficerNoticesPage() {
             </div>
             <div>
               <div className="text-xs font-black uppercase tracking-[0.18em] text-primary-600 mb-1">Registry</div>
-              <h2 className="text-2xl font-black text-surface-900 tracking-tight">Notice Records Table</h2>
+              <h2 className="text-2xl font-black text-surface-900 tracking-tight">Notice Records</h2>
+              <p className="text-sm text-surface-500 mt-1">A clear record of participation notices and access windows.</p>
             </div>
+            <span className="ml-auto inline-flex items-center rounded-full border border-[#e2ded5] bg-white px-3 py-1.5 text-xs font-bold text-[#526060]">
+              {state.notices.length} {state.notices.length === 1 ? 'record' : 'records'}
+            </span>
           </div>
         </div>
-        <div className="table-container relative">
-          <table className="data-table">
+        <div className="committee-notice-table-wrap relative">
+          <table className="committee-notice-table">
+            <caption className="sr-only">Committee public notice records</caption>
             <thead>
               <tr>
                 <th>Bill</th>
@@ -623,19 +628,29 @@ export function CommitteeOfficerNoticesPage() {
               </tr>
             </thead>
             <tbody>
-              {state.notices.map(n => {
+              {state.notices.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="committee-notice-empty">
+                    <FileText size={25} strokeWidth={1.8} aria-hidden="true" />
+                    <strong>No notice records yet</strong>
+                    <span>Add a notice record to see it listed here.</span>
+                  </td>
+                </tr>
+              ) : state.notices.map(n => {
                 const bill = state.bills.find(b => b.id === n.bill_ref);
                 return (
                   <tr key={n.id}>
-                    <td className="text-xs font-semibold text-surface-700">{bill?.title || n.bill_ref}</td>
+                    <td className="committee-notice-bill">{bill?.title || n.bill_ref}</td>
                     <td className="text-xs">
                       <Badge variant="accent" className="!text-[10px]">{n.institution}</Badge>
                     </td>
-                    <td className="text-sm font-medium tabular-nums">{n.notice_date}</td>
-                    <td className="text-xs font-medium tabular-nums text-surface-600">
-                      {n.window_start} → {n.window_end}
+                    <td className="committee-notice-date">{n.notice_date || '—'}</td>
+                    <td className="committee-notice-window">
+                      <span>{n.window_start || n.notice_date || '—'}</span>
+                      <span className="committee-notice-arrow" aria-hidden="true">→</span>
+                      <span>{n.window_end || n.notice_date || '—'}</span>
                     </td>
-                    <td className="text-xs text-surface-700 font-medium">{n.mode}</td>
+                    <td className="committee-notice-mode">{n.mode || '—'}</td>
                     <td>
                       {n.bill_text_accessible ? (
                         <Badge variant="green" showIcon className="!text-[10px]">Yes</Badge>
