@@ -601,8 +601,8 @@ export function CommitteeOfficerNoticesPage() {
         <div className="absolute -bottom-24 -left-24 w-56 h-56 rounded-full bg-accent-100/40 blur-3xl pointer-events-none" />
         <div className="relative p-7 md:p-8 pb-0">
           <div className="inline-flex items-center gap-3 mb-6">
-            <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-primary-500 to-accent-500 flex items-center justify-center text-white shadow-md shadow-primary-500/30">
-              <FileText className="h-5.5 w-5.5" />
+            <div className="w-11 h-11 rounded-2xl flex items-center justify-center text-white shadow-md" style={{ background: 'linear-gradient(135deg, #A52D29 0%, #176B2B 100%)', boxShadow: '0 6px 14px rgba(165,45,41,.22)' }}>
+              <FileText className="h-5.5 w-5.5" size={22} strokeWidth={2.25} aria-hidden="true" />
             </div>
             <div>
               <div className="text-xs font-black uppercase tracking-[0.18em] text-primary-600 mb-1">Registry</div>
