@@ -141,8 +141,8 @@ export function CommitteeOfficerIngestionPage() {
         <div className="absolute -bottom-24 -left-24 w-56 h-56 rounded-full bg-accent-100/60 blur-3xl pointer-events-none" />
         <div className="relative">
           <div className="inline-flex items-center gap-3 mb-6">
-            <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-primary-500 to-accent-500 flex items-center justify-center text-white shadow-md shadow-primary-500/30">
-              <Upload className="h-5.5 w-5.5" />
+            <div className="w-11 h-11 rounded-2xl flex items-center justify-center text-white shadow-md" style={{ background: 'linear-gradient(135deg, #A52D29 0%, #176B2B 100%)', boxShadow: '0 6px 14px rgba(165,45,41,.22)' }}>
+              <Upload className="h-5.5 w-5.5" size={22} strokeWidth={2.25} aria-hidden="true" />
             </div>
             <div>
               <div className="text-xs font-black uppercase tracking-[0.18em] text-primary-600 mb-1">Step One</div>
@@ -223,8 +223,8 @@ export function CommitteeOfficerIngestionPage() {
                   isDragging ? 'border-primary-500 bg-primary-50/60' : 'border-surface-200 hover:border-primary-300'
                 } ${uploading ? 'opacity-60 cursor-not-allowed' : ''}`}
               >
-                <div className="mx-auto w-16 h-16 rounded-2xl bg-gradient-to-br from-primary-500 to-accent-500 flex items-center justify-center text-white shadow-lg shadow-primary-500/25 mb-4 group-hover:scale-105 transition-transform duration-300">
-                  <Upload className="h-8 w-8" />
+                <div className="mx-auto w-16 h-16 rounded-2xl flex items-center justify-center text-white shadow-lg mb-4 group-hover:scale-105 transition-transform duration-300" style={{ background: 'linear-gradient(135deg, #A52D29 0%, #176B2B 100%)', boxShadow: '0 12px 24px rgba(165,45,41,.2)' }}>
+                  <Upload className="h-8 w-8" size={32} strokeWidth={2.25} aria-hidden="true" />
                 </div>
 
                 {selectedFile ? (
@@ -308,8 +308,8 @@ export function CommitteeOfficerIngestionPage() {
         <div className="absolute -bottom-24 -left-24 w-56 h-56 rounded-full bg-warm-100/40 blur-3xl pointer-events-none" />
         <div className="relative">
           <div className="inline-flex items-center gap-3 mb-6">
-            <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-accent-500 to-primary-600 flex items-center justify-center text-white shadow-md shadow-accent-500/30">
-              <Database className="h-5.5 w-5.5" />
+            <div className="w-11 h-11 rounded-2xl flex items-center justify-center text-white shadow-md" style={{ background: 'linear-gradient(135deg, #176B2B 0%, #A52D29 100%)', boxShadow: '0 6px 14px rgba(23,107,43,.22)' }}>
+              <Database className="h-5.5 w-5.5" size={22} strokeWidth={2.25} aria-hidden="true" />
             </div>
             <div>
               <div className="text-xs font-black uppercase tracking-[0.18em] text-accent-600 mb-1">Pipeline</div>
