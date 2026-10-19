@@ -36,7 +36,7 @@ export function SubmitViewPage() {
   const fireConfetti = () => {
     const duration = 2500;
     const end = Date.now() + duration;
-    const colors = ['#3a5cff', '#13b892', '#1f37f5', '#2dd3ad', '#ed8b29'];
+    const colors = ['#101616', '#A52D29', '#FFFFFF', '#176B2B'];
 
     (function frame() {
       confetti({ particleCount: 4, angle: 60, spread: 60, origin: { x: 0 }, colors, scalar: 0.8 });
@@ -123,9 +123,14 @@ export function SubmitViewPage() {
           <Card className="!p-0 overflow-hidden !rounded-3xl text-center">
             {/* Banner */}
             <div
-              className="relative p-10 md:p-14 text-white overflow-hidden"
-              style={{ background: 'linear-gradient(135deg, #3a5cff 0%, #1f37f5 55%, #13b892 100%)' }}
+              className="relative p-10 md:p-14 pt-12 md:pt-16 text-white overflow-hidden"
+              style={{ background: 'linear-gradient(135deg, #101616 0%, #252525 62%, #176B2B 100%)' }}
             >
+              <div
+                className="absolute inset-x-0 top-0 h-2.5"
+                aria-hidden="true"
+                style={{ background: 'linear-gradient(to bottom, #101616 0 27%, #FFFFFF 27% 36%, #A52D29 36% 64%, #FFFFFF 64% 73%, #176B2B 73% 100%)' }}
+              />
               <div
                 className="absolute inset-0 opacity-15"
                 style={{
@@ -134,7 +139,8 @@ export function SubmitViewPage() {
                 }}
               />
               <div className="absolute -top-24 -left-24 w-60 h-60 rounded-full bg-white/10 blur-3xl" />
-              <div className="absolute -bottom-24 -right-24 w-64 h-64 rounded-full bg-white/10 blur-3xl" />
+              <div className="absolute -bottom-24 -right-24 w-64 h-64 rounded-full bg-[#A52D29]/35 blur-3xl" />
+              <div className="absolute top-1/3 -right-16 w-64 h-64 rounded-full bg-[#176B2B]/40 blur-3xl" />
 
               <div className="relative">
                 {/* Square with thumbs up */}
@@ -148,7 +154,7 @@ export function SubmitViewPage() {
                 >
                   <div
                     className="w-full h-full rounded-[24px] flex items-center justify-center shadow-inner"
-                    style={{ background: 'linear-gradient(135deg, #2dd3ad, #13b892)' }}
+                    style={{ background: 'linear-gradient(135deg, #176B2B, #0F5220)' }}
                   >
                     <ThumbsUp className="h-10 w-10 md:h-12 md:w-12 text-white" strokeWidth={2.5} />
                   </div>
@@ -187,6 +193,11 @@ export function SubmitViewPage() {
                 transition={{ delay: 0.3, duration: 0.5 }}
                 className="rounded-3xl p-7 md:p-9 bg-white border border-surface-200 shadow-elevated text-left"
               >
+                <div
+                  className="h-1.5 rounded-full mb-6"
+                  aria-hidden="true"
+                  style={{ background: 'linear-gradient(90deg, #101616 0 27%, #FFFFFF 27% 31%, #A52D29 31% 66%, #FFFFFF 66% 70%, #176B2B 70% 100%)', border: '1px solid rgba(16,22,22,.08)' }}
+                />
                 <div className="flex items-start justify-between gap-3 mb-4 flex-wrap">
                   <div>
                     <p className="text-xs font-black uppercase tracking-[0.2em] text-surface-500 mb-2">Your Receipt ID</p>
