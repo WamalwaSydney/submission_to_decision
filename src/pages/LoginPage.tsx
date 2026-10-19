@@ -121,7 +121,7 @@ export function LoginPage() {
 
           <Divider sx={{ my: 2.5, color: '#778181', fontSize: 12 }}>or</Divider>
           <Typography sx={{ textAlign: 'center', color: '#526060', fontSize: 13 }}>
-            New to the pilot? <Link to="/signup" className="font-extrabold text-primary-700 hover:text-primary-800">Create a demo account</Link>
+            New to the platform? <Link to="/signup" className="font-extrabold text-primary-700 hover:text-primary-800">Create a demo account</Link>
           </Typography>
         </Card>
 

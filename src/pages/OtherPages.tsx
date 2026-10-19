@@ -342,7 +342,7 @@ export function CommunityRulesPage() {
                 <li>This platform <strong>cannot guarantee</strong> that your concern will be resolved.</li>
                 <li>Online participation is <strong>not statistically representative</strong> of the electorate.</li>
                 <li>The platform <strong>cannot ensure</strong> that every affected group is reflected in online submissions.</li>
-                <li>Where a user has no smartphone or computer, this is recorded as a pilot limitation.</li>
+                <li>Where a user has no smartphone or computer, this is recorded as an access limitation.</li>
                 <li>This platform does not provide <strong>legal advice</strong>.</li>
                 <li>Non-response or low response rates are shown as neutral, observable facts — never as evidence of misconduct.</li>
               </ul>

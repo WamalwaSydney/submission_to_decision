@@ -184,7 +184,7 @@ export function HomePage() {
                   color: ink[600],
                 }}
               >
-                Pilot Launch · Kenya 2026
+                Kenya · 2026
               </Typography>
               <Badge variant="accent" sx={{ fontSize: 10 }}>
                 LIVE
@@ -701,13 +701,13 @@ export function HomePage() {
         </InfoBox>
       </Box>
 
-      {/* ============== PILOT SCOPE ============== */}
+      {/* ============== PARTICIPATION COVERAGE ============== */}
       <Box component="section" sx={{ position: 'relative' }}>
         <Box sx={{ maxWidth: 900, mx: 'auto', mb: 10 }}>
           <SectionHeader
-            eyebrow="Pilot Scope"
+            eyebrow="Participation Coverage"
             title="Where we're running first"
-            subtitle="We're piloting across three tiers of Kenyan legislature to refine and prove the model."
+            subtitle="Explore participation and legislative tracking across three tiers of Kenyan government."
           />
         </Box>
 
@@ -719,7 +719,7 @@ export function HomePage() {
           }}
         >
           {[
-            { name: 'National Assembly', icon: <Globe2 size={22} />, tone: 'primary' as const, desc: 'Legislative tracking: national and unbounded. Citizen activity: confined to pilot counties.' },
+            { name: 'National Assembly', icon: <Globe2 size={22} />, tone: 'primary' as const, desc: 'Legislative tracking: national and unbounded. Citizen activity: currently available in participating counties.' },
             { name: 'Nairobi County', icon: <Users size={22} />, tone: 'accent' as const, desc: 'Testing limited to 2 constituencies. Submissions, receipts, and outcome viewing live.' },
             { name: 'Trans Nzoia County', icon: <BarChart3 size={22} />, tone: 'warm' as const, desc: 'Testing limited to 3 wards. Submissions, receipts, and outcome viewing live.' },
           ].map((scope, i) => {

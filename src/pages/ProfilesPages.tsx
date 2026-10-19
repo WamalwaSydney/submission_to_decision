@@ -26,7 +26,7 @@ export function ProfilesPage() {
           Offices & <span className="gradient-text">Representatives</span>
         </h1>
         <p className="text-lg text-surface-600 leading-relaxed max-w-3xl">
-          Lightweight profiles for offices in the pilot area. Unclaimed by default, built from public institutional information.
+          Lightweight profiles for offices in participating areas. Unclaimed by default, built from public institutional information.
           Profiles can be claimed and verified by administrators.
         </p>
       </div>
@@ -266,7 +266,7 @@ export function ProfileDetailPage() {
                 {profile.profile_label === 'unclaimed' && 'Built from public institutional data. Not yet claimed by the office holder.'}
                 {profile.profile_label === 'verified' && 'Claimed and verified by an administrator.'}
                 {profile.profile_label === 'simulated' && 'This is a demo/simulated profile for testing.'}
-                {profile.profile_label === 'pilot' && 'This is a pilot-phase verified profile.'}
+                {profile.profile_label === 'pilot' && 'This is a verified profile in a participating area.'}
               </p>
             </div>
 

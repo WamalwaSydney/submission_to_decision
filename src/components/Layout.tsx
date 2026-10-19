@@ -13,7 +13,6 @@ import {
   ListItemIcon,
   ListItemText,
   Avatar,
-  Badge,
   Divider,
   Typography,
   Tooltip,
@@ -239,29 +238,10 @@ export function Layout({ children }: { children: React.ReactNode }) {
                   mt: 0.5,
                 }}
               >
-                Kenya · Pilot
+                Kenya
               </Typography>
             </Box>
-            <Badge
-              badgeContent="PILOT"
-              color="default"
-              sx={{
-                ml: 1,
-                display: { xs: 'none', sm: 'inline-flex' },
-                '& .MuiBadge-badge': {
-                  fontSize: 9,
-                  fontWeight: 800,
-                  letterSpacing: '0.14em',
-                  px: 1,
-                  py: 0.25,
-                  borderRadius: 1.5,
-                  background: `linear-gradient(135deg, ${ink[100]}, ${ink[200]})`,
-                  border: `1px solid ${alpha('#CBD5E1', 0.7)}`,
-                  color: '#334155',
-                  boxShadow: `inset 0 1px 0 ${alpha('#fff', 0.85)}`,
-                },
-              }}
-            />
+
           </Box>
 
 
@@ -776,12 +756,12 @@ export function Layout({ children }: { children: React.ReactNode }) {
                     Participation Trace
                   </Typography>
                   <Typography sx={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.18em', textTransform: 'uppercase', color: ink[500] }}>
-                    Kenya · 2026 Pilot
+                    Kenya · 2026
                   </Typography>
                 </Box>
               </Box>
               <Typography sx={{ color: ink[600], lineHeight: 1.65, mb: 2, maxWidth: 460, fontWeight: 500, fontSize: 13.5 }}>
-                Submission-to-Decision Traceability Platform for Kenya's legislatures. Piloting with the National Assembly,
+                Submission-to-Decision Traceability Platform for Kenya's legislatures. Working with the National Assembly,
                 Nairobi & Trans Nzoia County Assemblies.
               </Typography>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25 }}>
@@ -866,7 +846,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
               English only · All demo content is simulated
             </Typography>
             <Typography sx={{ color: ink[400], fontSize: 12 }}>
-              © 2026 Participation Traceability Platform · Pilot Release
+              © 2026 Participation Traceability Platform
             </Typography>
           </Box>
         </Box>

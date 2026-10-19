@@ -98,7 +98,7 @@ export function SignupPage() {
           Create your <Box component="span" className="gradient-text">account</Box>
         </Typography>
         <Typography sx={{ color: '#526060', fontSize: 15, lineHeight: 1.7 }}>
-          Join the participation-trace pilot. Browsing bills and receipts remains open to everyone.
+          Join the participation-trace platform. Browsing bills and receipts remains open to everyone.
         </Typography>
       </Box>
 
