@@ -17,7 +17,6 @@ import {
   Divider,
   Typography,
   Tooltip,
-  useMediaQuery,
   useTheme,
   alpha,
 } from '@mui/material';
@@ -95,7 +94,6 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const location = useLocation();
   const theme = useTheme();
-  const isXl = useMediaQuery(theme.breakpoints.up('xl'));
   const ink = theme.palette.ink as any;
   const palPrimary = theme.palette.primary as any;
   const palSecondary = theme.palette.secondary as any;
@@ -171,7 +169,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
             to="/"
             sx={{
               display: 'flex',
-              order: 4,
+              order: 1,
               alignItems: 'center',
               gap: 1.5,
               textDecoration: 'none',
@@ -266,64 +264,6 @@ export function Layout({ children }: { children: React.ReactNode }) {
             />
           </Box>
 
-          {isXl && (
-              <Box component="nav" aria-label="Main navigation" sx={{ order: 1, ml: 0 }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                {allNavLinks.map((link) => {
-                  const active = location.pathname === link.to;
-                  const Icon = (link as any).icon || Shield;
-                  return (
-                    <Tooltip key={link.to} title={link.label} placement="bottom" arrow>
-                      <Box
-                        component={Link}
-                        to={link.to}
-                        sx={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: 1.25,
-                          px: 1.75,
-                          py: 1.1,
-                          borderRadius: 3,
-                          textDecoration: 'none',
-                          fontSize: 13.5,
-                          fontWeight: 600,
-                          letterSpacing: '-0.01em',
-                          color: active ? palPrimary[700] : ink[500],
-                          background: active
-                            ? `linear-gradient(135deg, ${alpha(palPrimary[500], 0.10)}, ${alpha(palSecondary[500], 0.08)})`
-                            : 'transparent',
-                          position: 'relative',
-                          transition: 'all 220ms cubic-bezier(0.22, 1, 0.36, 1)',
-                          '&:hover': {
-                            color: ink[900],
-                            background: active
-                              ? `linear-gradient(135deg, ${alpha(palPrimary[500], 0.14)}, ${alpha(palSecondary[500], 0.11)})`
-                              : alpha('#0F172A', 0.04),
-                          },
-                          ...(active && {
-                            '&::after': {
-                              content: '""',
-                              position: 'absolute',
-                              bottom: -6,
-                              left: '50%',
-                              transform: 'translateX(-50%)',
-                              width: 30,
-                              height: 3,
-                              borderRadius: 999,
-                              background: `linear-gradient(90deg, ${palPrimary[500]}, ${palSecondary[500]})`,
-                            },
-                          }),
-                        }}
-                      >
-                        <Icon size={15} strokeWidth={2.1} />
-                        {link.label}
-                      </Box>
-                    </Tooltip>
-                  );
-                })}
-              </Box>
-            </Box>
-          )}
 
           <Box sx={{ flexGrow: 1, order: 2 }} />
 
@@ -468,12 +408,21 @@ export function Layout({ children }: { children: React.ReactNode }) {
             )}
 
             <IconButton
-              sx={{ display: { xl: 'none' }, borderRadius: 3, p: 1.3 }}
-              onClick={() => setMobileMenuOpen(true)}
+              onClick={() => setMobileMenuOpen((open) => !open)}
               aria-expanded={mobileMenuOpen}
-              aria-label="Toggle menu"
+              aria-controls="primary-navigation-drawer"
+              aria-label={mobileMenuOpen ? 'Close navigation menu' : 'Open navigation menu'}
+              sx={{
+                borderRadius: 3,
+                p: 1.25,
+                color: ink[800],
+                border: `1px solid ${alpha('#E2E8F0', 0.9)}`,
+                background: alpha('#fff', 0.7),
+                transition: 'all 180ms ease',
+                '&:hover': { background: alpha(palPrimary[500], 0.08), color: palPrimary[700] },
+              }}
             >
-              <MenuIcon size={21} />
+              {mobileMenuOpen ? <XIcon size={20} strokeWidth={2.2} /> : <MenuIcon size={20} strokeWidth={2.2} />}
             </IconButton>
           </Box>
         </Toolbar>
@@ -484,6 +433,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
       </Box>
 
       <Drawer
+        id="primary-navigation-drawer"
         anchor="right"
         open={mobileMenuOpen}
         onClose={() => setMobileMenuOpen(false)}
@@ -549,7 +499,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
             Navigation
           </Typography>
           <List sx={{ pt: 0.5 }}>
-            {publicLinks.map((link) => {
+            {visiblePublicLinks.map((link) => {
               const Icon = link.icon;
               const active = location.pathname === link.to;
               return (
@@ -559,9 +509,19 @@ export function Layout({ children }: { children: React.ReactNode }) {
                   to={link.to}
                   selected={active}
                   onClick={() => setMobileMenuOpen(false)}
-                  sx={{ borderRadius: 3, px: 2, py: 1.5, gap: 2 }}
+                  sx={{
+                    borderRadius: 3, px: 2, py: 1.4, gap: 1.75, mb: 0.5,
+                    color: ink[700], transition: 'all 180ms ease',
+                    '&:hover': { background: alpha(palPrimary[500], 0.07), transform: 'translateX(2px)' },
+                    '&.Mui-selected': { color: palPrimary[700], background: `linear-gradient(135deg, ${alpha(palPrimary[500], 0.12)}, ${alpha(palSecondary[500], 0.08)})` },
+                    '&.Mui-selected:hover': { background: alpha(palPrimary[500], 0.16) },
+                  }}
                 >
-                  <ListItemIcon sx={{ minWidth: 0 }}><Icon size={18} /></ListItemIcon>
+                  <ListItemIcon sx={{ minWidth: 0, color: 'inherit' }}>
+                    <Box sx={{ width: 34, height: 34, display: 'grid', placeItems: 'center', borderRadius: 2.5, background: active ? alpha(palPrimary[500], 0.12) : alpha('#64748B', 0.08), color: active ? palPrimary[700] : ink[500] }}>
+                      <Icon size={17} strokeWidth={2.1} />
+                    </Box>
+                  </ListItemIcon>
                   <ListItemText
                     primary={
                       <Typography sx={{ fontWeight: 700, fontSize: 14 }}>{link.label}</Typography>
@@ -593,9 +553,19 @@ export function Layout({ children }: { children: React.ReactNode }) {
                       to={link.to}
                       selected={active}
                       onClick={() => setMobileMenuOpen(false)}
-                      sx={{ borderRadius: 3, px: 2, py: 1.5, gap: 2 }}
+                      sx={{
+                    borderRadius: 3, px: 2, py: 1.4, gap: 1.75, mb: 0.5,
+                    color: ink[700], transition: 'all 180ms ease',
+                    '&:hover': { background: alpha(palPrimary[500], 0.07), transform: 'translateX(2px)' },
+                    '&.Mui-selected': { color: palPrimary[700], background: `linear-gradient(135deg, ${alpha(palPrimary[500], 0.12)}, ${alpha(palSecondary[500], 0.08)})` },
+                    '&.Mui-selected:hover': { background: alpha(palPrimary[500], 0.16) },
+                  }}
                     >
-                      <ListItemIcon sx={{ minWidth: 0 }}><Icon size={18} /></ListItemIcon>
+                      <ListItemIcon sx={{ minWidth: 0, color: 'inherit' }}>
+                    <Box sx={{ width: 34, height: 34, display: 'grid', placeItems: 'center', borderRadius: 2.5, background: active ? alpha(palPrimary[500], 0.12) : alpha('#64748B', 0.08), color: active ? palPrimary[700] : ink[500] }}>
+                      <Icon size={17} strokeWidth={2.1} />
+                    </Box>
+                  </ListItemIcon>
                       <ListItemText
                         primary={
                           <Typography sx={{ fontWeight: 700, fontSize: 14 }}>{link.label}</Typography>
