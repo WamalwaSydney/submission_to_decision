@@ -4,7 +4,7 @@ import { useApp } from '../context/AppContext';
 import { api } from '../api/endpoints';
 import { Card } from '../components/UI';
 import { confidenceClasses, confidenceLabel } from '../utils/confidence';
-import { CheckCircle2, FileText, FileUp, Loader2, UploadCloud, X } from 'lucide-react';
+import { ArrowUpRight, CheckCircle2, FileCheck2, FileText, FileUp, Gavel, Loader2, UploadCloud, X } from 'lucide-react';
 
 export function CommitteeDashboardPage() {
   const { state } = useApp();
@@ -43,24 +43,39 @@ export function CommitteeDashboardPage() {
   };
 
   if (!isCommittee) return <Card><h1 className="text-2xl font-black">Committee area</h1><p className="mt-2">Sign in with a committee account to ingest and manage bills.</p></Card>;
-  return <div className="space-y-6">
-    <div><p className="text-xs font-black uppercase tracking-[0.18em] text-primary-600">Committee workspace</p><h1 className="text-4xl font-black mt-2">Committee dashboard</h1><p className="text-surface-600 mt-2 max-w-2xl">Publish a bill record and its official PDF so citizens can find the legislation and follow its participation trail.</p></div>
-    <Card><div className="flex items-start gap-3 mb-5"><div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-primary-500 to-accent-500 text-white flex items-center justify-center shadow-md"><FileUp className="h-5 w-5" /></div><div><h2 className="text-xl font-black">Ingest a bill</h2><p className="text-sm text-surface-500 mt-1">Required: title and unique identifier. Upload the official bill PDF when available.</p></div></div><form onSubmit={ingest} className="grid gap-4 md:grid-cols-2">
+  return <div className="committee-dashboard space-y-7">
+    <header className="committee-dashboard-hero">
+      <div>
+        <span className="committee-dashboard-kicker">Committee workspace</span>
+        <h1>Committee dashboard</h1>
+        <p>Publish bills and official documents so citizens can follow legislation and its participation trail.</p>
+      </div>
+      <div className="committee-dashboard-hero-mark" aria-hidden="true"><Gavel size={30} strokeWidth={1.8} /></div>
+    </header>
+
+    <section className="committee-dashboard-stats" aria-label="Workspace overview">
+      <div className="committee-dashboard-stat"><span className="committee-dashboard-stat-icon red"><FileText size={20} /></span><span><strong>{bills.length}</strong><small>Published bills</small></span></div>
+      <div className="committee-dashboard-stat"><span className="committee-dashboard-stat-icon green"><FileCheck2 size={20} /></span><span><strong>{bills.filter(bill => Boolean(bill.pdf_url || bill.document_url)).length}</strong><small>With documents</small></span></div>
+      <Link className="committee-dashboard-shortcut" to="/committee/ingestion"><span>Manage report ingestion</span><ArrowUpRight size={17} /></Link>
+    </section>
+
+    <Card><div className="committee-dashboard-section-heading"><div className="committee-dashboard-icon-tile"><FileUp size={22} strokeWidth={2.3} aria-hidden="true" /></div><div><p className="committee-dashboard-section-kicker">New publication</p><h2>Ingest a bill</h2><p>Required: title and unique identifier. Add the official PDF when available.</p></div></div><form onSubmit={ingest} className="grid gap-4 md:grid-cols-2">
       <label className="md:col-span-2"><span className="text-xs font-black uppercase tracking-wide text-surface-600">Bill title</span><input className="input-field mt-1" required placeholder="e.g. Nairobi County Finance Bill, 2026" value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} /></label>
       <label><span className="text-xs font-black uppercase tracking-wide text-surface-600">Unique bill identifier</span><input className="input-field mt-1" required placeholder="e.g. NCA/2026/Bill-003" value={form.identifier} onChange={e => setForm({ ...form, identifier: e.target.value })} /></label>
       <label><span className="text-xs font-black uppercase tracking-wide text-surface-600">Current stage</span><select className="input-field mt-1" value={form.stage} onChange={e => setForm({ ...form, stage: e.target.value })}><option>Introduced</option><option>Public Participation</option><option>Committee Stage</option><option>Second Reading</option></select></label>
       <label className="md:col-span-2"><span className="text-xs font-black uppercase tracking-wide text-surface-600">Official source URL (optional)</span><input className="input-field mt-1" type="url" placeholder="https://www.parliament.go.ke/..." value={form.source_url} onChange={e => setForm({ ...form, source_url: e.target.value })} /></label>
       <div className="md:col-span-2">
         <input ref={fileInputRef} type="file" accept="application/pdf,.pdf" className="sr-only" onChange={e => { chooseBillFile(e.target.files?.[0]); e.target.value = ''; }} />
-        <button type="button" onClick={() => fileInputRef.current?.click()} className="w-full rounded-2xl border-2 border-dashed border-surface-200 bg-surface-50/60 hover:border-primary-400 hover:bg-primary-50/40 transition-colors p-6 text-left flex items-center gap-4">
-          <span className="w-12 h-12 rounded-xl bg-primary-100 text-primary-700 flex items-center justify-center shrink-0"><UploadCloud className="h-6 w-6" /></span>
-          <span className="min-w-0 flex-1">{billFile ? <><span className="block font-bold text-surface-900 truncate">{billFile.name}</span><span className="text-xs text-surface-500">{(billFile.size / (1024 * 1024)).toFixed(1)} MB · PDF selected</span></> : <><span className="block font-bold text-surface-900">Select official bill PDF</span><span className="text-xs text-surface-500">Click to browse or choose a file from your device · maximum 50 MB</span></>}</span>
-          {billFile ? <span onClick={e => { e.stopPropagation(); setBillFile(null); }} className="p-2 rounded-lg hover:bg-white text-surface-500" aria-label="Remove bill PDF"><X className="h-4 w-4" /></span> : <FileText className="h-5 w-5 text-surface-400 shrink-0" />}
+        <button type="button" onClick={() => fileInputRef.current?.click()} className="committee-dashboard-file-picker">
+          <span className="committee-dashboard-file-icon"><UploadCloud size={25} strokeWidth={2.2} aria-hidden="true" /></span>
+          <span className="min-w-0 flex-1">{billFile ? <><span className="block font-bold text-surface-900 truncate">{billFile.name}</span><span className="text-xs text-surface-500">{(billFile.size / (1024 * 1024)).toFixed(1)} MB · PDF selected</span></> : <><span className="block font-bold text-surface-900">Select official bill PDF</span><span className="text-xs text-surface-500">Browse your device · PDF up to 50 MB</span></>}</span>
+          {billFile ? <span onClick={e => { e.stopPropagation(); setBillFile(null); }} className="p-2 rounded-lg hover:bg-white text-surface-500" aria-label="Remove bill PDF"><X size={17} /></span> : <FileText size={20} className="text-surface-400 shrink-0" />}
         </button>
       </div>
-      <button className="btn-primary md:col-span-2 inline-flex items-center justify-center gap-2" type="submit" disabled={saving || !form.title.trim() || !form.identifier.trim()}>{saving ? <><Loader2 className="h-4 w-4 animate-spin" /> Uploading bill...</> : <><FileUp className="h-4 w-4" /> Upload and publish bill</>}</button>
-    </form>{message && <p className={`mt-4 text-sm font-semibold flex items-center gap-2 ${message.includes('ingested') ? 'text-green-700' : 'text-red-700'}`}>{message.includes('ingested') && <CheckCircle2 className="h-4 w-4" />}{message}</p>}</Card>
-    <Card><h2 className="text-xl font-black mb-4">Your bills ({bills.length})</h2><div className="space-y-3">{bills.map(bill => <div key={bill.id} className="border rounded-xl p-4 flex items-center justify-between gap-4"><div><p className="font-bold">{bill.title}</p><p className="text-sm text-surface-500">{bill.identifier} · {bill.stage}</p></div><Link className="btn-secondary" to={`/bill-flow/${bill.id}`}>View public flow</Link></div>)}{!bills.length && <p className="text-surface-500">No bills have been ingested yet.</p>}</div></Card>
+      <button className="btn-primary md:col-span-2 inline-flex items-center justify-center gap-2" type="submit" disabled={saving || !form.title.trim() || !form.identifier.trim()}>{saving ? <><Loader2 className="h-4 w-4 animate-spin" /> Uploading bill...</> : <><FileUp size={17} /> Upload and publish bill</>}</button>
+    </form>{message && <p role="status" className={`mt-4 text-sm font-semibold flex items-center gap-2 ${message.includes('ingested') ? 'text-green-700' : 'text-red-700'}`}>{message.includes('ingested') && <CheckCircle2 className="h-4 w-4" />}{message}</p>}</Card>
+
+    <Card><div className="committee-dashboard-bills-heading"><div><p className="committee-dashboard-section-kicker">Legislation</p><h2>Your bills</h2></div><span>{bills.length} total</span></div><div className="committee-dashboard-bills">{bills.map(bill => <article key={bill.id} className="committee-dashboard-bill-row"><span className="committee-dashboard-bill-mark"><Gavel size={18} /></span><div className="committee-dashboard-bill-info"><p>{bill.title}</p><span>{bill.identifier} <i>·</i> {bill.stage}</span></div><Link className="committee-dashboard-flow-link" to={`/bill-flow/${bill.id}`}>View public flow <ArrowUpRight size={15} /></Link></article>)}{!bills.length && <div className="committee-dashboard-empty"><FileText size={24} /><strong>No bills published yet</strong><span>Use the form above to add the first bill to your public flow.</span></div>}</div></Card>
   </div>;
 }
 
