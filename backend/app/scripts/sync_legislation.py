@@ -562,7 +562,7 @@ async def ensure_committee_id(conn, name: str | None, institution: str = "Nation
             duplicate_id = duplicate[0]
             await conn.execute(text("UPDATE legislative_items SET committee_id=:canonical WHERE committee_id=:duplicate"), {"canonical": committee_id, "duplicate": duplicate_id})
             await conn.execute(text("UPDATE users SET committee_id=:canonical WHERE committee_id=:duplicate"), {"canonical": committee_id, "duplicate": duplicate_id})
-            await conn.execute(text("UPDATE representative_profiles SET committee_id=:canonical WHERE committee_id=:duplicate"), {"canonical": committee_id, "duplicate": duplicate_id})
+            # RepresentativeProfile stores memberships as text[] labels, not a committee_id FK.
             await conn.execute(text("DELETE FROM committees WHERE id=:duplicate"), {"duplicate": duplicate_id})
         return committee_id
 
