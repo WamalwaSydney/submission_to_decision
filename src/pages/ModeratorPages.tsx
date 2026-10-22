@@ -280,15 +280,17 @@ export function ReviewerQueuePage() {
           <div className="space-y-3">
             {unmatchedReceipts.map(receipt => {
               const bill = state.bills.find(item => item.id === receipt.legislative_item_id);
-              const reportAvailable = state.reports.some(report => report.bill_ref === receipt.legislative_item_id);
+              const billReports = state.reports.filter(report => report.bill_ref === receipt.legislative_item_id);
+              const reportAvailable = billReports.length > 0;
+              const reportEntriesAvailable = state.reportEntries.some(entry => billReports.some(report => report.id === entry.report_ref));
               return (
                 <div key={receipt.id} className="rounded-xl border border-surface-200 bg-white p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
                   <div className="min-w-0">
                     <p className="font-mono text-xs font-bold text-primary-700 mb-1">{receipt.public_id || receipt.id}</p>
                     <p className="text-sm text-surface-800 leading-relaxed">{receipt.submission_text}</p>
-                    <p className="text-xs text-surface-500 mt-2">Bill: {bill?.title || 'Bill information unavailable'} · {reportAvailable ? 'Committee report available; no proposal is currently recorded.' : 'Awaiting a committee report.'}</p>
+                    <p className="text-xs text-surface-500 mt-2">Bill: {bill?.title || 'Bill information unavailable'} · {!reportAvailable ? 'No linked committee report yet; awaiting report and triage follow-up.' : !reportEntriesAvailable ? 'A report is linked, but its contents have not been extracted into reviewable entries.' : 'Report entries are available; no proposal is currently recorded.'}</p>
                   </div>
-                  {reportAvailable && bill && canModerate && (
+                  {reportEntriesAvailable && bill && canModerate && (
                     <button type="button" onClick={() => generateForReceipt(receipt.id, bill.id)} disabled={generatingBillId !== null} className="btn-secondary inline-flex min-h-10 shrink-0 items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-60">
                       <Sparkles className="h-4 w-4" /> {generatingBillId === bill.id ? 'Scoring…' : 'Generate AI proposal'}
                     </button>

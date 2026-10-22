@@ -15,7 +15,7 @@ async def propose_matches(db: AsyncSession, bill_id: str, use_llm: bool = True) 
     receipt_result = await db.execute(select(ParticipationReceipt).where(ParticipationReceipt.legislative_item_id == bill_id))
     receipts = list(receipt_result.scalars().all())
     entry_result = await db.execute(select(ReportEntry).join(ReportEntry.report).where(ReportEntry.report.has(bill_ref=bill_id)))
-    entries = list(entry_result.scalars().all())
+    entries = [entry for entry in entry_result.scalars().all() if (entry.extracted_summary or "").strip()]
     if not receipts or not entries:
         return []
 
@@ -24,11 +24,17 @@ async def propose_matches(db: AsyncSession, bill_id: str, use_llm: bool = True) 
     for match in existing_result.scalars().all():
         existing_by_receipt.setdefault(match.receipt_ref, []).append(match)
 
+    # Only score receipts that have never been proposed or decided. This keeps
+    # the AI request small and ensures a moderator rejection is not resurrected.
+    receipts_to_score = [receipt for receipt in receipts if not existing_by_receipt.get(receipt.id)]
+    if not receipts_to_score:
+        return []
+
     llm_candidates = []
     if use_llm and llm_matching_service.is_configured():
         try:
             llm_candidates = await llm_matching_service.propose_matches(
-                [{"id": r.id, "clause_ref": r.clause_ref, "submission_text": r.submission_text} for r in receipts],
+                [{"id": r.id, "clause_ref": r.clause_ref, "submission_text": r.submission_text} for r in receipts_to_score],
                 [{"id": e.id, "clause_ref": e.clause_ref, "extracted_summary": e.extracted_summary} for e in entries],
             )
         except Exception:
@@ -43,7 +49,7 @@ async def propose_matches(db: AsyncSession, bill_id: str, use_llm: bool = True) 
             llm_by_receipt.setdefault(candidate["receipt_id"], candidate)
 
     matches: list[SubmissionMatch] = []
-    for receipt in receipts:
+    for receipt in receipts_to_score:
         existing = existing_by_receipt.get(receipt.id, [])
         # Do not silently resurrect a proposal a moderator already confirmed or
         # rejected, or duplicate one that is still awaiting a decision.
@@ -78,9 +84,15 @@ async def propose_matches(db: AsyncSession, bill_id: str, use_llm: bool = True) 
                 similarity = fuzz.token_sort_ratio(receipt.submission_text.lower(), entry.extracted_summary.lower())
                 score, method = similarity / 100.0, "text-similarity"
                 explanation = f"Text similarity proposal ({score * 100:.1f}%): submission discusses '{receipt.submission_text[:50]}...' and report entry '{entry.extracted_summary[:50]}...' ."
-            if score >= 0.30 and score > best_score:
+            if best_match is None or score > best_score:
                 best_score, best_method, best_explanation, best_match = score, method, explanation, entry
         if best_match:
+            if best_score < 0.30:
+                best_explanation = (
+                    f"Low-confidence fallback proposal ({best_score * 100:.1f}% lexical similarity). "
+                    "No clear semantic match was returned; moderator review is required. "
+                    f"Top candidate report entry: '{best_match.extracted_summary[:180]}'."
+                )
             match = SubmissionMatch(
                 receipt_ref=receipt.id, report_entry_ref=best_match.id, match_method=best_method,
                 confidence_score=best_score, explanation=best_explanation,

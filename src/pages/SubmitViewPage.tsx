@@ -23,7 +23,7 @@ export function SubmitViewPage() {
   const [submissionText, setSubmissionText] = useState('');
   const [showName, setShowName] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [success, setSuccess] = useState<{ receiptId: string; publicId: string } | null>(null);
+  const [success, setSuccess] = useState<{ receiptId: string; publicId: string; matchingStatus: string } | null>(null);
   const [offlineDrafts, setOfflineDrafts] = useState<OfflineDraft[]>([]);
   const [savingDraft, setSavingDraft] = useState(false);
   const [draftSaved, setDraftSaved] = useState(false);
@@ -88,7 +88,7 @@ export function SubmitViewPage() {
         dispatch({ type: 'ADD_MATCH', payload: match });
       }
       setSubmitting(false);
-      setSuccess({ receiptId, publicId });
+      setSuccess({ receiptId, publicId, matchingStatus: String(result.matching_status || (result.match_proposals?.length ? 'pending_review' : 'submission_triage')) });
       setTimeout(fireConfetti, 120);
     } catch (error) {
       setSubmitting(false);
@@ -219,6 +219,12 @@ export function SubmitViewPage() {
                 <p className="text-sm font-semibold text-surface-600 leading-relaxed">
                   Save this ID to look up your submission status anytime. It's public — sharing it reveals no personal information.
                 </p>
+                <div role="status" className={`mt-5 rounded-xl border p-4 text-sm font-semibold leading-relaxed ${success.matchingStatus === 'pending_review' ? 'border-blue-200 bg-blue-50 text-blue-900' : 'border-warm-200 bg-warm-50 text-warm-900'}`}>
+                  {success.matchingStatus === 'pending_review' && 'A match proposal was generated from the available committee report and sent to the Moderator Pending Review queue. A moderator must confirm or reject the proposal.'}
+                  {success.matchingStatus === 'submission_triage' && 'No linked committee report is available yet. Your submission is in the Moderator Submission Triage queue until a report becomes available.'}
+                  {success.matchingStatus === 'report_extraction_required' && 'A report is linked, but it has not yielded usable entries yet. Your submission is flagged for moderator triage while the report is checked.'}
+                  {success.matchingStatus === 'already_processed' && 'A committee report is available, but this submission has no new proposal. It remains visible to the moderator for follow-up.'}
+                </div>
               </motion.div>
             </div>
 

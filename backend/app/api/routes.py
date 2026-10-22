@@ -495,6 +495,26 @@ async def create_receipt(
     # A report may have been ingested before this citizen submitted. Re-run
     # matching on submission so the new receipt enters the moderator queue too.
     match_proposals = await linking_service.propose_matches(db, bill_uuid, use_llm=True)
+    receipt_match_proposals = [match for match in match_proposals if match.receipt_ref == receipt.id]
+    report_result = await db.execute(
+        select(CommitteeReport.id).where(CommitteeReport.bill_ref == bill_uuid).limit(1)
+    )
+    report_exists = report_result.scalar_one_or_none() is not None
+    entry_result = await db.execute(
+        select(ReportEntry.id)
+        .join(CommitteeReport, ReportEntry.report_ref == CommitteeReport.id)
+        .where(CommitteeReport.bill_ref == bill_uuid)
+        .limit(1)
+    )
+    report_has_entries = entry_result.scalar_one_or_none() is not None
+    if receipt_match_proposals:
+        matching_status = "pending_review"
+    elif not report_exists:
+        matching_status = "submission_triage"
+    elif not report_has_entries:
+        matching_status = "report_extraction_required"
+    else:
+        matching_status = "already_processed"
 
     await notification_service.notify_receipt_event(
         db, receipt, f"receipt:{receipt.id}:submitted", "submission_received",
@@ -506,7 +526,8 @@ async def create_receipt(
         "status": "awaiting committee report",
         "hash": receipt.hash,
         "previous_hash": receipt.previous_hash,
-        "match_proposals": [to_dict(match) for match in match_proposals],
+        "match_proposals": [to_dict(match) for match in receipt_match_proposals],
+        "matching_status": matching_status,
     }
 
 
