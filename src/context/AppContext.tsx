@@ -209,7 +209,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const getBillOutcomes = (billId: string): { status: SubmissionStatus; count: number }[] => {
     const billReceipts = state.receipts.filter(r => r.legislative_item_id === billId);
     const statuses: SubmissionStatus[] = [
-      'awaiting committee report', 'adopted', 'amended', 'rejected with reasons', 'not addressed'
+      'awaiting committee report', 'adopted', 'amended', 'rejected with reasons', 'not addressed', 'unclassified'
     ];
     
     return statuses.map(status => ({

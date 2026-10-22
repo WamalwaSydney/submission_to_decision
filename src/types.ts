@@ -1,11 +1,12 @@
-// Exact status vocabulary from §6 - DO NOT add synonyms or extra statuses
+// Canonical outcome statuses plus an explicit non-outcome label for extracted text awaiting classification.
 
 export type SubmissionStatus = 
   | 'awaiting committee report'
   | 'adopted'
   | 'amended'
   | 'rejected with reasons'
-  | 'not addressed';
+  | 'not addressed'
+  | 'unclassified';
 
 export type RepresentativeStatus = 
   | 'unclaimed'

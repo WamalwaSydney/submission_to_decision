@@ -1,8 +1,13 @@
 """Committee-report extraction with native-text and OCR fallback."""
 import os
 import re
+import tempfile
 from datetime import date, datetime
+from pathlib import Path
 from typing import List, Tuple
+from urllib.parse import urlparse
+import httpx
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import CommitteeReport, ReportEntry
 
@@ -106,3 +111,101 @@ def parse_report_entries(text: str) -> List[Tuple[str, str, str, str | None]]:
 
 def _finalize(item: dict) -> Tuple[str, str, str, str | None]:
     return item["ref"], normalize_line(" ".join(item["summary"])), item["treatment"] or "not addressed", item["reason"]
+
+
+async def extract_pending_linked_reports(db: AsyncSession, bill_ref) -> int:
+    """Download and extract linked official Parliament PDFs before matching.
+
+    Only HTTPS URLs on parliament.go.ke (or its subdomains) are accepted. The
+    document is size-limited, and extraction status prevents repeated downloads
+    for reports that have already been processed or need manual review.
+    """
+    result = await db.execute(
+        select(CommitteeReport).where(
+            CommitteeReport.bill_ref == bill_ref,
+            CommitteeReport.extraction_status == "pending",
+            CommitteeReport.source_url.is_not(None),
+        )
+    )
+    reports = list(result.scalars().all())
+    extracted_count = 0
+    for report in reports:
+        parsed = urlparse(report.source_url or "")
+        if parsed.scheme != "https" or not parsed.hostname or not (
+            parsed.hostname == "parliament.go.ke" or parsed.hostname.endswith(".parliament.go.ke")
+        ):
+            report.extraction_status = "needs_review"
+            continue
+
+        try:
+            chunks = []
+            total_bytes = 0
+            async with httpx.AsyncClient(timeout=45, follow_redirects=True, headers={"User-Agent": "ParticipationTrace/1.0 (official report text extraction)"}) as client:
+                async with client.stream("GET", report.source_url) as response:
+                    response.raise_for_status()
+                    final_host = urlparse(str(response.url)).hostname or ""
+                    if final_host != "parliament.go.ke" and not final_host.endswith(".parliament.go.ke"):
+                        raise ValueError("PDF redirect left the official Parliament domain")
+                    async for chunk in response.aiter_bytes():
+                        total_bytes += len(chunk)
+                        if total_bytes > 35 * 1024 * 1024:
+                            raise ValueError("PDF exceeded the 35 MB extraction limit")
+                        chunks.append(chunk)
+            pdf_bytes = b"".join(chunks)
+            if not pdf_bytes.startswith(b"%PDF"):
+                raise ValueError("The linked document is not a readable PDF")
+
+            with tempfile.TemporaryDirectory(prefix="parliament-report-") as directory:
+                pdf_path = Path(directory) / "report.pdf"
+                pdf_path.write_bytes(pdf_bytes)
+                text, ocr_used = extract_text(str(pdf_path))
+            entries = parse_report_entries(text)
+            if not entries:
+                entries = parse_unstructured_report_entries(text)
+            if not entries:
+                report.extraction_status = "needs_review"
+                report.ocr_used = ocr_used
+                continue
+
+            for clause_ref, summary, treatment, reason in entries:
+                if not summary:
+                    continue
+                db.add(ReportEntry(
+                    report_ref=report.id,
+                    clause_ref=clause_ref,
+                    extracted_summary=summary,
+                    treatment=treatment,
+                    stated_reason=reason,
+                ))
+            report.extraction_status = "ocr_used" if ocr_used else "extracted"
+            report.ocr_used = ocr_used
+            extracted_count += 1
+        except Exception:
+            # Keep the citizen submission intact; moderators can still inspect
+            # the linked PDF and the report remains visibly flagged for review.
+            report.extraction_status = "needs_review"
+
+    if reports:
+        await db.commit()
+    return extracted_count
+
+
+def parse_unstructured_report_entries(text: str) -> List[Tuple[str, str, str, str | None]]:
+    """Split readable report text into reviewable text blocks without claiming outcomes."""
+    cleaned = []
+    for raw in text.splitlines():
+        line = normalize_line(raw)
+        if not line or line.startswith("[Page "):
+            continue
+        if re.match(r"^(page\s+\d+|republic of kenya|national assembly|senate|committee report)\b", line, re.I):
+            continue
+        cleaned.append(line)
+    full_text = normalize_line(" ".join(cleaned))
+    if len(full_text) < 120:
+        return []
+    chunks = [full_text[index:index + 1200] for index in range(0, len(full_text), 1200)]
+    return [
+        (f"Report text {index + 1}", chunk.strip(), "unclassified", None)
+        for index, chunk in enumerate(chunks)
+        if len(chunk.strip()) >= 80
+    ]

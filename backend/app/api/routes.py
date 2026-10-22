@@ -528,6 +528,19 @@ async def my_receipts(
     return {"receipts": [to_dict(receipt) for receipt in result.scalars().all()]}
 
 
+@router.get("/receipts/review-queue")
+async def review_queue_receipts(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_role("reviewer")),
+):
+    result = await db.execute(
+        select(ParticipationReceipt).order_by(ParticipationReceipt.timestamp.desc())
+    )
+    # Moderators need submission content and receipt identifiers for review, but
+    # author account IDs are internal and must not be exposed in this queue.
+    return {"receipts": [to_dict(receipt, exclude={"author_id"}) for receipt in result.scalars().all()]}
+
+
 @router.get("/receipts/{public_id}")
 async def get_receipt(public_id: str, db: AsyncSession = Depends(get_db)):
     result = await db.execute(
@@ -591,6 +604,24 @@ async def get_pending_matches(
 ):
     matches = await linking_service.get_pending_matches(db)
     return {"matches": [to_dict(match) for match in matches]}
+
+
+@router.post("/matches/auto-process")
+async def auto_process_matches(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_role("reviewer")),
+):
+    bill_result = await db.execute(
+        select(ParticipationReceipt.legislative_item_id)
+        .join(CommitteeReport, CommitteeReport.bill_ref == ParticipationReceipt.legislative_item_id)
+        .distinct()
+    )
+    processed = 0
+    created = 0
+    for bill_id in bill_result.scalars().all():
+        processed += 1
+        created += len(await linking_service.propose_matches(db, bill_id, use_llm=True))
+    return {"bills_processed": processed, "proposals_created": created}
 
 
 @router.post("/matches/{match_id}/confirm")

@@ -6,9 +6,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.models import ParticipationReceipt, ReportEntry, SubmissionMatch
 from app.audit import record_audit
-from app.services import llm_matching_service, notification_service
+from app.services import ingestion_service, llm_matching_service, notification_service
 
 async def propose_matches(db: AsyncSession, bill_id: str, use_llm: bool = True) -> List[SubmissionMatch]:
+    # Parliament sync stores linked report PDFs as pending records. Extract them
+    # on the first automatic matching attempt so link-only reports are usable.
+    await ingestion_service.extract_pending_linked_reports(db, bill_id)
     receipt_result = await db.execute(select(ParticipationReceipt).where(ParticipationReceipt.legislative_item_id == bill_id))
     receipts = list(receipt_result.scalars().all())
     entry_result = await db.execute(select(ReportEntry).join(ReportEntry.report).where(ReportEntry.report.has(bill_ref=bill_id)))
@@ -34,14 +37,22 @@ async def propose_matches(db: AsyncSession, bill_id: str, use_llm: bool = True) 
 
     receipt_by_id = {str(r.id): r for r in receipts}
     entry_by_id = {str(e.id): e for e in entries}
+    llm_by_receipt = {}
+    for candidate in llm_candidates:
+        if candidate["receipt_id"] in receipt_by_id and candidate["entry_id"] in entry_by_id:
+            llm_by_receipt.setdefault(candidate["receipt_id"], candidate)
+
     matches: list[SubmissionMatch] = []
-    if llm_candidates:
-        for candidate in llm_candidates:
-            receipt = receipt_by_id[candidate["receipt_id"]]
+    for receipt in receipts:
+        existing = existing_by_receipt.get(receipt.id, [])
+        # Do not silently resurrect a proposal a moderator already confirmed or
+        # rejected, or duplicate one that is still awaiting a decision.
+        if existing:
+            continue
+
+        candidate = llm_by_receipt.get(str(receipt.id))
+        if candidate:
             entry = entry_by_id[candidate["entry_id"]]
-            existing = existing_by_receipt.get(receipt.id, [])
-            if any(m.reviewer_decision == "confirmed" or m.report_entry_ref == entry.id for m in existing):
-                continue
             match = SubmissionMatch(
                 receipt_ref=receipt.id, report_entry_ref=entry.id, match_method="llm",
                 confidence_score=candidate["confidence"],
@@ -50,33 +61,33 @@ async def propose_matches(db: AsyncSession, bill_id: str, use_llm: bool = True) 
             )
             db.add(match)
             matches.append(match)
-    else:
-        for receipt in receipts:
-            existing = existing_by_receipt.get(receipt.id, [])
-            if any(m.reviewer_decision == "confirmed" for m in existing):
-                continue
-            best_match = None
-            best_score = 0.0
-            best_method = None
-            best_explanation = ""
-            for entry in entries:
-                if receipt.clause_ref and entry.clause_ref and receipt.clause_ref.lower() == entry.clause_ref.lower():
-                    score, method = 0.95, "clause"
-                    explanation = f"Exact clause reference match: both reference {receipt.clause_ref}"
-                else:
-                    similarity = fuzz.token_sort_ratio(receipt.submission_text.lower(), entry.extracted_summary.lower())
-                    score, method = similarity / 100.0, "text-similarity"
-                    explanation = f"Text similarity proposal ({score * 100:.1f}%): submission discusses '{receipt.submission_text[:50]}...' and report entry '{entry.extracted_summary[:50]}...' ."
-                if score >= 0.30 and score > best_score:
-                    best_score, best_method, best_explanation, best_match = score, method, explanation, entry
-            if best_match and not any(m.report_entry_ref == best_match.id for m in existing):
-                match = SubmissionMatch(
-                    receipt_ref=receipt.id, report_entry_ref=best_match.id, match_method=best_method,
-                    confidence_score=best_score, explanation=best_explanation,
-                    reviewer_decision="pending", actor_type="automated_system",
-                )
-                db.add(match)
-                matches.append(match)
+            continue
+
+        # AI may omit an item when uncertain or fail entirely. Still run the
+        # deterministic clause/text scorer for that receipt so AI coverage of
+        # other submissions cannot suppress its automatic proposal.
+        best_match = None
+        best_score = 0.0
+        best_method = None
+        best_explanation = ""
+        for entry in entries:
+            if receipt.clause_ref and entry.clause_ref and receipt.clause_ref.strip().lower() == entry.clause_ref.strip().lower():
+                score, method = 0.95, "clause"
+                explanation = f"Exact clause reference match: both reference {receipt.clause_ref}"
+            else:
+                similarity = fuzz.token_sort_ratio(receipt.submission_text.lower(), entry.extracted_summary.lower())
+                score, method = similarity / 100.0, "text-similarity"
+                explanation = f"Text similarity proposal ({score * 100:.1f}%): submission discusses '{receipt.submission_text[:50]}...' and report entry '{entry.extracted_summary[:50]}...' ."
+            if score >= 0.30 and score > best_score:
+                best_score, best_method, best_explanation, best_match = score, method, explanation, entry
+        if best_match:
+            match = SubmissionMatch(
+                receipt_ref=receipt.id, report_entry_ref=best_match.id, match_method=best_method,
+                confidence_score=best_score, explanation=best_explanation,
+                reviewer_decision="pending", actor_type="automated_system",
+            )
+            db.add(match)
+            matches.append(match)
 
     await db.commit()
     report_ids = sorted({str(entry.report_ref) for entry in entries})

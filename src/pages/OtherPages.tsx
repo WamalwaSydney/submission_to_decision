@@ -13,7 +13,7 @@ import { api } from '../api/endpoints';
 export function ResearchExportPage() {
   const { state, getSubmissionStatus, getBillOutcomes } = useApp();
 
-  const outcomeTotals = ['adopted', 'amended', 'rejected with reasons', 'not addressed', 'awaiting committee report'].map(status => ({
+  const outcomeTotals = ['adopted', 'amended', 'rejected with reasons', 'not addressed', 'unclassified', 'awaiting committee report'].map(status => ({
     name: status.replace(' with reasons', ''),
     count: state.bills.reduce((total, bill) => total + getBillOutcomes(bill.id).filter(item => item.status === status).reduce((sum, item) => sum + item.count, 0), 0),
   }));
@@ -570,6 +570,7 @@ export function MyReceiptsPage() {
     'adopted': 'green',
     'amended': 'blue',
     'rejected with reasons': 'red',
+    'unclassified': 'gray',
   };
 
   return (

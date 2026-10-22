@@ -43,6 +43,7 @@ export const api = {
   bills: () => apiFetch<{ bills: any[] }>('/bills'),
   receipt: (publicId: string) => apiFetch<any>(`/receipts/${encodeURIComponent(publicId)}`),
   myReceipts: () => apiFetch<{ receipts: any[] }>('/receipts/my'),
+  reviewQueueReceipts: () => apiFetch<{ receipts: any[] }>('/receipts/review-queue'),
   createReceipt: (data: { legislative_item_id: string; clause_ref?: string; submission_text: string; show_name_publicly: boolean }) => {
     const form = new FormData();
     form.append('legislative_item_id', data.legislative_item_id);
@@ -62,6 +63,7 @@ export const api = {
     return apiFetch<any>('/reports/upload', { method: 'POST', body: form });
   },
   pendingMatches: () => apiFetch<{ matches: any[] }>('/matches/pending'),
+  autoProcessMatches: () => apiFetch<{ bills_processed: number; proposals_created: number }>('/matches/auto-process', { method: 'POST' }),
   generateMatches: (billRef: string) => apiFetch<{ matches: any[] }>(`/reports/${encodeURIComponent(billRef)}/generate-matches`, { method: 'POST' }),
   decideMatch: (matchId: string, decision: 'confirm' | 'reject') => apiFetch<any>(`/matches/${matchId}/${decision}`, { method: 'POST' }),
   report: (reportId: string) => apiFetch<any>(`/reports/${encodeURIComponent(reportId)}`),

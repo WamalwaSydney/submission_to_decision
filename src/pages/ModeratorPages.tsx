@@ -21,14 +21,18 @@ export function ReviewerQueuePage() {
 
   useEffect(() => {
     let cancelled = false;
+    if (state.currentUser?.role !== 'reviewer') {
+      setQueueLoading(false);
+      return () => { cancelled = true; };
+    }
     setQueueLoading(true);
-    Promise.all([api.bootstrap(), api.pendingMatches()]).then(([snapshot, pending]) => {
+    api.autoProcessMatches().then(() => Promise.all([api.bootstrap(), api.pendingMatches(), api.reviewQueueReceipts()])).then(([snapshot, pending, queueReceipts]) => {
       if (cancelled) return;
       dispatch({
         type: 'HYDRATE',
         payload: {
           bills: snapshot.bills,
-          receipts: snapshot.receipts,
+          receipts: queueReceipts.receipts,
           reports: snapshot.reports,
           reportEntries: snapshot.report_entries,
           matches: [...snapshot.matches.filter(match => match.reviewer_decision !== 'pending'), ...pending.matches],
@@ -41,7 +45,7 @@ export function ReviewerQueuePage() {
       if (!cancelled) setQueueLoading(false);
     });
     return () => { cancelled = true; };
-  }, [dispatch]);
+  }, [dispatch, state.currentUser?.id, state.currentUser?.role]);
 
   const handleDecision = async (matchId: string, decision: ReviewerDecision) => {
     if (!state.currentUser) return;
@@ -78,10 +82,10 @@ export function ReviewerQueuePage() {
     setQueueError('');
     try {
       await api.generateMatches(billId);
-      const [snapshot, pending] = await Promise.all([api.bootstrap(), api.pendingMatches()]);
+      const [snapshot, pending, queueReceipts] = await Promise.all([api.bootstrap(), api.pendingMatches(), api.reviewQueueReceipts()]);
       dispatch({ type: 'HYDRATE', payload: {
         bills: snapshot.bills,
-        receipts: snapshot.receipts,
+        receipts: queueReceipts.receipts,
         reports: snapshot.reports,
         reportEntries: snapshot.report_entries,
         matches: [...snapshot.matches.filter(match => match.reviewer_decision !== 'pending'), ...pending.matches],

@@ -680,6 +680,7 @@ export function StatusBadge({ status }: { status: any }) {
     amended: 'blue',
     'rejected with reasons': 'red',
     'not addressed': 'gray',
+    unclassified: 'gray',
     confirmed: 'green',
     pending: 'yellow',
     rejected: 'red',
