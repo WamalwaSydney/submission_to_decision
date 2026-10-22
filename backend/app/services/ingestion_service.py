@@ -3,16 +3,18 @@ import os
 import re
 import tempfile
 import logging
+import asyncio
 from datetime import date, datetime
 from pathlib import Path
 from typing import List, Tuple
 from urllib.parse import urlparse
 import httpx
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import CommitteeReport, ReportEntry
 
 log = logging.getLogger(__name__)
+_pdf_ocr_semaphore = asyncio.Semaphore(1)
 
 
 def normalize_line(value: str) -> str:
@@ -26,7 +28,8 @@ async def ingest_report(db: AsyncSession, bill_ref: str, institution: str, file_
         date_tabled = date.fromisoformat(date_tabled)
     elif isinstance(date_tabled, datetime):
         date_tabled = date_tabled.date()
-    text, ocr_used = extract_text(file_path)
+    async with _pdf_ocr_semaphore:
+        text, ocr_used = await asyncio.to_thread(extract_text, file_path)
     entries = parse_report_entries(text)
     report = CommitteeReport(
         bill_ref=bill_ref, institution=institution, date_tabled=date_tabled,
@@ -64,11 +67,27 @@ def extract_text(file_path: str) -> Tuple[str, bool]:
 
 def ocr_extract(file_path: str) -> str:
     import pytesseract
-    from pdf2image import convert_from_path
-    return "\n".join(
-        f"[Page {i}]\n{pytesseract.image_to_string(image)}"
-        for i, image in enumerate(convert_from_path(file_path), start=1)
-    )
+    from pdf2image import convert_from_path, pdfinfo_from_path
+
+    page_count = int(pdfinfo_from_path(file_path).get("Pages", 0))
+    pages = []
+    for page_number in range(1, page_count + 1):
+        images = convert_from_path(
+            file_path,
+            first_page=page_number,
+            last_page=page_number,
+            dpi=140,
+            grayscale=True,
+            thread_count=1,
+            fmt="jpeg",
+        )
+        try:
+            if images:
+                pages.append(f"[Page {page_number}]\n{pytesseract.image_to_string(images[0])}")
+        finally:
+            for image in images:
+                image.close()
+    return "\n".join(pages)
 
 
 CLAUSE_RE = re.compile(r"^(?:clause|section|article|paragraph)\s+([A-Za-z0-9().\-]+)\s*[:\-–—]?\s*(.*)$", re.I)
@@ -133,6 +152,15 @@ async def extract_pending_linked_reports(db: AsyncSession, bill_ref) -> int:
     reports = list(result.scalars().all())
     extracted_count = 0
     for report in reports:
+        claim = await db.execute(
+            update(CommitteeReport)
+            .where(CommitteeReport.id == report.id, CommitteeReport.extraction_status == "pending")
+            .values(extraction_status="extracting")
+            .returning(CommitteeReport.id)
+        )
+        if claim.scalar_one_or_none() is None:
+            continue
+        await db.commit()
         parsed = urlparse(report.source_url or "")
         if parsed.scheme != "https" or not parsed.hostname or not (
             parsed.hostname == "parliament.go.ke" or parsed.hostname.endswith(".parliament.go.ke")
@@ -161,7 +189,8 @@ async def extract_pending_linked_reports(db: AsyncSession, bill_ref) -> int:
             with tempfile.TemporaryDirectory(prefix="parliament-report-") as directory:
                 pdf_path = Path(directory) / "report.pdf"
                 pdf_path.write_bytes(pdf_bytes)
-                text, ocr_used = extract_text(str(pdf_path))
+                async with _pdf_ocr_semaphore:
+                    text, ocr_used = await asyncio.to_thread(extract_text, str(pdf_path))
             entries = parse_report_entries(text)
             if not entries:
                 entries = parse_unstructured_report_entries(text)
