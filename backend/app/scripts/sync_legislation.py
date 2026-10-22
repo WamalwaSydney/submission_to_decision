@@ -80,7 +80,7 @@ DATE_RE = re.compile(
 
 # File references look like DLS/NA/2023/123 -- no spaces.  The old pattern
 # allowed spaces around slashes and matched fragments such as "DLS/NA/ The".
-FILE_REF_RE = re.compile(r"\bDLS/[A-Za-z0-9.()-]+(?:/[A-Za-z0-9.()-]+)+")
+FILE_REF_RE = re.compile(r"\b(?:NA/)?DLS/[A-Za-z0-9.()-]+(?:/[A-Za-z0-9.()-]+)+")
 
 # Whitelisted stage labels, most advanced first.  Anything else falls back to
 # DEFAULT_STAGE instead of storing raw table text.
@@ -255,6 +255,12 @@ def committee_key(value: str) -> str:
     return COMMITTEE_KEY_ALIASES.get(normalized, normalized)
 
 
+def normalize_tracker_reference(value: str) -> str:
+    """Rejoin file-reference fragments split across PDF columns or lines."""
+    normalized = re.sub(r"(?i)\b(DLS/NA/|NA/DLS/)\s*B\s*ILLS/", r"\1BILLS/", clean(value))
+    return re.sub(r"(?i)(/BILLS/[12]/)\s+(\d{1,2}/20\d{2})\b", r"\1\2", normalized)
+
+
 def extract_committee_assignment(status_text: str, committee_names: Iterable[str]) -> str | None:
     """Return a directory committee only when the tracker status names one unambiguously."""
     normalized_status = normalize_committee_terms(status_text)
@@ -277,8 +283,12 @@ def parse_tracker(text_value: str, source_url: str, as_at: date, committee_names
     rows: list[BillRow] = []
     for block in _row_blocks(text_value):
         joined = clean(" ".join(block))
-        ref = BILL_REF_RE.search(joined)
-        tracker_head = TRACKER_BILL_HEAD_RE.search(joined)
+        # The bill number and year occupy their own fixed-width cell. Reading
+        # that cell across wrapped lines avoids confusing the bill year with
+        # the proposal's title year or its DLS file-reference year.
+        bill_column_text = clean(" ".join(line[78:95] for line in block if len(line) > 78))
+        ref = BILL_REF_RE.search(bill_column_text) or BILL_REF_RE.search(joined)
+        tracker_head = TRACKER_BILL_HEAD_RE.search(bill_column_text) or TRACKER_BILL_HEAD_RE.search(joined)
         generic = GENERIC_BILL_REF_RE.search(joined)
         house = canonical_house(ref.group("house") if ref else (tracker_head.group("house") if tracker_head else "na")) or "na"
         number = int(ref.group("number")) if ref else (int(tracker_head.group("number")) if tracker_head else (int(generic.group(1)) if generic else None))
@@ -290,12 +300,13 @@ def parse_tracker(text_value: str, source_url: str, as_at: date, committee_names
             years = YEAR_RE.findall(joined)
             year = int(years[-1]) if years else as_at.year
 
-        # pdftotext preserves the tracker columns. The title cell begins at
-        # column 30 and ends before the sponsor cell at column 78.
+        # PDF text extraction can place the first/last title glyph just outside
+        # the nominal cell boundary. Start slightly early, then strip sponsor
+        # text at the title/sponsor boundary.
         title_parts = []
         for line in block:
             if len(line) > 30:
-                piece = line[30:78]
+                piece = line[28:78]
                 piece = re.sub(r"\b(?:Hon\.|Dr\.|Prof\.|Sen\.|Ms\.)\s*.*", "", piece, flags=re.I)
                 piece = re.sub(r"\b(?:Chairperson|Member|Governor)\b\s*.*", "", piece, flags=re.I)
                 if piece.strip():
@@ -305,7 +316,8 @@ def parse_tracker(text_value: str, source_url: str, as_at: date, committee_names
             continue
         if not re.search(r"\b(bill|amendment|appropriation|finance|fund)\b", title, re.I):
             continue
-        file_match = FILE_REF_RE.search(joined)
+        file_ref_column = clean(" ".join(line[:28] for line in block))
+        file_match = FILE_REF_RE.search(normalize_tracker_reference(file_ref_column))
         file_ref = clean(file_match.group(0)) if file_match else None
         suffix = f"Bill-{number:03d}" if number is not None else f"Proposal-{hashlib.sha1((file_ref or title).encode()).hexdigest()[:10]}"
         identifier = f"{house.upper()}/{year}/{suffix}"
@@ -627,7 +639,7 @@ async def _upsert_bill(conn, row: BillRow, as_at: date) -> bool:
         "committee_id": committee_id,
     }
     if exists:
-        await conn.execute(text("""UPDATE legislative_items SET title=:title, institution=:institution, stage=:stage, documents=CAST(:documents AS jsonb), bill_house=:bill_house, bill_number=:bill_number, bill_year=:bill_year, source_url=:source_url, source_file_ref=:source_file_ref, source_updated_at=:source_updated_at, source_status=:source_status, committee_id=CASE WHEN :committee_id IS NOT NULL THEN :committee_id ELSE committee_id END, is_simulated=false WHERE identifier=:identifier"""), params)
+        await conn.execute(text("""UPDATE legislative_items SET title=:title, institution=:institution, stage=:stage, documents=CAST(:documents AS jsonb), bill_house=:bill_house, bill_number=:bill_number, bill_year=:bill_year, source_url=:source_url, source_file_ref=:source_file_ref, source_updated_at=:source_updated_at, source_status=:source_status, committee_id=COALESCE(CAST(:committee_id AS uuid),committee_id), is_simulated=false WHERE identifier=:identifier"""), params)
         return False
     await conn.execute(text("""INSERT INTO legislative_items (id, title, identifier, institution, stage, documents, status_history, is_simulated, bill_house, bill_number, bill_year, source_url, source_file_ref, source_updated_at, source_status, committee_id) VALUES (:id,:title,:identifier,:institution,:stage,CAST(:documents AS jsonb),'[]'::jsonb,false,:bill_house,:bill_number,:bill_year,:source_url,:source_file_ref,:source_updated_at,:source_status,:committee_id)"""), {**params, "id": uuid.uuid4()})
     return True
@@ -665,7 +677,7 @@ async def _upsert_notice(conn, notice: NoticeRow) -> None:
         bill = (await conn.execute(text("SELECT id FROM legislative_items WHERE identifier=:identifier"), {"identifier": identifier})).first()
     if bill and committee_id:
         # Only attach a bill when its official house/number/year reference matched above.
-        await conn.execute(text("UPDATE legislative_items SET committee_id=COALESCE(committee_id,:committee_id) WHERE id=:id AND is_simulated=false"), {"id": bill[0], "committee_id": committee_id})
+        await conn.execute(text("UPDATE legislative_items SET committee_id=COALESCE(committee_id,CAST(:committee_id AS uuid)) WHERE id=:id AND is_simulated=false"), {"id": bill[0], "committee_id": committee_id})
 
     if bill:
         for document_url in notice.document_urls:
