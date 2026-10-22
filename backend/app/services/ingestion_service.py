@@ -60,7 +60,7 @@ def extract_text(file_path: str) -> Tuple[str, bool]:
             text=True,
             encoding="utf-8",
             errors="replace",
-            timeout=45,
+            timeout=90,
         )
         text = native.stdout
         if len(text.strip()) >= 100:
