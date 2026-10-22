@@ -3,10 +3,13 @@
 import os
 import random
 from datetime import date, datetime, timedelta
+from pathlib import Path
 from typing import Optional
 from uuid import UUID, uuid4
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel
 from sqlalchemy import select, inspect as sa_inspect
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -661,6 +664,31 @@ async def upload_report(
         "ocr_used": report.ocr_used,
         "match_proposals": [to_dict(match) for match in proposals],
     }
+
+
+@router.get("/reports/{report_id}/document")
+async def open_report_document(report_id: UUID, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(CommitteeReport).where(CommitteeReport.id == report_id))
+    report = result.scalar_one_or_none()
+    if not report:
+        raise HTTPException(status_code=404, detail="Committee report not found")
+
+    if report.source_url:
+        parsed = urlparse(report.source_url)
+        if parsed.scheme in {"http", "https"} and parsed.netloc:
+            return RedirectResponse(report.source_url)
+
+    # Uploaded report refs are stored as a generated filename. Resolve only the
+    # basename inside the configured storage directory to prevent path traversal.
+    filename = Path(report.source_document_ref or "").name
+    report_path = storage_service.STORAGE_DIR / filename
+    if not filename or not report_path.is_file():
+        raise HTTPException(status_code=404, detail="Report document is unavailable")
+    return FileResponse(
+        report_path,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+    )
 
 
 @router.get("/reports/{report_id}")

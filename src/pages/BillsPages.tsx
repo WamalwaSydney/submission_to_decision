@@ -15,6 +15,7 @@ import {
 } from '../components/UI';
 import { confidenceClasses, confidenceLabel } from '../utils/confidence';
 import { api } from '../api/endpoints';
+import { reportDocumentHref } from '../utils/reportLinks';
 
 function SubmissionStatusBadge({ status }: { status: SubmissionStatus }) {
   return StatusBadge({ status });
@@ -487,10 +488,10 @@ export function BillPage() {
           </div>
           <div className="space-y-4">
             {billReports.map(report => (
-              <div key={report.id} className="relative rounded-2xl p-5 border border-surface-200/80 bg-gradient-to-br from-white to-surface-50 shadow-soft hover:shadow-elevated transition-all">
+              <a key={report.id} href={reportDocumentHref(report)} target="_blank" rel="noreferrer" aria-label={`Open committee report ${report.title || report.source_document_ref}`} className="block relative rounded-2xl p-5 border border-surface-200/80 bg-gradient-to-br from-white to-surface-50 shadow-soft hover:shadow-elevated hover:border-primary-200 transition-all">
                 <div className="flex items-start justify-between gap-3 mb-2 flex-wrap">
-                  <span className="font-bold text-surface-900">{report.source_document_ref}</span>
-                  <Badge variant="blue">{report.extraction_status}</Badge>
+                  <span className="font-bold text-surface-900">{report.title || report.source_document_ref}</span>
+                  <span className="inline-flex items-center gap-2"><Badge variant="blue">{report.extraction_status}</Badge><FileText className="h-4 w-4 text-primary-600" /></span>
                 </div>
                 <div className="flex flex-wrap gap-x-4 gap-y-2 text-xs font-semibold text-surface-500">
                   <span className="flex items-center gap-1"><Calendar className="h-3.5 w-3.5" /> Tabled: {report.date_tabled}</span>
@@ -498,7 +499,7 @@ export function BillPage() {
                   {report.ocr_used && <Badge variant="warm" className="!text-[10px]">OCR USED</Badge>}
                   {report.is_simulated && <Badge variant="gray" className="!text-[10px]">SIMULATED</Badge>}
                 </div>
-              </div>
+              </a>
             ))}
           </div>
         </Card>

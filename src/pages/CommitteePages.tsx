@@ -4,6 +4,7 @@ import { useApp } from '../context/AppContext';
 import { api } from '../api/endpoints';
 import { Card } from '../components/UI';
 import { confidenceClasses, confidenceLabel } from '../utils/confidence';
+import { reportDocumentHref } from '../utils/reportLinks';
 import { ArrowUpRight, CheckCircle2, FileCheck2, FileText, FileUp, Gavel, Loader2, UploadCloud, X } from 'lucide-react';
 
 export function CommitteeDashboardPage() {
@@ -91,5 +92,5 @@ export function BillFlowPage() {
   return <div className="space-y-6"><Card><p className="text-xs uppercase tracking-widest text-primary-600">Public bill flow</p><h1 className="text-4xl font-black mt-2">{flow.bill.title}</h1><p className="text-surface-600 mt-2">{flow.bill.identifier} · current stage: {flow.bill.stage}</p>{committee && <p className="mt-2 text-sm">Responsible committee: <strong>{committee.name}</strong></p>}</Card>
     <Card><h2 className="text-xl font-black mb-4">Legislative stages</h2><div className="space-y-3">{flow.flow.map((item: any, i: number) => <div key={i} className="border-l-4 border-primary-400 pl-4"><p className="font-bold">{item.stage}</p><p className="text-sm text-surface-500">{item.date} · {item.note}</p></div>)}</div></Card>
     <Card><h2 className="text-xl font-black mb-4">Participation outcomes</h2><div className="space-y-3">{flow.submissions.map((s: any) => <div key={s.public_id} className="border rounded-xl p-4"><div className="flex justify-between gap-4"><strong>{s.public_id}</strong><span className="font-semibold">{s.status}</span></div><p className="text-sm text-surface-500 mt-1">{s.clause_ref || 'General submission'}</p>{s.match_percentage !== null && <span className={`inline-flex mt-2 rounded-full border px-2.5 py-1 text-xs font-black ${confidenceClasses(s.match_percentage / 100)}`}>{confidenceLabel(s.match_percentage / 100)} confidence · {s.match_percentage}%</span>}{s.reason && <p className="text-sm mt-2">Committee reason: {s.reason}</p>}</div>)}{!flow.submissions.length && <p className="text-surface-500">No submissions have been recorded yet.</p>}</div></Card>
-    <Card><h2 className="text-xl font-black mb-3">Committee reports</h2>{flow.reports.map((r: any) => <p key={r.id} className="text-sm border-b py-2">{r.title || r.source_document_ref} · {r.extraction_status} · {r.ocr_used ? 'OCR used' : 'native text'}</p>)}</Card></div>;
+    <Card><h2 className="text-xl font-black mb-3">Committee reports</h2>{flow.reports.map((r: any) => <a key={r.id} href={reportDocumentHref(r)} target="_blank" rel="noreferrer" className="flex items-center justify-between gap-3 text-sm border-b py-3 text-primary-700 hover:text-primary-900"><span>{r.title || r.source_document_ref} · {r.extraction_status} · {r.ocr_used ? 'OCR used' : 'native text'}</span><ArrowUpRight className="h-4 w-4 flex-shrink-0" /></a>)}</Card></div>;
 }

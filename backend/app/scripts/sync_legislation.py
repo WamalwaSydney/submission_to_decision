@@ -32,7 +32,7 @@ import subprocess
 import sys
 import tempfile
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime
 from pathlib import Path
 from typing import Iterable
@@ -59,6 +59,12 @@ MIN_COMMITTEES = 20
 MAX_FAILED_FRACTION = 0.25
 PDF_RE = re.compile(r"\.pdf(?:$|[?#])", re.I)
 MONTH_RE = re.compile(r"/sites/default/files/(\d{4})-(\d{2})/")
+COMMITTEE_KEY_ALIASES = {
+    "budget and appropriation": "budget and appropriation",
+    "administration and national security": "administration and internal security",
+    "blue economy and irrigation": "blue economy water and irrigation",
+    "transport and housing": "transport and infrastructure",
+}
 BILL_REF_RE = re.compile(
     r"\b(?P<house>national\s+assembly|na|senate)\s*bill\s*(?:no\.?\s*)?(?P<number>\d+)\s*(?:of\s+)?(?:[A-Za-z]+\s+){0,3}(?P<year>20\d{2})\b",
     re.I,
@@ -143,6 +149,7 @@ class BillRow:
     stage: str
     source_url: str
     source_file_ref: str | None
+    committee_name: str | None = None
 
 
 @dataclass(frozen=True)
@@ -223,13 +230,50 @@ def _row_blocks(text_value: str) -> Iterable[list[str]]:
             block = [line]
         elif block:
             # Repeat headers and page breaks are not bill data.
-            if "LEGISLATIVE PROPOSALS TRACKER" not in line and not line.strip().startswith("S. NO"):
+            upper = line.upper()
+            is_header = any(marker in upper for marker in (
+                "LEGISLATIVE PROPOSALS TRACKER",
+                "REPUBLIC OF KENYA",
+                "THIRTEENTH PARLIAMENT",
+                "THE NATIONAL ASSEMBLY",
+            ))
+            if not is_header and not line.strip().startswith("S. NO") and not re.match(r"^\s*Page\s+\d+", line, re.I):
                 block.append(line)
     if block:
         yield block
 
 
-def parse_tracker(text_value: str, source_url: str, as_at: date) -> list[BillRow]:
+def normalize_committee_terms(value: str) -> str:
+    tokens = re.findall(r"[a-z0-9]+", value.casefold().replace("&", " and "))
+    tokens = [token for token in tokens if token not in {"departmental", "committee", "committees", "on", "the", "national", "assembly"}]
+    tokens = ["appropriation" if token == "appropriations" else token for token in tokens]
+    return " ".join(tokens)
+
+
+def committee_key(value: str) -> str:
+    normalized = normalize_committee_terms(value)
+    return COMMITTEE_KEY_ALIASES.get(normalized, normalized)
+
+
+def extract_committee_assignment(status_text: str, committee_names: Iterable[str]) -> str | None:
+    """Return a directory committee only when the tracker status names one unambiguously."""
+    normalized_status = normalize_committee_terms(status_text)
+    if not normalized_status:
+        return None
+    matches: dict[str, str] = {}
+    for name in committee_names:
+        key = committee_key(name)
+        phrase = normalize_committee_terms(name)
+        if not key or not phrase:
+            continue
+        variants = [phrase]
+        variants.extend(alias for alias, canonical in COMMITTEE_KEY_ALIASES.items() if canonical == key)
+        if any(re.search(rf"(?<![a-z0-9]){re.escape(variant)}(?![a-z0-9])", normalized_status) for variant in set(variants)):
+            matches.setdefault(key, name)
+    return next(iter(matches.values())) if len(matches) == 1 else None
+
+
+def parse_tracker(text_value: str, source_url: str, as_at: date, committee_names: Iterable[str] = ()) -> list[BillRow]:
     rows: list[BillRow] = []
     for block in _row_blocks(text_value):
         joined = clean(" ".join(block))
@@ -266,8 +310,24 @@ def parse_tracker(text_value: str, source_url: str, as_at: date) -> list[BillRow
         suffix = f"Bill-{number:03d}" if number is not None else f"Proposal-{hashlib.sha1((file_ref or title).encode()).hexdigest()[:10]}"
         identifier = f"{house.upper()}/{year}/{suffix}"
         stage = extract_stage(joined)
-        rows.append(BillRow(title=title, identifier=identifier, house=house, number=number, year=year, stage=stage, source_url=source_url, source_file_ref=file_ref))
-    unique: dict[str, BillRow] = {row.identifier: row for row in rows}
+        # The official PDF is fixed-width. Column 85 begins in the status cell,
+        # excluding committee names in bill titles, sponsors, and bill numbers.
+        status_text = clean(" ".join(line[85:] for line in block if len(line) > 85))
+        committee_name = extract_committee_assignment(status_text, committee_names)
+        rows.append(BillRow(title=title, identifier=identifier, house=house, number=number, year=year, stage=stage, source_url=source_url, source_file_ref=file_ref, committee_name=committee_name))
+    unique: dict[str, BillRow] = {}
+    conflicting_assignments: set[str] = set()
+    for row in rows:
+        if row.identifier in conflicting_assignments:
+            continue
+        prior = unique.get(row.identifier)
+        if prior and prior.committee_name and row.committee_name and committee_key(prior.committee_name) != committee_key(row.committee_name):
+            unique[row.identifier] = replace(prior, committee_name=None)
+            conflicting_assignments.add(row.identifier)
+        elif prior and prior.committee_name and row.committee_name is None:
+            continue
+        else:
+            unique[row.identifier] = row
     if len(unique) < 5:
         raise RuntimeError(f"Tracker parser produced only {len(unique)} bills; refusing a partial sync")
     return list(unique.values())
@@ -370,14 +430,36 @@ class Committee:
 
 def discover_committees(html: str) -> list[Committee]:
     soup = BeautifulSoup(html, "lxml")
+    anchors = soup.select("#quicktabs-the_national_assembly_committees a[href]")
+    if not anchors:
+        anchors = soup.select("nav.menu--committees a[href]")
     found: dict[str, Committee] = {}
-    for a in soup.select("a[href]"):
+    section_labels = {
+        "committee",
+        "departmental committees",
+        "audit, appropriations and general purpose committees",
+        "other committees (2017-2022)",
+    }
+    for a in anchors:
         name = clean(a.get_text(" ", strip=True))
-        href = urljoin(BASE, a["href"]).split("#")[0]
-        if not name or not href.startswith(BASE) or "committee" not in href.lower():
+        raw_href = a.get("href", "").split("#")[0]
+        if not name or name.casefold() in section_labels or "2017-2022" in name:
             continue
-        if any(x in name.lower() for x in ("departmental committees", "audit, appropriations", "committee") ):
-            found[href] = Committee(name, href, "National Assembly")
+        if any("other committees (2017-2022)" in clean(parent.get_text(" ", strip=True)).casefold() for parent in a.find_parents("li", class_="menu-item--expanded")):
+            continue
+        href = urljoin(BASE, raw_href)
+        parsed = urlparse(href)
+        if parsed.netloc.lower() not in {"www.parliament.go.ke", "parliament.go.ke"}:
+            continue
+        path = parsed.path.replace("/index.php/", "/")
+        if not path or path == "/" or raw_href.startswith("#"):
+            continue
+        href = f"{BASE}{path}"
+        key = committee_key(name)
+        if key:
+            # Keep the official directory label and URL, but collapse duplicate
+            # links and spelling variants to one committee entry.
+            found.setdefault(key, Committee(name, href, "National Assembly"))
     return list(found.values())
 
 
@@ -452,13 +534,25 @@ async def ensure_committee_id(conn, name: str | None, institution: str = "Nation
     clean_name = clean(name or "")
     if not clean_name or clean_name.casefold() in GENERIC_COMMITTEE_NAMES:
         return None
-    existing = await conn.execute(
-        text("SELECT id FROM committees WHERE lower(trim(name))=lower(trim(:name)) ORDER BY id LIMIT 1"),
-        {"name": clean_name},
-    )
-    row = existing.first()
-    if row:
-        return row[0]
+    key = committee_key(clean_name)
+    result = await conn.execute(text("SELECT id,name FROM committees WHERE lower(trim(institution))=lower(trim(:institution)) ORDER BY id"), {"institution": institution or "National Assembly"})
+    matches = [row for row in result.fetchall() if key and committee_key(row[1]) == key]
+    if matches:
+        target = next((row for row in matches if row[1].casefold() == clean_name.casefold()), matches[0])
+        committee_id = target[0]
+        if target[1].casefold() != clean_name.casefold():
+            name_conflict = (await conn.execute(text("SELECT id FROM committees WHERE lower(trim(name))=lower(trim(:name)) ORDER BY id LIMIT 1"), {"name": clean_name})).first()
+            if not name_conflict or name_conflict[0] == committee_id:
+                await conn.execute(text("UPDATE committees SET name=:name WHERE id=:id"), {"id": committee_id, "name": clean_name})
+        for duplicate in matches:
+            if duplicate[0] == committee_id:
+                continue
+            duplicate_id = duplicate[0]
+            await conn.execute(text("UPDATE legislative_items SET committee_id=:canonical WHERE committee_id=:duplicate"), {"canonical": committee_id, "duplicate": duplicate_id})
+            await conn.execute(text("UPDATE users SET committee_id=:canonical WHERE committee_id=:duplicate"), {"canonical": committee_id, "duplicate": duplicate_id})
+            await conn.execute(text("UPDATE representative_profiles SET committee_id=:canonical WHERE committee_id=:duplicate"), {"canonical": committee_id, "duplicate": duplicate_id})
+            await conn.execute(text("DELETE FROM committees WHERE id=:duplicate"), {"duplicate": duplicate_id})
+        return committee_id
 
     committee_id = uuid.uuid4()
     await conn.execute(
@@ -516,6 +610,7 @@ async def _upsert_bill(conn, row: BillRow, as_at: date) -> bool:
     """Insert or update one bill. Returns True if a new row was inserted."""
     result = await conn.execute(text("SELECT id FROM legislative_items WHERE identifier=:identifier"), {"identifier": row.identifier})
     exists = result.first()
+    committee_id = await ensure_committee_id(conn, row.committee_name) if row.committee_name else None
     params = {
         "title": row.title,
         "identifier": row.identifier,
@@ -529,11 +624,12 @@ async def _upsert_bill(conn, row: BillRow, as_at: date) -> bool:
         "source_file_ref": row.source_file_ref,
         "source_updated_at": as_at,
         "source_status": row.stage,
+        "committee_id": committee_id,
     }
     if exists:
-        await conn.execute(text("""UPDATE legislative_items SET title=:title, institution=:institution, stage=:stage, documents=CAST(:documents AS jsonb), bill_house=:bill_house, bill_number=:bill_number, bill_year=:bill_year, source_url=:source_url, source_file_ref=:source_file_ref, source_updated_at=:source_updated_at, source_status=:source_status, is_simulated=false WHERE identifier=:identifier"""), params)
+        await conn.execute(text("""UPDATE legislative_items SET title=:title, institution=:institution, stage=:stage, documents=CAST(:documents AS jsonb), bill_house=:bill_house, bill_number=:bill_number, bill_year=:bill_year, source_url=:source_url, source_file_ref=:source_file_ref, source_updated_at=:source_updated_at, source_status=:source_status, committee_id=CASE WHEN :committee_id IS NOT NULL THEN :committee_id ELSE committee_id END, is_simulated=false WHERE identifier=:identifier"""), params)
         return False
-    await conn.execute(text("""INSERT INTO legislative_items (id, title, identifier, institution, stage, documents, status_history, is_simulated, bill_house, bill_number, bill_year, source_url, source_file_ref, source_updated_at, source_status) VALUES (:id,:title,:identifier,:institution,:stage,CAST(:documents AS jsonb),'[]'::jsonb,false,:bill_house,:bill_number,:bill_year,:source_url,:source_file_ref,:source_updated_at,:source_status)"""), {**params, "id": uuid.uuid4()})
+    await conn.execute(text("""INSERT INTO legislative_items (id, title, identifier, institution, stage, documents, status_history, is_simulated, bill_house, bill_number, bill_year, source_url, source_file_ref, source_updated_at, source_status, committee_id) VALUES (:id,:title,:identifier,:institution,:stage,CAST(:documents AS jsonb),'[]'::jsonb,false,:bill_house,:bill_number,:bill_year,:source_url,:source_file_ref,:source_updated_at,:source_status,:committee_id)"""), {**params, "id": uuid.uuid4()})
     return True
 
 
@@ -600,12 +696,6 @@ async def _upsert_report(conn, row: dict) -> bool:
         bill = await conn.execute(text("SELECT id FROM legislative_items WHERE bill_house=:house AND bill_number=:number AND bill_year=:year ORDER BY id LIMIT 1"), {"house": row["bill_house"], "number": row["bill_number"], "year": row["bill_year"]})
         found = bill.first()
         bill_id = found[0] if found else None
-    if bill_id is not None:
-        committee_id = await ensure_committee_id(conn, row.get("committee_name"), row.get("institution") or "National Assembly")
-        if committee_id:
-            # Committee reports are official evidence of referral. Do not overwrite a
-            # bill assignment already made by an administrator or a matching notice.
-            await conn.execute(text("UPDATE legislative_items SET committee_id=COALESCE(committee_id,:committee_id) WHERE id=:id AND is_simulated=false"), {"id": bill_id, "committee_id": committee_id})
     existing = (await conn.execute(text("SELECT id FROM committee_reports WHERE source_url=:source_url AND committee_url=:committee_url"), {"source_url": row["source_url"], "committee_url": row["committee_url"]})).first()
     params = {**row, "bill_ref": bill_id, "source_document_ref": row["source_url"], "date_tabled": row["date_tabled"] or date.today(), "extraction_status": "pending", "ocr_used": False, "is_simulated": False}
     if existing:
@@ -627,6 +717,28 @@ async def _upsert_report(conn, row: dict) -> bool:
 
 
 async def upsert_reports(conn, rows: list[dict]) -> int:
+    committee_candidates: dict[tuple[str, int, int], dict[str, str]] = {}
+    for row in rows:
+        if not (row.get("bill_house") and row.get("bill_number") and row.get("bill_year") and row.get("committee_name")):
+            continue
+        reference = (canonical_house(row["bill_house"]) or "na", int(row["bill_number"]), int(row["bill_year"]))
+        committee_candidates.setdefault(reference, {})[committee_key(row["committee_name"])] = row["committee_name"]
+
+    # Apply only a consensus referral from exact official report references.
+    # Multiple reports on a bill can be legitimate, so conflicting committees
+    # are left for a clerk rather than selecting the last scraped page.
+    for (house, number, year), candidates in committee_candidates.items():
+        if len(candidates) != 1:
+            if candidates:
+                log.warning("Conflicting official committee reports for %s/%s/%s: %s", house, year, number, sorted(candidates.values()))
+            continue
+        committee_id = await ensure_committee_id(conn, next(iter(candidates.values())))
+        if not committee_id:
+            continue
+        bill = (await conn.execute(text("SELECT id FROM legislative_items WHERE bill_house=:house AND bill_number=:number AND bill_year=:year ORDER BY id LIMIT 1"), {"house": house, "number": number, "year": year})).first()
+        if bill:
+            await conn.execute(text("UPDATE legislative_items SET committee_id=:committee_id WHERE id=:id AND is_simulated=false"), {"id": bill[0], "committee_id": committee_id})
+
     count = 0
     for row in rows:
         try:
@@ -640,12 +752,16 @@ async def upsert_reports(conn, rows: list[dict]) -> int:
 
 async def fetch_all() -> tuple[list[BillRow], list[NoticeRow], list[dict], int, int]:
     async with httpx.AsyncClient(headers=HEADERS, timeout=60, follow_redirects=True) as client:
+        nav = await get(client, COMMITTEES_INDEX)
+        committees = discover_committees(nav.text)
+        if len(committees) < MIN_COMMITTEES:
+            raise RuntimeError(f"Only {len(committees)} committees discovered; refusing a partial report sync")
+
         tracker_page = await get(client, TRACKER_INDEX)
         tracker_url, tracker_date = choose_latest_tracker(tracker_page.text)
         tracker_text = extract_pdf((await get(client, tracker_url)).content)
-        bills = parse_tracker(tracker_text, tracker_url, tracker_date)
+        bills = parse_tracker(tracker_text, tracker_url, tracker_date, [committee.name for committee in committees])
 
-        nav = await get(client, COMMITTEES_INDEX)
         notice_index = next((url for url in discover_notice_urls(nav.text) if url.rstrip("/").replace("/index.php", "") == MEMORANDA_INDEX), MEMORANDA_INDEX)
         notice_listing = await get(client, notice_index)
         def canonical_notice_url(url: str) -> str:
@@ -661,9 +777,6 @@ async def fetch_all() -> tuple[list[BillRow], list[NoticeRow], list[dict], int, 
             attachment_text = extract_pdf((await get(client, attachment)).content) if attachment else ""
             notices.extend(parse_notice_page(page.text, url, attachment_text))
 
-        committees = discover_committees(nav.text)
-        if len(committees) < MIN_COMMITTEES:
-            raise RuntimeError(f"Only {len(committees)} committees discovered; refusing a partial report sync")
         sem = asyncio.Semaphore(CONCURRENCY)
         async def one(committee: Committee):
             async with sem:

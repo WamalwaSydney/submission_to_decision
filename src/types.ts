@@ -124,6 +124,8 @@ export interface CommitteeReport {
   institution: Institution;
   date_tabled: string;
   source_document_ref: string;
+  source_url?: string;
+  title?: string;
   extraction_status: ExtractionStatus;
   ocr_used: boolean;
   is_simulated: boolean;
