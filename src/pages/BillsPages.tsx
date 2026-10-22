@@ -132,11 +132,12 @@ export function BillsListPage() {
             const receipts = state.receipts.filter(r => r.legislative_item_id === bill.id);
             const notices = state.notices.filter(n => n.bill_ref === bill.id);
             const status = getOutcome(bill.id);
+            const stageSource = (bill.documents || []).find(doc => /official bills tracker/i.test(doc.name));
             return <motion.div key={bill.id} initial={{ opacity: 0, y: 16 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true, margin: '-40px' }} transition={{ duration: 0.35, delay: idx * 0.025 }}>
               <Link to={`/bills/${bill.id}`} className="card block !p-6 md:!p-7 group relative overflow-hidden">
                 <div className="relative flex items-start justify-between gap-4"><div className="flex-1 min-w-0">
                   <div className="flex flex-wrap items-center gap-2 mb-3"><h2 className="text-xl md:text-[22px] font-black text-surface-900 tracking-tight leading-snug">{bill.title}</h2>{bill.is_simulated && <Badge variant="gray" className="!text-[10px]">SIMULATED</Badge>}</div>
-                  <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm mb-5"><span className="flex items-center gap-1.5 font-semibold text-surface-600"><Building2 className="h-4 w-4 text-primary-500" />{bill.institution}</span><span className="flex items-center gap-1.5 font-semibold text-surface-600"><Clock className="h-4 w-4 text-warm-500" />{bill.stage}</span><span className="font-mono text-xs font-bold text-surface-500 bg-surface-100 px-2 py-0.5 rounded-md border border-surface-200">{bill.identifier}</span></div>
+                  <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm mb-5"><span className="flex items-center gap-1.5 font-semibold text-surface-600"><Building2 className="h-4 w-4 text-primary-500" />{bill.institution}</span><span className="flex items-center gap-1.5 font-semibold text-surface-700"><Clock className="h-4 w-4 text-warm-500" /><span><span className="font-black">{stageSource ? 'Current stage' : 'Last recorded stage'}:</span> {bill.stage}</span></span>{stageSource && bill.source_updated_at && <span className="text-xs font-semibold text-surface-500">National Assembly tracker as at {bill.source_updated_at}</span>}<span className="font-mono text-xs font-bold text-surface-500 bg-surface-100 px-2 py-0.5 rounded-md border border-surface-200">{bill.identifier}</span></div>
                   <div className="flex flex-wrap gap-3"><span className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-primary-50/80 border border-primary-100 text-primary-700 text-xs font-bold"><Users className="h-3.5 w-3.5" />{receipts.length} submission{receipts.length !== 1 ? 's' : ''}</span><span className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-accent-50/80 border border-accent-100 text-accent-700 text-xs font-bold"><Calendar className="h-3.5 w-3.5" />{notices.length} notice{notices.length !== 1 ? 's' : ''}</span><span className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-warm-50/80 border border-warm-200 text-warm-700 text-xs font-bold"><FileText className="h-3.5 w-3.5" />{(bill.documents || []).length} document{(bill.documents || []).length !== 1 ? 's' : ''}</span><div className="ml-auto"><SubmissionStatusBadge status={status as SubmissionStatus} /></div></div>
                 </div><div className="flex-shrink-0 self-center"><div className="w-11 h-11 md:w-12 md:h-12 rounded-2xl border border-surface-200 flex items-center justify-center text-surface-400 group-hover:bg-gradient-to-br group-hover:from-primary-600 group-hover:to-accent-500 group-hover:border-transparent group-hover:text-white transition-all"><ArrowRight className="h-5 w-5" /></div></div></div>
               </Link>
@@ -169,6 +170,7 @@ export function BillPage() {
   const billReceipts = state.receipts.filter(r => r.legislative_item_id === bill.id);
   const billNotices = state.notices.filter(n => n.bill_ref === bill.id);
   const billReports = state.reports.filter(r => r.bill_ref === bill.id);
+  const billStageSource = (bill.documents || []).find(doc => /official bills tracker/i.test(doc.name));
   const outcomes = getBillOutcomes(bill.id);
   const billMatches = state.matches.filter(m => billReceipts.some(r => r.id === m.receipt_ref));
   const confirmedMatches = billMatches.filter(m => m.reviewer_decision === 'confirmed');
@@ -204,7 +206,8 @@ export function BillPage() {
           <span className="flex items-center gap-1.5 font-semibold text-surface-700">
             <Building2 className="h-4 w-4 text-primary-500" /> {bill.institution}
           </span>
-          <Badge variant="yellow"><Clock className="h-3 w-3" /> {bill.stage}</Badge>
+          <Badge variant="yellow"><Clock className="h-3 w-3" /> {billStageSource ? 'Current stage' : 'Last recorded stage'}: {bill.stage}</Badge>
+          {billStageSource?.url && <a href={billStageSource.url} target="_blank" rel="noreferrer" className="text-xs font-bold text-primary-700 hover:text-primary-900 underline underline-offset-2">National Assembly Bills Tracker · as at {bill.source_updated_at || 'latest update'}</a>}
         </div>
       </div>
 
@@ -411,7 +414,7 @@ export function BillPage() {
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="font-bold text-surface-900 truncate">{doc.name}</p>
-                  <p className="text-xs text-surface-500 font-medium">{isBillText ? 'Official bill document from Parliament' : /tracker/i.test(doc.name) ? 'Parliament legislative proposals tracker' : documentUrl ? 'Open source document' : 'Download readable bill record'}</p>
+                  <p className="text-xs text-surface-500 font-medium">{isBillText ? 'Official bill document from Parliament' : /official bills tracker/i.test(doc.name) ? 'Official Parliament source for the current bill stage' : /tracker/i.test(doc.name) ? 'Parliament legislative proposals tracker' : documentUrl ? 'Open source document' : 'Download readable bill record'}</p>
                 </div>
                 {documentUrl ? <ArrowRight className="h-4 w-4 text-surface-400 group-hover:text-primary-600 group-hover:-rotate-45 transition-all flex-shrink-0" /> : <Download className="h-4 w-4 text-surface-400 group-hover:text-primary-600 transition-all flex-shrink-0" />}
               </>

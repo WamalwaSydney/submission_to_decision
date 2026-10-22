@@ -5,9 +5,10 @@ Run from ``backend/``::
     python -m app.scripts.sync_legislation
 
 The Parliament's legislative-proposals page publishes tracker PDFs rather than
-HTML rows.  This sync discovers the newest tracker PDF, extracts its fixed-width
-text with ``pdftotext``, and upserts the platform's existing
-``legislative_items`` rows.  It also discovers the live Submission of Memoranda
+HTML rows. This sync discovers the newest proposal tracker and National Assembly
+Bills Tracker, extracts their fixed-width text with ``pdftotext``, and applies
+authoritative bill stages to existing ``legislative_items`` rows by exact
+house/number/year matches. It also discovers the live Submission of Memoranda
 page from the committee navigation, parses each notice, and upserts notices.
 
 Committee report ingestion keeps the report PDF URL as the verifiable endpoint.
@@ -51,6 +52,7 @@ log = logging.getLogger("sync_legislation")
 BASE = "https://www.parliament.go.ke"
 COMMITTEES_INDEX = f"{BASE}/the-national-assembly/committees"
 TRACKER_INDEX = f"{BASE}/legislative-proposals-tracker"
+BILL_TRACKER_INDEX = f"{BASE}/the-national-assembly/house-business/bill-tracker"
 MEMORANDA_INDEX = f"{BASE}/submission-memoranda"
 HEADERS = {"User-Agent": "UraiaLegislationSync/1.0 (civic-tech research; non-commercial)"}
 CONCURRENCY = 4
@@ -71,12 +73,14 @@ BILL_REF_RE = re.compile(
 )
 GENERIC_BILL_REF_RE = re.compile(r"\bbill\s*(?:no\.?\s*)?(\d+)\s*(?:of\s+)?(?:[A-Za-z]+\s+){0,3}(20\d{2})\b", re.I)
 TRACKER_BILL_HEAD_RE = re.compile(r"\b(?P<house>national\s+assembly|na|senate)\s*bill\s*(?:no\.?\s*)?(?P<number>\d+)\b", re.I)
+BILL_TRACKER_REF_RE = re.compile(r"\b(?P<house>national\s+assembly|na|senate)\s+bills?\s+no\.?\s*(?P<number>\d+)\s+of\s+(?P<year>20\d{2})\b", re.I)
 YEAR_RE = re.compile(r"\b(20\d{2})\b")
 DATE_RE = re.compile(
     r"\b(\d{1,2})\s*(?:st|nd|rd|th)?\s+"
     r"(January|February|March|April|May|June|July|August|September|October|November|December)\s+(20\d{2})\b",
     re.I,
 )
+NUMERIC_DATE_RE = re.compile(r"\b\d{1,2}\s*/\s*\d{1,2}\s*/\s*20\d{2}\b")
 
 # File references look like DLS/NA/2023/123 -- no spaces.  The old pattern
 # allowed spaces around slashes and matched fragments such as "DLS/NA/ The".
@@ -139,6 +143,88 @@ def extract_stage(joined_row: str) -> str:
     return DEFAULT_STAGE
 
 
+CURRENT_BILL_STAGE_PATTERNS = (
+    ("Assented", re.compile(r"\bbill\s+(?:has\s+been\s+)?assented\s+to\b", re.I)),
+    ("Withdrawn", re.compile(r"\bbill\s+(?:was\s+)?withdrawn\b|\bwithdrawn\s+by\s+the\s+mover\b", re.I)),
+    ("Defeated at Second Reading", re.compile(r"\bbill\s+(?:was\s+)?(?:defeated|rejected)\s+at\s+the\s+second\s+reading\s+stage\b", re.I)),
+    ("Defeated", re.compile(r"\bbill\s+(?:was\s+)?defeated\b|\bbill\s+(?:was\s+)?rejected(?:\s+by\b|\s+at\b)", re.I)),
+    ("Consideration Stayed", re.compile(r"\bconsideration\s+of\s+the\s+bill\s+(?:was\s+)?stayed\b", re.I)),
+    ("Lapsed", re.compile(r"\bbill\s+(?:has\s+)?lapsed\b", re.I)),
+    ("Mediation Committee", re.compile(r"\bbill\s+(?:was\s+)?referred\s+to\s+(?:a\s+)?mediation\s+committee\b", re.I)),
+    ("Mediation Report Adopted", re.compile(r"\bmediated\s+version\s+of\s+(?:the\s+)?bill\s+approved\b", re.I)),
+    ("Senate Amendments Returned", re.compile(r"\bsenate\s+amendments\s+referred\s+back\b", re.I)),
+    ("Committee Stage", re.compile(r"\bcommittee\s+stage\b", re.I)),
+    ("Awaiting Division — Committee of the Whole", re.compile(r"\bbill\s+(?:is\s+)?awaiting\s+division\s+at\s+committee\s+of\s+the\s+whole\s+stage\b", re.I)),
+    ("Committee of the Whole", re.compile(r"\bbill\s+(?:is\s+)?at\s+committee\s+of\s+the\s+whole\s+stage\b", re.I)),
+    ("Second Reading", re.compile(r"\bbill\s+(?:is\s+)?at\s+second\s+reading\s+stage\b", re.I)),
+    ("Awaiting Second Reading", re.compile(r"\bbill\s+(?:is\s+)?due\s+for\s+second\s+reading\b|\bbill\s+awaiting\s+second\s+reading\b", re.I)),
+    ("First Reading", re.compile(r"\bbill\s+(?:is\s+)?at\s+first\s+reading\s+stage\b", re.I)),
+    ("Awaiting First Reading", re.compile(r"\bbill\s+(?:is\s+)?due\s+for\s+first\s+reading\b|\bbill\s+awaiting\s+first\s+reading\b", re.I)),
+    ("Referred to National Assembly", re.compile(r"\bbill\b(?:(?!\.).){0,220}\breferred\s+(?:back\s+)?to\s+the\s+national\s+assembly\b|\bforwarded\s+to\s+the\s+national\s+assembly\s+for\s+consideration\b", re.I)),
+    ("Referred to Senate", re.compile(r"\bbill\b(?:(?!\.).){0,220}\breferred\s+(?:back\s+)?to\s+the\s+senate\b|\bforwarded\s+to\s+the\s+senate\s+for\s+consideration\b", re.I)),
+    ("Passed by National Assembly", re.compile(r"\bbill\s+passed\s+by\s+the\s+national\s+assembly\b", re.I)),
+    ("Passed by Senate", re.compile(r"\bbill\s+passed\s+by\s+the\s+senate\b", re.I)),
+)
+
+
+def extract_current_bill_stage(row_text: str) -> str | None:
+    """Select the latest explicit stage/outcome statement in an official tracker row."""
+    matches = [
+        (match.end(), len(match.group(0)), label)
+        for label, pattern in CURRENT_BILL_STAGE_PATTERNS
+        for match in pattern.finditer(row_text)
+    ]
+    return max(matches)[2] if matches else None
+
+
+def parse_bill_tracker_columns(layout_text: str) -> dict[int, dict[str, str]]:
+    """Read National Assembly tracker cells from pdftotext's fixed-width layout."""
+    rows: dict[int, dict[str, str]] = {}
+    offsets: tuple[int, int, int, int, int, int, int] | None = None
+    serial: int | None = None
+    columns: dict[str, list[str]] = {}
+
+    def save_row() -> None:
+        if serial is not None:
+            rows[serial] = {name: clean(" ".join(parts)) for name, parts in columns.items()}
+
+    def append_cells(line: str) -> None:
+        if offsets is None or serial is None:
+            return
+        bill, sponsor, first, second, third, remarks, assent = offsets
+        columns["title"].append(line[bill:sponsor])
+        columns["first_read"].append(line[first:second])
+        columns["second_read"].append(line[second:third])
+        columns["third_read"].append(line[third:remarks])
+        columns["remarks"].append(line[remarks:assent])
+        columns["assent"].append(line[assent:])
+
+    for line in layout_text.splitlines():
+        if "REMARKS" in line and "ASSENT" in line:
+            bill = line.find("BILL")
+            sponsor = line.find("SPONSOR", bill + len("BILL"))
+            first = line.find("1ST READ") - 1
+            second = line.find("2ND READ") - 1
+            third = line.find("3RD READ") - 1
+            remarks = line.find("REMARKS") - 1
+            assent = line.find("ASSENT", remarks + len("REMARKS")) - 1
+            if min(bill, sponsor, first, second, third, remarks, assent) >= 0:
+                offsets = (bill, sponsor, first, second, third, remarks, assent)
+            continue
+        if any(label in line for label in ("Status as at", "THE NATIONAL ASSEMBLY", "BILLS TRACKER", "S/No/ BILL")):
+            continue
+        match = re.match(r"^\s*(\d+)\.\s+", line)
+        if match:
+            save_row()
+            serial = int(match.group(1))
+            columns = {name: [] for name in ("title", "first_read", "second_read", "third_read", "remarks", "assent")}
+            append_cells(line)
+        elif serial is not None and line.strip():
+            append_cells(line)
+    save_row()
+    return rows
+
+
 @dataclass(frozen=True)
 class BillRow:
     title: str
@@ -150,6 +236,8 @@ class BillRow:
     source_url: str
     source_file_ref: str | None
     committee_name: str | None = None
+    stage_source_url: str | None = None
+    stage_as_at: date | None = None
 
 
 @dataclass(frozen=True)
@@ -198,8 +286,8 @@ def link_date(href: str, label: str) -> date:
     return date(int(m.group(1)), int(m.group(2)), 1) if m else date.min
 
 
-def choose_latest_tracker(html: str) -> tuple[str, date]:
-    links = pdf_links(html, TRACKER_INDEX)
+def choose_latest_tracker(html: str, page_url: str = TRACKER_INDEX) -> tuple[str, date]:
+    links = pdf_links(html, page_url)
     tracker_links = [(u, l) for u, l in links if "tracker" in f"{u} {l}".lower()]
     if not tracker_links:
         raise RuntimeError("The official tracker page contained no tracker PDF links")
@@ -207,13 +295,14 @@ def choose_latest_tracker(html: str) -> tuple[str, date]:
     return href, link_date(href, label)
 
 
-def extract_pdf(pdf_bytes: bytes) -> str:
+def extract_pdf(pdf_bytes: bytes, layout: bool = True) -> str:
     with tempfile.TemporaryDirectory(prefix="legsync-") as directory:
         pdf = Path(directory) / "source.pdf"
         txt = Path(directory) / "source.txt"
         pdf.write_bytes(pdf_bytes)
         try:
-            subprocess.run(["pdftotext", "-layout", str(pdf), str(txt)], check=True, capture_output=True, text=True)
+            mode = "-layout" if layout else "-raw"
+            subprocess.run(["pdftotext", mode, str(pdf), str(txt)], check=True, capture_output=True, text=True)
         except FileNotFoundError as exc:
             raise RuntimeError("pdftotext is required to parse the Parliament tracker PDF") from exc
         except subprocess.CalledProcessError as exc:
@@ -343,6 +432,99 @@ def parse_tracker(text_value: str, source_url: str, as_at: date, committee_names
     if len(unique) < 5:
         raise RuntimeError(f"Tracker parser produced only {len(unique)} bills; refusing a partial sync")
     return list(unique.values())
+
+
+def parse_bill_stage_tracker(text_value: str, source_url: str, as_at: date, layout_text: str = "") -> list[BillRow]:
+    """Parse bill stages from the National Assembly tracker and its milestone columns."""
+    rows: dict[str, BillRow] = {}
+    ambiguous: set[str] = set()
+    column_rows = parse_bill_tracker_columns(layout_text)
+    for block in _row_blocks(text_value):
+        joined = clean(" ".join(block))
+        reference = BILL_TRACKER_REF_RE.search(joined)
+        if not reference:
+            continue
+        serial_match = re.match(r"^\s*(\d+)\.\s+", block[0])
+        row_columns = column_rows.get(int(serial_match.group(1)), {}) if serial_match else {}
+        assent = row_columns.get("assent", "")
+        if NUMERIC_DATE_RE.search(assent):
+            stage = "Assented"
+        else:
+            stage = extract_current_bill_stage(row_columns.get("remarks", ""))
+            if not stage and not row_columns:
+                stage = extract_current_bill_stage(joined)
+        if not stage:
+            second_read = row_columns.get("second_read", "")
+            third_read = row_columns.get("third_read", "")
+            if re.search(r"\bcommittee\s+stage\b", second_read + third_read, re.I) and not NUMERIC_DATE_RE.search(third_read):
+                stage = "Committee Stage"
+            elif NUMERIC_DATE_RE.search(third_read):
+                stage = "Third Reading"
+            elif NUMERIC_DATE_RE.search(second_read):
+                stage = "Second Reading"
+            elif NUMERIC_DATE_RE.search(row_columns.get("first_read", "")):
+                stage = "First Reading"
+        if not stage:
+            continue
+        title = row_columns.get("title", "") or re.sub(r"^\s*\d+\.\s*", "", joined[:reference.start()])
+        title = clean(title).rstrip(" (")
+        if not title or not re.search(r"\bbill\b", title, re.I):
+            continue
+        house = canonical_house(reference.group("house")) or "na"
+        number = int(reference.group("number"))
+        year = int(reference.group("year"))
+        identifier = f"{house.upper()}/{year}/Bill-{number:03d}"
+        row = BillRow(
+            title=title[:BILL_LIMITS["title"]],
+            identifier=identifier,
+            house=house,
+            number=number,
+            year=year,
+            stage=stage,
+            source_url=source_url,
+            source_file_ref=None,
+            stage_source_url=source_url,
+            stage_as_at=as_at,
+        )
+        if identifier in ambiguous:
+            continue
+        prior = rows.get(identifier)
+        if prior and prior.stage != row.stage:
+            log.warning("Conflicting current stages in official Bills Tracker for %s; leaving stage unchanged", identifier)
+            rows.pop(identifier, None)
+            ambiguous.add(identifier)
+        else:
+            rows[identifier] = row
+    return list(rows.values())
+
+
+def merge_bill_stage_rows(bills: list[BillRow], stage_rows: list[BillRow]) -> list[BillRow]:
+    """Apply official stages by exact references or unique normalized title/year, without adding records."""
+    merged = list(bills)
+    positions = {row.identifier: index for index, row in enumerate(merged)}
+    title_positions: dict[tuple[str, int], list[int]] = {}
+    for index, row in enumerate(merged):
+        title_positions.setdefault((canonical_title(row.title), row.year), []).append(index)
+    stage_title_counts: dict[tuple[str, int], int] = {}
+    for row in stage_rows:
+        key = (canonical_title(row.title), row.year)
+        stage_title_counts[key] = stage_title_counts.get(key, 0) + 1
+    for stage_row in stage_rows:
+        index = positions.get(stage_row.identifier)
+        if index is None:
+            key = (canonical_title(stage_row.title), stage_row.year)
+            candidates = title_positions.get(key, [])
+            if stage_title_counts.get(key) != 1 or len(candidates) != 1:
+                continue
+            index = candidates[0]
+        current = merged[index]
+        merged[index] = replace(
+            current,
+            stage=stage_row.stage,
+            stage_source_url=stage_row.stage_source_url,
+            stage_as_at=stage_row.stage_as_at,
+        )
+    return merged
 
 
 def discover_notice_urls(html: str) -> list[str]:
@@ -535,7 +717,15 @@ CREATE TABLE IF NOT EXISTS legislative_link_reviews (
 
 
 def bill_documents(row: BillRow) -> list[dict]:
-    return [{"name": "Legislative Proposals Tracker", "url": row.source_url}]
+    documents = []
+    if row.source_url and row.source_url != row.stage_source_url:
+        documents.append({"name": "Legislative Proposals Tracker", "url": row.source_url})
+    if row.stage_source_url:
+        date_label = f" as at {row.stage_as_at.strftime('%d %B %Y')}" if row.stage_as_at else ""
+        documents.append({"name": f"Official Bills Tracker — current stage{date_label}", "url": row.stage_source_url})
+    elif row.source_url:
+        documents.append({"name": "Legislative Proposals Tracker", "url": row.source_url})
+    return documents
 
 
 GENERIC_COMMITTEE_NAMES = {"committee", "national assembly committee", "national assembly"}
@@ -634,7 +824,7 @@ async def _upsert_bill(conn, row: BillRow, as_at: date) -> bool:
         "bill_year": row.year,
         "source_url": row.source_url,
         "source_file_ref": row.source_file_ref,
-        "source_updated_at": as_at,
+        "source_updated_at": row.stage_as_at or as_at,
         "source_status": row.stage,
         "committee_id": committee_id,
     }
@@ -773,6 +963,18 @@ async def fetch_all() -> tuple[list[BillRow], list[NoticeRow], list[dict], int, 
         tracker_url, tracker_date = choose_latest_tracker(tracker_page.text)
         tracker_text = extract_pdf((await get(client, tracker_url)).content)
         bills = parse_tracker(tracker_text, tracker_url, tracker_date, [committee.name for committee in committees])
+
+        bill_tracker_page = await get(client, BILL_TRACKER_INDEX)
+        bill_tracker_url, bill_tracker_date = choose_latest_tracker(bill_tracker_page.text, BILL_TRACKER_INDEX)
+        bill_tracker_pdf = (await get(client, bill_tracker_url)).content
+        bill_tracker_text = extract_pdf(bill_tracker_pdf, layout=False)
+        bill_tracker_layout = extract_pdf(bill_tracker_pdf, layout=True)
+        stage_rows = parse_bill_stage_tracker(bill_tracker_text, bill_tracker_url, bill_tracker_date, bill_tracker_layout)
+        if len(stage_rows) < 10:
+            raise RuntimeError(f"Only {len(stage_rows)} explicit bill stages parsed from the official Bills Tracker; refusing a partial stage sync")
+        bills = merge_bill_stage_rows(bills, stage_rows)
+        log.info("Parsed %d explicit bill stages from Parliament Bills Tracker as at %s", len(stage_rows), bill_tracker_date)
+        log.info("Applied current-stage data to %d existing platform bills", sum(row.stage_source_url == bill_tracker_url for row in bills))
 
         notice_index = next((url for url in discover_notice_urls(nav.text) if url.rstrip("/").replace("/index.php", "") == MEMORANDA_INDEX), MEMORANDA_INDEX)
         notice_listing = await get(client, notice_index)
