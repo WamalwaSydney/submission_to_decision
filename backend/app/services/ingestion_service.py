@@ -38,7 +38,8 @@ PDF_MAX_BYTES = int(os.getenv("PDF_MAX_BYTES", str(35 * 1024 * 1024)))
 # One modest pass is substantially faster and safer on a free Render instance
 # than retrying every page at three resolutions.
 OCR_DPI = int(os.getenv("OCR_DPI", "150"))
-TESSERACT_TIMEOUT = int(os.getenv("TESSERACT_TIMEOUT", "25"))
+OCR_MAX_DIMENSION = int(os.getenv("OCR_MAX_DIMENSION", "1800"))
+TESSERACT_TIMEOUT = int(os.getenv("TESSERACT_TIMEOUT", "45"))
 PDF_RENDER_TIMEOUT = int(os.getenv("PDF_RENDER_TIMEOUT", "20"))
 OCR_TOTAL_TIMEOUT = int(os.getenv("OCR_TOTAL_TIMEOUT", "240"))
 MAX_OCR_PAGES = int(os.getenv("MAX_OCR_PAGES", "100"))
@@ -188,6 +189,7 @@ def _render_page(file_path: str, page_number: int, prefix: str, dpi: int) -> str
             "-l", str(page_number),
             "-singlefile",
             "-r", str(dpi),
+            "-scale-to", str(OCR_MAX_DIMENSION),
             "-gray",
             "-jpeg",
             file_path,
@@ -210,7 +212,11 @@ def _ocr_page(file_path: str, page_number: int, directory: str) -> str:
     try:
         image_path = _render_page(file_path, page_number, prefix, OCR_DPI)
         ocr = _run_pdf_command(
-            ["tesseract", image_path, "stdout", "--dpi", str(OCR_DPI), "--psm", "6"],
+            [
+                "env", "OMP_THREAD_LIMIT=1", "OMP_NUM_THREADS=1",
+                "tesseract", image_path, "stdout", "--dpi", str(OCR_DPI),
+                "--oem", "1", "--psm", "6",
+            ],
             timeout=TESSERACT_TIMEOUT,
             text=True,
         )
