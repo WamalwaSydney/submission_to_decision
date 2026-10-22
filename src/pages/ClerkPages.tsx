@@ -323,11 +323,18 @@ export function CommitteeOfficerIngestionPage() {
               const entries = state.reportEntries.filter(e => e.report_ref === report.id);
               const isExpanded = expandedReport === report.id;
 
-              const statusBadge =
-                report.extraction_status === 'verified' ? 'green' :
+              const sourceVerified = report.source_verification_status === 'verified';
+              const extractionLabel: Record<string, string> = {
+                pending: 'Text extraction has not started',
+                extracting: 'Reading PDF for review entries',
+                needs_review: 'Text extraction needs review',
+                extracted: `${entries.length} reviewable entries extracted`,
+                ocr_used: `${entries.length} entries extracted using OCR`,
+                verified: 'Report contents reviewed and verified',
+              };
+              const statusBadge = sourceVerified ? 'green' :
                 report.extraction_status === 'needs_review' ? 'yellow' :
-                report.extraction_status === 'ocr_used' ? 'blue' :
-                'gray';
+                report.extraction_status === 'ocr_used' ? 'blue' : 'gray';
 
               return (
                 <motion.div
@@ -353,7 +360,7 @@ export function CommitteeOfficerIngestionPage() {
                         </div>
                         <div className="flex items-center gap-3">
                           <Badge variant={statusBadge as any} showIcon>
-                            {report.extraction_status}
+                            {sourceVerified ? 'Official Parliament source · Verified' : 'Source not verified'}
                           </Badge>
                           <div className={`p-1.5 rounded-lg transition-transform ${isExpanded ? 'rotate-180 bg-surface-100' : 'bg-surface-50'}`}>
                             <ChevronDown className="h-4 w-4 text-surface-500" />
@@ -364,6 +371,7 @@ export function CommitteeOfficerIngestionPage() {
                       <div className="flex flex-wrap gap-2 pl-6 text-xs font-medium text-surface-600 mb-4">
                         <span className="px-2.5 py-1 rounded-lg bg-surface-50 border border-surface-100">{report.institution}</span>
                         <span className="px-2.5 py-1 rounded-lg bg-surface-50 border border-surface-100">Tabled: {report.date_tabled}</span>
+                        <span className="px-2.5 py-1 rounded-lg bg-surface-50 border border-surface-100">{extractionLabel[report.extraction_status] || 'Text extraction in progress'}</span>
                         {report.ocr_used && <Badge variant="blue" className="!text-[10px]">OCR used</Badge>}
                         {report.is_simulated && <Badge variant="gray" className="!text-[10px]">SIMULATED</Badge>}
                         <span className="px-2.5 py-1 rounded-lg bg-primary-50 text-primary-700 border border-primary-100">{entries.length} entries</span>

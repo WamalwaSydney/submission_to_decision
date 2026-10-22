@@ -48,7 +48,7 @@ export interface User {
   role: UserRole;
   name: string;
   email: string;
-  status: 'active' | 'suspended';
+  status: 'active' | 'suspended' | 'pending_approval';
   committee_id?: string;
   notification_language?: 'en' | 'sw';
   created_date: string;
@@ -133,6 +133,8 @@ export interface CommitteeReport {
   date_tabled: string;
   source_document_ref: string;
   source_url?: string;
+  source_verification_status?: 'verified' | 'unverified';
+  source_verification_label?: string;
   bill_house?: string;
   bill_number?: number;
   bill_year?: number;

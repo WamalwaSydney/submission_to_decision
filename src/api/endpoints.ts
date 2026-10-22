@@ -4,11 +4,15 @@ import { User } from '../types';
 export interface LoginResponse { access_token: string; token_type: string; user: User; }
 export type SignupRole = 'citizen' | 'committee_officer' | 'reviewer' | 'administrator';
 export interface SignupOptions {
-  committee_name?: string;
-  institution?: string;
-  committee_description?: string;
-  committee_contact_email?: string;
+  committee_id?: string;
   notification_language?: 'en' | 'sw';
+}
+export interface RegisterResponse {
+  access_token?: string;
+  token_type?: string;
+  user?: User;
+  status?: 'pending_approval';
+  message?: string;
 }
 export interface BootstrapResponse {
   bills: any[];
@@ -37,8 +41,9 @@ export const api = {
   },
   billFlow: (billId: string) => apiFetch<any>(`/bills/${encodeURIComponent(billId)}/flow`),
   users: () => apiFetch<{ users: User[] }>('/users'),
+  approveCommitteeOfficer: (userId: string, committeeId: string) => apiFetch<any>(`/users/${encodeURIComponent(userId)}/approve-committee-officer`, { method: 'POST', body: JSON.stringify({ committee_id: committeeId }) }),
   login: (email: string, password: string) => apiFetch<LoginResponse>('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
-  register: (name: string, email: string, password: string, role: SignupRole, options: SignupOptions = {}) => apiFetch<LoginResponse>('/auth/register', { method: 'POST', body: JSON.stringify({ name, email, password, role, ...options }) }),
+  register: (name: string, email: string, password: string, role: SignupRole, options: SignupOptions = {}) => apiFetch<RegisterResponse>('/auth/register', { method: 'POST', body: JSON.stringify({ name, email, password, role, ...options }) }),
   me: () => apiFetch<{ user: User }>('/auth/me'),
   bills: () => apiFetch<{ bills: any[] }>('/bills'),
   receipt: (publicId: string) => apiFetch<any>(`/receipts/${encodeURIComponent(publicId)}`),

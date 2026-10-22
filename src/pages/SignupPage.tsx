@@ -1,42 +1,43 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Alert, Box, IconButton, InputAdornment, MenuItem, TextField, Typography } from '@mui/material';
 import { ArrowRight, Eye, EyeOff, LockKeyhole, UserRoundPlus } from 'lucide-react';
 import { Card } from '../components/UI';
 import { useApp } from '../context/AppContext';
-import { api, SignupRole } from '../api/endpoints';
+import { api } from '../api/endpoints';
 
-type PublicSignupRole = SignupRole;
+type PublicSignupRole = 'citizen' | 'committee_officer';
 
 const ROLE_OPTIONS: { value: PublicSignupRole; label: string }[] = [
   { value: 'citizen', label: 'Citizen / public participant' },
   { value: 'committee_officer', label: 'Committee Officer' },
-  { value: 'reviewer', label: 'Moderator' },
-  { value: 'administrator', label: 'Platform Administrator' },
 ];
 
-const ELEVATED: PublicSignupRole[] = ['committee_officer', 'reviewer', 'administrator'];
-
 export function SignupPage() {
-  const { dispatch } = useApp();
+  const { state, dispatch } = useApp();
   const navigate = useNavigate();
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [role, setRole] = useState<PublicSignupRole>('citizen');
   const [notificationLanguage, setNotificationLanguage] = useState<'en' | 'sw'>('en');
-  const [committeeName, setCommitteeName] = useState('');
-  const [institution, setInstitution] = useState('National Assembly');
-  const [committeeDescription, setCommitteeDescription] = useState('');
+  const [committeeId, setCommitteeId] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [error, setError] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
   const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (state.committees.length) return;
+    api.committees().then(({ committees }) => dispatch({ type: 'HYDRATE', payload: { committees } })).catch(() => {});
+  }, [dispatch, state.committees.length]);
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError('');
+    setSuccessMessage('');
     const normalizedName = name.trim();
     const normalizedEmail = email.trim().toLowerCase();
 
@@ -52,18 +53,22 @@ export function SignupPage() {
       setError('The passwords do not match.');
       return;
     }
+    if (role === 'committee_officer' && !committeeId) {
+      setError('Select the official committee you work for.');
+      return;
+    }
 
     setSubmitting(true);
     try {
       const response = await api.register(normalizedName, normalizedEmail, password, role, {
         notification_language: notificationLanguage,
-        ...(role === 'committee_officer' ? {
-          committee_name: committeeName.trim() || undefined,
-          institution,
-          committee_description: committeeDescription.trim() || undefined,
-          committee_contact_email: normalizedEmail,
-        } : {}),
+        ...(role === 'committee_officer' ? { committee_id: committeeId } : {}),
       });
+      if (response.status === 'pending_approval') {
+        setSuccessMessage(response.message || 'Your committee access request was sent for administrator approval. You can sign in after approval.');
+        return;
+      }
+      if (!response.access_token || !response.user) throw new Error('The registration response was incomplete. Please try again.');
       localStorage.setItem('access_token', response.access_token);
       localStorage.setItem('current_user', JSON.stringify(response.user));
       dispatch({ type: 'SET_USER', payload: response.user });
@@ -105,6 +110,7 @@ export function SignupPage() {
       <Card className="!p-5 sm:!p-7">
         <Box component="form" onSubmit={handleSubmit} sx={{ display: 'grid', gap: 2 }}>
           {error && <Alert severity="error" role="alert">{error}</Alert>}
+          {successMessage && <Alert severity="success" role="status">{successMessage} <Link to="/signin" className="font-bold underline">Go to sign in</Link>.</Alert>}
 
           <TextField
             label="Full name"
@@ -152,43 +158,21 @@ export function SignupPage() {
           {role === 'committee_officer' && (
             <>
               <Alert severity="info" sx={{ borderRadius: '12px' }}>
-                Your committee organization and officer workspace will be created automatically when you sign up.
+                Select the existing committee record synced from Parliament. An administrator must approve your officer access before you can sign in.
               </Alert>
               <TextField
-                label="Committee name"
-                value={committeeName}
-                onChange={event => setCommitteeName(event.target.value)}
-                placeholder="e.g. Budget and Appropriations Committee"
+                select
+                label="Your committee"
+                value={committeeId}
+                onChange={event => setCommitteeId(event.target.value)}
                 required
                 fullWidth
-              />
-              <TextField
-                select
-                label="Institution"
-                value={institution}
-                onChange={event => setInstitution(event.target.value)}
-                fullWidth
+                helperText={state.committees.length ? 'Your account will only access this committee’s workspace.' : 'No synced committees are available yet.'}
               >
-                <MenuItem value="National Assembly">National Assembly</MenuItem>
-                <MenuItem value="Nairobi County Assembly">Nairobi County Assembly</MenuItem>
-                <MenuItem value="Trans Nzoia County Assembly">Trans Nzoia County Assembly</MenuItem>
+                <MenuItem value="">Select a committee</MenuItem>
+                {state.committees.map(committee => <MenuItem key={committee.id} value={committee.id}>{committee.name} — {committee.institution}</MenuItem>)}
               </TextField>
-              <TextField
-                label="Committee description"
-                value={committeeDescription}
-                onChange={event => setCommitteeDescription(event.target.value)}
-                multiline
-                minRows={2}
-                fullWidth
-              />
             </>
-          )}
-
-          {ELEVATED.includes(role) && (
-            <Alert severity="warning" sx={{ borderRadius: '12px' }}>
-              This role has elevated platform permissions. Use it only for the responsibilities
-              described in the platform workflow.
-            </Alert>
           )}
 
           <TextField
@@ -255,7 +239,7 @@ export function SignupPage() {
             disabled={submitting}
             className="btn-primary w-full inline-flex items-center justify-center gap-2 !py-3"
           >
-            {submitting ? 'Creating account...' : 'Create demo account'}
+            {submitting ? 'Submitting...' : role === 'committee_officer' ? 'Request committee access' : 'Create account'}
             {!submitting && <ArrowRight className="h-4 w-4" />}
           </button>
         </Box>

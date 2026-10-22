@@ -9,10 +9,11 @@ import { Badge, DisclaimerBox, InfoBox, Card } from '../components/UI';
 export function AdminPage() {
   const { state, dispatch } = useApp();
   const [activeTab, setActiveTab] = useState<'profiles' | 'roles' | 'committees' | 'export' | 'settings'>('profiles');
-  const [committeeForm, setCommitteeForm] = useState({ name: '', institution: 'National Assembly', description: '', contact_email: '', account_name: '', account_email: '', account_password: '' });
-  const [committeeMessage, setCommitteeMessage] = useState('');
   const [adminUsers, setAdminUsers] = useState(state.users);
   const [userPage, setUserPage] = useState(1);
+  const [committeeAssignments, setCommitteeAssignments] = useState<Record<string, string>>({});
+  const [approvingUserId, setApprovingUserId] = useState<string | null>(null);
+  const [userMessage, setUserMessage] = useState('');
 
   useEffect(() => {
     if (activeTab !== 'roles' || state.currentUser?.role !== 'administrator') return;
@@ -33,6 +34,26 @@ export function AdminPage() {
   const usersPerPage = 10;
   const totalUserPages = Math.max(1, Math.ceil(adminUsers.length / usersPerPage));
   const visibleUsers = adminUsers.slice((userPage - 1) * usersPerPage, userPage * usersPerPage);
+
+  const handleApproveOfficer = async (userId: string, currentCommitteeId?: string) => {
+    const committeeId = committeeAssignments[userId] || currentCommitteeId;
+    if (!committeeId) {
+      setUserMessage('Select one of the synced committees before approving this account.');
+      return;
+    }
+    setApprovingUserId(userId);
+    setUserMessage('');
+    try {
+      await api.approveCommitteeOfficer(userId, committeeId);
+      const { users } = await api.users();
+      setAdminUsers(users);
+      setUserMessage('Committee officer access approved. The officer can now sign in with their email and password.');
+    } catch (error) {
+      setUserMessage(error instanceof Error ? error.message : 'Unable to approve this committee officer.');
+    } finally {
+      setApprovingUserId(null);
+    }
+  };
 
   const handleVerifyProfile = (profileId: string, status: RepresentativeStatus) => {
     if (!state.currentUser) return;
@@ -266,8 +287,10 @@ export function AdminPage() {
                         <th>Name</th>
                         <th>Email</th>
                         <th>Role</th>
+                        <th>Committee</th>
                         <th>Status</th>
                         <th>Created</th>
+                        <th>Action</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -282,13 +305,21 @@ export function AdminPage() {
                           <td className="font-semibold">{u.name}</td>
                           <td className="text-xs font-medium">{u.email}</td>
                           <td><Badge variant="blue" showIcon className="!text-[10px] capitalize">{u.role}</Badge></td>
-                          <td><Badge variant="green" showIcon className="!text-[10px]">{u.status}</Badge></td>
+                          <td className="text-xs">{u.status === 'pending_approval' ? (
+                            <select aria-label={`Assign ${u.name} to committee`} className="input-field !py-1.5 !text-xs min-w-48" value={committeeAssignments[u.id] ?? u.committee_id ?? ''} onChange={event => setCommitteeAssignments(previous => ({ ...previous, [u.id]: event.target.value }))}>
+                              <option value="">Select committee</option>
+                              {state.committees.map(committee => <option key={committee.id} value={committee.id}>{committee.name} — {committee.institution}</option>)}
+                            </select>
+                          ) : state.committees.find(committee => committee.id === u.committee_id)?.name || '—'}</td>
+                          <td><Badge variant={u.status === 'active' ? 'green' : u.status === 'pending_approval' ? 'yellow' : 'gray'} showIcon className="!text-[10px]">{u.status === 'pending_approval' ? 'pending approval' : u.status}</Badge></td>
                           <td className="text-xs">{new Date(u.created_date).toLocaleDateString()}</td>
+                          <td>{u.role === 'committee_officer' && u.status === 'pending_approval' ? <button type="button" onClick={() => handleApproveOfficer(u.id, u.committee_id)} disabled={approvingUserId !== null} className="btn-primary !px-3 !py-2 text-xs disabled:opacity-50">{approvingUserId === u.id ? 'Approving…' : 'Approve access'}</button> : '—'}</td>
                         </motion.tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
+                {userMessage && <p role="status" className="mt-4 text-sm font-semibold text-primary-700">{userMessage}</p>}
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mt-5 pt-4 border-t border-surface-200">
                   <p className="text-xs font-semibold text-surface-500">
                     Showing {adminUsers.length === 0 ? 0 : (userPage - 1) * usersPerPage + 1}–{Math.min(userPage * usersPerPage, adminUsers.length)} of {adminUsers.length} users
@@ -334,19 +365,14 @@ export function AdminPage() {
 
       {activeTab === 'committees' && (
         <Card className="!p-6">
-          <h2 className="text-2xl font-black text-surface-900 mb-2">Create a committee</h2>
-          <p className="text-sm text-surface-600 mb-5">This creates the committee record and its committee login account.</p>
-          <form className="grid gap-3 md:grid-cols-2" onSubmit={async (event) => { event.preventDefault(); setCommitteeMessage(''); try { await api.createCommittee(committeeForm); setCommitteeMessage('Committee and account created.'); setCommitteeForm({ name: '', institution: 'National Assembly', description: '', contact_email: '', account_name: '', account_email: '', account_password: '' }); } catch (e) { setCommitteeMessage(e instanceof Error ? e.message : 'Unable to create committee.'); } }}>
-            <input className="input-field" required placeholder="Committee name" value={committeeForm.name} onChange={e => setCommitteeForm({ ...committeeForm, name: e.target.value })} />
-            <select className="input-field" value={committeeForm.institution} onChange={e => setCommitteeForm({ ...committeeForm, institution: e.target.value })}><option>National Assembly</option><option>Nairobi County Assembly</option><option>Trans Nzoia County Assembly</option></select>
-            <input className="input-field" placeholder="Contact email" type="email" value={committeeForm.contact_email} onChange={e => setCommitteeForm({ ...committeeForm, contact_email: e.target.value })} />
-            <input className="input-field" placeholder="Committee description" value={committeeForm.description} onChange={e => setCommitteeForm({ ...committeeForm, description: e.target.value })} />
-            <input className="input-field" required placeholder="Account display name" value={committeeForm.account_name} onChange={e => setCommitteeForm({ ...committeeForm, account_name: e.target.value })} />
-            <input className="input-field" required placeholder="Account email" type="email" value={committeeForm.account_email} onChange={e => setCommitteeForm({ ...committeeForm, account_email: e.target.value })} />
-            <input className="input-field" required minLength={8} placeholder="Temporary password (8+ characters)" type="password" value={committeeForm.account_password} onChange={e => setCommitteeForm({ ...committeeForm, account_password: e.target.value })} />
-            <button className="btn-primary" type="submit">Create committee</button>
-          </form>
-          {committeeMessage && <p className="text-sm mt-4">{committeeMessage}</p>}
+          <h2 className="text-2xl font-black text-surface-900 mb-2">Synced committee directory</h2>
+          <p className="text-sm text-surface-600 mb-5">Committee records are loaded from the official Parliament data sync. Officers request access to an existing record from Sign up; administrators review the request in User Accounts and approve the correct committee.</p>
+          {state.committees.length ? <div className="grid gap-3 md:grid-cols-2">
+            {state.committees.map(committee => <div key={committee.id} className="rounded-xl border border-surface-200 bg-white p-4">
+              <div className="font-bold text-surface-900">{committee.name}</div>
+              <div className="mt-1 text-xs font-semibold text-surface-500">{committee.institution}</div>
+            </div>)}
+          </div> : <p className="rounded-xl bg-surface-50 p-4 text-sm text-surface-600">No committee records are currently available. Run the Parliament synchronization before inviting officer access requests.</p>}
         </Card>
       )}
 

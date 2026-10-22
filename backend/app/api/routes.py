@@ -2,19 +2,20 @@
 
 import os
 import random
+import logging
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Optional
 from uuid import UUID, uuid4
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFile, File, Form
 from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel
 from sqlalchemy import select, inspect as sa_inspect
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import get_db
+from app.database import get_db, async_session
 from app.auth import get_current_user, require_role, verify_password, get_password_hash, create_access_token
 from app.models import (
     User, Committee, LegislativeItem, ParticipationReceipt, Message,
@@ -25,6 +26,20 @@ from app.services import receipt_service, linking_service, ingestion_service, st
 from app.audit import record_audit
 
 router = APIRouter()
+log = logging.getLogger(__name__)
+_scheduled_report_bills: set[str] = set()
+
+
+async def _extract_and_match_bill_reports(bill_id: UUID) -> None:
+    key = str(bill_id)
+    try:
+        async with async_session() as session:
+            await ingestion_service.extract_pending_linked_reports(session, bill_id)
+            await linking_service.propose_matches(session, bill_id, use_llm=True)
+    except Exception:
+        log.exception("Background report extraction/matching failed for bill %s", bill_id)
+    finally:
+        _scheduled_report_bills.discard(key)
 
 
 class LoginRequest(BaseModel):
@@ -37,10 +52,7 @@ class RegisterRequest(BaseModel):
     email: str
     password: str
     role: str = "citizen"
-    committee_name: Optional[str] = None
-    institution: Optional[str] = None
-    committee_description: Optional[str] = None
-    committee_contact_email: Optional[str] = None
+    committee_id: Optional[UUID] = None
     notification_language: str = "en"
 
 
@@ -52,6 +64,10 @@ class CommitteeCreate(BaseModel):
     account_name: str
     account_email: str
     account_password: str
+
+
+class CommitteeOfficerApproval(BaseModel):
+    committee_id: Optional[UUID] = None
 
 class BillCreate(BaseModel):
     title: str
@@ -91,14 +107,16 @@ async def login(payload: LoginRequest, db: AsyncSession = Depends(get_db)):
     if not user or not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Invalid email or password")
     if user.status != "active":
-        raise HTTPException(status_code=403, detail="Account suspended")
+        if user.status == "pending_approval":
+            raise HTTPException(status_code=403, detail="Committee access request is pending administrator approval")
+        raise HTTPException(status_code=403, detail="Account is not active")
     token = create_access_token({"sub": str(user.id)})
     return {"access_token": token, "token_type": "bearer", "user": public_user(user)}
 
 
 @router.post("/auth/register")
 async def register(payload: RegisterRequest, db: AsyncSession = Depends(get_db)):
-    allowed_roles = {"citizen", "committee_officer", "reviewer", "administrator"}
+    allowed_roles = {"citizen", "committee_officer"}
     if payload.role not in allowed_roles:
         raise HTTPException(status_code=400, detail="Unsupported account role")
     if len(payload.password) < 8:
@@ -113,27 +131,16 @@ async def register(payload: RegisterRequest, db: AsyncSession = Depends(get_db))
     if result.scalar_one_or_none():
         raise HTTPException(status_code=409, detail="An account with that email already exists")
 
-    # A committee is an organization; the registering committee officer is the
-    # human account linked to it. Provisioning it here prevents an officer from
-    # being created without the organization needed by the committee workspace.
     committee = None
     if payload.role == "committee_officer":
-        committee_name = (payload.committee_name or f"{name}'s Committee").strip()
-        institution = (payload.institution or "National Assembly").strip()
-        if not committee_name or not institution:
-            raise HTTPException(status_code=422, detail="Committee name and institution are required for committee officers")
-        existing_committee = await db.execute(select(Committee).where(Committee.name == committee_name))
-        if existing_committee.scalar_one_or_none():
-            raise HTTPException(status_code=409, detail="A committee with that name already exists")
-        committee = Committee(
-            name=committee_name,
-            institution=institution,
-            description=payload.committee_description,
-            contact_email=(payload.committee_contact_email or email).strip(),
-            status="active",
+        if not payload.committee_id:
+            raise HTTPException(status_code=422, detail="Select an existing committee")
+        committee_result = await db.execute(
+            select(Committee).where(Committee.id == payload.committee_id, Committee.status == "active")
         )
-        db.add(committee)
-        await db.flush()
+        committee = committee_result.scalar_one_or_none()
+        if not committee:
+            raise HTTPException(status_code=404, detail="Selected committee was not found or is inactive")
 
     notification_language = "sw" if payload.notification_language == "sw" else "en"
     user = User(
@@ -141,28 +148,21 @@ async def register(payload: RegisterRequest, db: AsyncSession = Depends(get_db))
         email=email,
         role=payload.role,
         password_hash=get_password_hash(payload.password),
-        status="active",
+        status="pending_approval" if payload.role == "committee_officer" else "active",
         committee_id=committee.id if committee else None,
         privacy_prefs={"show_name_publicly": False, "notification_language": notification_language},
     )
     db.add(user)
     await db.flush()
-    if committee:
-        committee.created_by = user.id
-        await record_audit(
-            db,
-            entity_type="committee",
-            entity_id=committee.id,
-            action="created_during_registration",
-            actor_id=user.id,
-            details={"name": committee.name, "institution": committee.institution},
-        )
     await db.commit()
     await db.refresh(user)
+    if payload.role == "committee_officer":
+        return {
+            "status": "pending_approval",
+            "message": f"Your request to access {committee.name} has been sent to the platform administrator. You can sign in after approval.",
+        }
     token = create_access_token({"sub": str(user.id)})
     response = {"access_token": token, "token_type": "bearer", "user": public_user(user)}
-    if committee:
-        response["committee"] = to_dict(committee)
     return response
 
 
@@ -181,6 +181,43 @@ async def list_users(
     return {"users": [public_user(user) for user in result.scalars().all()]}
 
 
+@router.post("/users/{user_id}/approve-committee-officer")
+async def approve_committee_officer(
+    user_id: UUID,
+    payload: CommitteeOfficerApproval,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_role("administrator")),
+):
+    user_result = await db.execute(select(User).where(User.id == user_id))
+    user = user_result.scalar_one_or_none()
+    if not user or user.role != "committee_officer":
+        raise HTTPException(status_code=404, detail="Committee officer request not found")
+    if user.status != "pending_approval":
+        raise HTTPException(status_code=409, detail="This account is not awaiting approval")
+    committee_id = payload.committee_id or user.committee_id
+    if not committee_id:
+        raise HTTPException(status_code=422, detail="Choose an existing committee for this officer")
+    committee_result = await db.execute(
+        select(Committee).where(Committee.id == committee_id, Committee.status == "active")
+    )
+    committee = committee_result.scalar_one_or_none()
+    if not committee:
+        raise HTTPException(status_code=404, detail="Selected committee was not found or is inactive")
+    user.committee_id = committee.id
+    user.status = "active"
+    await record_audit(
+        db,
+        entity_type="user",
+        entity_id=user.id,
+        action="committee_officer_access_approved",
+        actor_id=current_user.id,
+        details={"committee_id": str(committee.id)},
+    )
+    await db.commit()
+    await db.refresh(user)
+    return {"user": public_user(user), "committee": to_dict(committee)}
+
+
 # ============ Helpers ============
 
 def to_dict(obj, exclude: set = frozenset()) -> dict:
@@ -190,6 +227,20 @@ def to_dict(obj, exclude: set = frozenset()) -> dict:
         for attr in sa_inspect(obj).mapper.column_attrs
         if attr.key not in exclude
     }
+
+
+def report_to_dict(report: CommitteeReport) -> dict:
+    """Serialize report data with source provenance separate from text extraction state."""
+    data = to_dict(report)
+    source_url = (report.source_url or "").strip()
+    host = (urlparse(source_url).hostname or "").lower().rstrip(".")
+    official_host = host == "parliament.go.ke" or host.endswith(".parliament.go.ke")
+    official_source = official_host and source_url.lower().startswith(("https://", "http://")) and not report.is_simulated
+    data["source_verification_status"] = "verified" if official_source else "unverified"
+    data["source_verification_label"] = (
+        "Official Parliament source verified" if official_source else "Source not verified as Parliament-hosted"
+    )
+    return data
 
 
 PUBLIC_RECEIPT_EXCLUDE = {"author_id"}
@@ -367,7 +418,8 @@ async def bootstrap(db: AsyncSession = Depends(get_db)):
     """Return the non-secret application data needed by the initial client shell."""
     async def all_rows(model, exclude=frozenset()):
         result = await db.execute(select(model))
-        return [to_dict(row, exclude=exclude) for row in result.scalars().all()]
+        rows = result.scalars().all()
+        return [report_to_dict(row) if model is CommitteeReport else to_dict(row, exclude=exclude) for row in rows]
 
     return {
         "committees": await all_rows(Committee),
@@ -384,7 +436,11 @@ async def bootstrap(db: AsyncSession = Depends(get_db)):
 # ============ Public bill flow ============
 
 @router.get("/bills/{bill_id}/flow")
-async def bill_flow(bill_id: UUID, db: AsyncSession = Depends(get_db)):
+async def bill_flow(
+    bill_id: UUID,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+):
     bill_result = await db.execute(select(LegislativeItem).where(LegislativeItem.id == bill_id))
     bill = bill_result.scalar_one_or_none()
     if not bill: raise HTTPException(status_code=404, detail="Bill not found")
@@ -394,6 +450,14 @@ async def bill_flow(bill_id: UUID, db: AsyncSession = Depends(get_db)):
     for report in reports:
         entry_result = await db.execute(select(ReportEntry).where(ReportEntry.report_ref == report.id))
         entries.extend(entry_result.scalars().all())
+    extraction_pending = any(
+        report.source_url and report.extraction_status in {"pending", "extracting"}
+        for report in reports
+    )
+    schedule_key = str(bill.id)
+    if extraction_pending and schedule_key not in _scheduled_report_bills:
+        _scheduled_report_bills.add(schedule_key)
+        background_tasks.add_task(_extract_and_match_bill_reports, bill.id)
     receipt_result = await db.execute(select(ParticipationReceipt).where(ParticipationReceipt.legislative_item_id == bill.id).order_by(ParticipationReceipt.timestamp.asc()))
     submissions = []
     for receipt in receipt_result.scalars().all():
@@ -401,7 +465,7 @@ async def bill_flow(bill_id: UUID, db: AsyncSession = Depends(get_db)):
         match = match_result.scalars().first()
         entry = next((e for e in entries if match and e.id == match.report_entry_ref), None)
         submissions.append({"public_id": receipt.public_id, "timestamp": receipt.timestamp, "clause_ref": receipt.clause_ref, "status": entry.treatment if entry and match and match.reviewer_decision == "confirmed" else "awaiting committee report", "match_percentage": round(match.confidence_score * 100, 1) if match else None, "match_decision": match.reviewer_decision if match else None, "reason": entry.stated_reason if entry and match and match.reviewer_decision == "confirmed" else None})
-    return {"bill": to_dict(bill), "flow": [{"stage": h.get("stage"), "date": h.get("date"), "note": h.get("note")} for h in (bill.status_history or [])], "reports": [to_dict(r) for r in reports], "report_entries": [to_dict(e) for e in entries], "submissions": submissions}
+    return {"bill": to_dict(bill), "flow": [{"stage": h.get("stage"), "date": h.get("date"), "note": h.get("note")} for h in (bill.status_history or [])], "reports": [report_to_dict(r) for r in reports], "report_entries": [to_dict(e) for e in entries], "submissions": submissions}
 
 # ============ Messages ============
 
@@ -779,7 +843,7 @@ async def get_report(
     if not report:
         raise HTTPException(status_code=404, detail="Report not found")
     entries_result = await db.execute(select(ReportEntry).where(ReportEntry.report_ref == report.id))
-    return {"report": to_dict(report), "entries": [to_dict(entry) for entry in entries_result.scalars().all()]}
+    return {"report": report_to_dict(report), "entries": [to_dict(entry) for entry in entries_result.scalars().all()]}
 
 
 @router.put("/reports/{report_id}/entries/{entry_id}")
@@ -831,7 +895,7 @@ async def verify_report(
     await record_audit(db, entity_type="committee_report", entity_id=report.id, action="verified", actor_id=current_user.id, details={})
     await db.commit()
     await db.refresh(report)
-    return {"report": to_dict(report)}
+    return {"report": report_to_dict(report)}
 
 
 @router.post("/reports/{bill_ref}/generate-matches")
@@ -878,7 +942,7 @@ async def retry_committee_report_extraction(
         matches = await linking_service.propose_matches(db, report.bill_ref, use_llm=True)
     await db.refresh(report)
     return {
-        "report": to_dict(report),
+        "report": report_to_dict(report),
         "reports_extracted": extracted_reports,
         "entries_extracted": len(entries),
         "matches": [to_dict(match) for match in matches],

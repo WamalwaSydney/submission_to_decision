@@ -151,8 +151,42 @@ export function BillsListPage() {
 }
 export function BillPage() {
   const { id } = useParams<{ id: string }>();
-  const { state, getSubmissionStatus, getBillOutcomes } = useApp();
+  const { state, dispatch, getSubmissionStatus, getBillOutcomes } = useApp();
   const bill = state.bills.find(b => b.id === id);
+
+  useEffect(() => {
+    if (!id) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let attempts = 0;
+    const refreshFlow = async () => {
+      try {
+        const flow = await api.billFlow(id);
+        if (cancelled) return;
+        const reports = flow.reports || [];
+        const reportIds = new Set(reports.map((report: { id: string }) => report.id));
+        dispatch({
+          type: 'HYDRATE',
+          payload: {
+            reports: [...state.reports.filter(report => report.bill_ref !== id), ...reports],
+            reportEntries: [...state.reportEntries.filter(entry => !reportIds.has(entry.report_ref)), ...(flow.report_entries || [])],
+          },
+        });
+        const extractionRunning = reports.some((report: { extraction_status: string }) => ['pending', 'extracting'].includes(report.extraction_status));
+        if (extractionRunning && attempts < 24) {
+          attempts += 1;
+          timer = setTimeout(refreshFlow, 3000);
+        }
+      } catch {
+        // Preserve bootstrap data if the detail refresh is temporarily unavailable.
+      }
+    };
+    void refreshFlow();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [dispatch, id]);
 
   if (!bill) {
     return (
@@ -513,16 +547,32 @@ export function BillPage() {
           <div className="space-y-4">
             {billReports.map(report => (
               <a key={report.id} href={reportDocumentHref(report)} target="_blank" rel="noreferrer" aria-label={`Open committee report ${report.title || report.source_document_ref}`} className="block relative rounded-2xl p-5 border border-surface-200/80 bg-gradient-to-br from-white to-surface-50 shadow-soft hover:shadow-elevated hover:border-primary-200 transition-all">
+                {(() => {
+                  const entriesCount = state.reportEntries.filter(entry => entry.report_ref === report.id).length;
+                  const extractionMessages: Record<string, string> = {
+                    pending: 'PDF text extraction has not started yet.',
+                    extracting: 'Reading the PDF to create reviewable report entries…',
+                    needs_review: 'PDF extraction needs staff review before matching.',
+                    extracted: entriesCount ? `${entriesCount} reviewable report entr${entriesCount === 1 ? 'y is' : 'ies are'} available.` : 'PDF text was extracted, but no reviewable entries were recognized.',
+                    ocr_used: entriesCount ? `${entriesCount} reviewable entr${entriesCount === 1 ? 'y was' : 'ies were'} extracted using OCR.` : 'OCR completed, but no reviewable entries were recognized.',
+                    verified: 'Report contents have been reviewed and verified.',
+                  };
+                  return (
+                    <>
                 <div className="flex items-start justify-between gap-3 mb-2 flex-wrap">
                   <span className="font-bold text-surface-900">{report.title || report.source_document_ref}</span>
-                  <span className="inline-flex items-center gap-2"><Badge variant="blue">{report.extraction_status}</Badge><FileText className="h-4 w-4 text-primary-600" /></span>
+                  <span className="inline-flex items-center gap-2"><Badge variant={report.source_verification_status === 'verified' ? 'green' : 'gray'}>{report.source_verification_status === 'verified' ? 'Official Parliament source · Verified' : 'Source not verified'}</Badge><FileText className="h-4 w-4 text-primary-600" /></span>
                 </div>
                 <div className="flex flex-wrap gap-x-4 gap-y-2 text-xs font-semibold text-surface-500">
                   <span className="flex items-center gap-1"><Calendar className="h-3.5 w-3.5" /> Tabled: {report.date_tabled}</span>
                   <span className="flex items-center gap-1"><Building2 className="h-3.5 w-3.5" /> {report.institution}</span>
+                  <span>{extractionMessages[report.extraction_status] || 'Report text extraction status: ' + report.extraction_status}</span>
                   {report.ocr_used && <Badge variant="warm" className="!text-[10px]">OCR USED</Badge>}
                   {report.is_simulated && <Badge variant="gray" className="!text-[10px]">SIMULATED</Badge>}
                 </div>
+                    </>
+                  );
+                })()}
               </a>
             ))}
           </div>
