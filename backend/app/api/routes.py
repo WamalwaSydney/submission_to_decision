@@ -492,6 +492,10 @@ async def create_receipt(
         author_name=current_user.name if show_name_publicly else None,
     )
 
+    # A report may have been ingested before this citizen submitted. Re-run
+    # matching on submission so the new receipt enters the moderator queue too.
+    match_proposals = await linking_service.propose_matches(db, bill_uuid, use_llm=True)
+
     await notification_service.notify_receipt_event(
         db, receipt, f"receipt:{receipt.id}:submitted", "submission_received",
     )
@@ -502,6 +506,7 @@ async def create_receipt(
         "status": "awaiting committee report",
         "hash": receipt.hash,
         "previous_hash": receipt.previous_hash,
+        "match_proposals": [to_dict(match) for match in match_proposals],
     }
 
 

@@ -34,7 +34,7 @@ async def seed():
         # Users (one per role)
         users = [
             User(id=uuid.UUID("00000000-0000-0000-0000-000000000001"), role="citizen", name="Jane Citizen", email="jane@example.com", password_hash=get_password_hash("password123"), status="active"),
-            User(id=uuid.UUID("00000000-0000-0000-0000-000000000002"), role="reviewer", name="Independent Reviewer", email="rep@example.com", password_hash=get_password_hash("password123"), status="active"),
+            User(id=uuid.UUID("00000000-0000-0000-0000-000000000002"), role="reviewer", name="Moderator", email="rep@example.com", password_hash=get_password_hash("password123"), status="active"),
             User(id=uuid.UUID("00000000-0000-0000-0000-000000000003"), role="reviewer", name="Mod User", email="mod@example.com", password_hash=get_password_hash("password123"), status="active"),
             User(id=uuid.UUID("00000000-0000-0000-0000-000000000004"), role="administrator", name="Admin User", email="admin@example.com", password_hash=get_password_hash("password123"), status="active"),
         ]

@@ -12,7 +12,7 @@ export const seedUsers: User[] = [
   { id: 'u-citizen-001', role: 'citizen', name: 'Jane Citizen', email: 'jane@example.com', status: 'active', created_date: '2026-01-15T08:00:00Z' },
   { id: 'u-rep-001', role: 'citizen', name: 'Public Participant', email: 'rep@example.com', status: 'active', created_date: '2026-01-10T08:00:00Z' },
   { id: 'u-committee-001', role: 'committee_officer', name: 'Simulated Finance Committee', email: 'committee@example.com', status: 'active', committee_id: 'committee-001', created_date: '2026-01-12T08:00:00Z' },
-  { id: 'u-reviewer-001', role: 'reviewer', name: 'Independent Reviewer', email: 'mod@example.com', status: 'active', created_date: '2026-01-08T08:00:00Z' },
+  { id: 'u-reviewer-001', role: 'reviewer', name: 'Moderator', email: 'mod@example.com', status: 'active', created_date: '2026-01-08T08:00:00Z' },
   { id: 'u-admin-001', role: 'administrator', name: 'Admin User', email: 'admin@example.com', status: 'active', created_date: '2026-01-05T08:00:00Z' },
 ];
 

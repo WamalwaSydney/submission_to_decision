@@ -11,7 +11,7 @@ type PublicSignupRole = SignupRole;
 const ROLE_OPTIONS: { value: PublicSignupRole; label: string }[] = [
   { value: 'citizen', label: 'Citizen / public participant' },
   { value: 'committee_officer', label: 'Committee Officer' },
-  { value: 'reviewer', label: 'Independent Reviewer' },
+  { value: 'reviewer', label: 'Moderator' },
   { value: 'administrator', label: 'Platform Administrator' },
 ];
 

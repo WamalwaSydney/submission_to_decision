@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { ReviewerDecision } from '../types';
 import { api } from '../api/endpoints';
@@ -10,16 +10,47 @@ import { confidenceClasses, confidenceBarClass, confidenceLabel } from '../utils
 
 export function ReviewerQueuePage() {
   const { state, dispatch } = useApp();
+  const [queueLoading, setQueueLoading] = useState(true);
+  const [queueError, setQueueError] = useState('');
+  const [decisionMatchId, setDecisionMatchId] = useState<string | null>(null);
+  const [decisionError, setDecisionError] = useState('');
   const pendingMatches = state.matches.filter(m => m.reviewer_decision === 'pending');
   const reviewedMatches = state.matches.filter(m => m.reviewer_decision !== 'pending');
+
+  useEffect(() => {
+    let cancelled = false;
+    setQueueLoading(true);
+    Promise.all([api.bootstrap(), api.pendingMatches()]).then(([snapshot, pending]) => {
+      if (cancelled) return;
+      dispatch({
+        type: 'HYDRATE',
+        payload: {
+          bills: snapshot.bills,
+          receipts: snapshot.receipts,
+          reports: snapshot.reports,
+          reportEntries: snapshot.report_entries,
+          matches: [...snapshot.matches.filter(match => match.reviewer_decision !== 'pending'), ...pending.matches],
+        },
+      });
+      setQueueError('');
+    }).catch(error => {
+      if (!cancelled) setQueueError(error instanceof Error ? error.message : 'Unable to refresh the review queue.');
+    }).finally(() => {
+      if (!cancelled) setQueueLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [dispatch]);
 
   const handleDecision = async (matchId: string, decision: ReviewerDecision) => {
     if (!state.currentUser) return;
     if (decision === 'pending') return;
+    setDecisionMatchId(matchId);
+    setDecisionError('');
     try {
       await api.decideMatch(matchId, decision === 'confirmed' ? 'confirm' : 'reject');
     } catch (error) {
-      alert(error instanceof Error ? error.message : 'Unable to update the match.');
+      setDecisionError(error instanceof Error ? error.message : 'Unable to update the match. Please refresh and try again.');
+      setDecisionMatchId(null);
       return;
     }
     dispatch({
@@ -37,6 +68,7 @@ export function ReviewerQueuePage() {
         timestamp: new Date().toISOString(),
       }
     });
+    setDecisionMatchId(null);
   };
 
   return (
@@ -51,6 +83,10 @@ export function ReviewerQueuePage() {
       <p className="text-lg text-surface-600 leading-relaxed max-w-3xl mb-8">
         Review proposed matches between citizen submissions and committee report entries. Nothing is published until you confirm a match.
       </p>
+
+      {queueLoading && <p role="status" className="mb-4 text-sm font-semibold text-surface-500">Refreshing matches from the live review queue…</p>}
+      {queueError && <div role="alert" className="mb-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-800">{queueError}</div>}
+      {decisionError && <div role="alert" className="mb-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-800">{decisionError}</div>}
 
       {!state.currentUser && (
         <DisclaimerBox className="!p-5 mb-6">
@@ -81,7 +117,7 @@ export function ReviewerQueuePage() {
                 <CheckCircle2 className="h-10 w-10 text-surface-400" />
               </div>
               <p className="text-lg font-semibold text-surface-700 mb-1">All caught up!</p>
-              <p className="text-surface-500">No matches pending review.</p>
+              <p className="text-surface-500">No matches pending review. New proposals appear here after a report is ingested or a submission arrives for a bill with an existing report.</p>
             </div>
           ) : (
             <div className="space-y-5">
@@ -160,16 +196,18 @@ export function ReviewerQueuePage() {
 
                         <div className="flex flex-wrap gap-3">
                           <button
+                            type="button"
                             onClick={() => handleDecision(match.id, 'confirmed')}
-                            disabled={!state.currentUser}
-                            className="btn-primary inline-flex items-center gap-2 !bg-gradient-to-r !from-green-500 !to-emerald-600 hover:!from-green-600 hover:!to-emerald-700 !border-green-200"
+                            disabled={!state.currentUser || decisionMatchId !== null}
+                            className="btn-primary inline-flex min-h-11 items-center justify-center gap-2 !bg-gradient-to-r !from-green-600 !to-emerald-700 !border-green-700 hover:!from-green-700 hover:!to-emerald-800 disabled:cursor-not-allowed disabled:opacity-60"
                           >
-                            <CheckCircle2 className="h-4 w-4" /> Confirm Match
+                            <CheckCircle2 className="h-4 w-4" /> {decisionMatchId === match.id ? 'Saving…' : 'Confirm Match'}
                           </button>
                           <button
+                            type="button"
                             onClick={() => handleDecision(match.id, 'rejected')}
-                            disabled={!state.currentUser}
-                            className="btn-danger inline-flex items-center gap-2"
+                            disabled={!state.currentUser || decisionMatchId !== null}
+                            className="btn-danger inline-flex min-h-11 items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-60"
                           >
                             <XCircle className="h-4 w-4" /> Reject Match
                           </button>

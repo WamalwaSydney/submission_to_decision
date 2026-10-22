@@ -97,6 +97,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const palPrimary = theme.palette.primary as any;
   const palSecondary = theme.palette.secondary as any;
   const palSaffron = (theme.palette.saffron || theme.palette.warning) as any;
+  const displayUserName = state.currentUser?.name === 'Independent Reviewer' ? 'Moderator' : state.currentUser?.name;
 
   const currentRoleLinks = state.currentUser
     ? authenticatedLinksMap[state.currentUser.role] || []
@@ -330,7 +331,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.75 }}>
                 <Box sx={{ display: { xs: 'none', md: 'flex' }, flexDirection: 'column', alignItems: 'flex-end', lineHeight: 1.1 }}>
                   <Typography sx={{ fontWeight: 700, fontSize: 14, color: ink[800] }}>
-                    {state.currentUser.name}
+                    {displayUserName}
                   </Typography>
                   <Typography
                     sx={{
@@ -341,11 +342,11 @@ export function Layout({ children }: { children: React.ReactNode }) {
                       fontSize: 10,
                     }}
                   >
-                    {state.currentUser.role}
+                    {state.currentUser.role === 'reviewer' ? 'Moderator' : state.currentUser.role.replace(/_/g, ' ')}
                   </Typography>
                 </Box>
                 <Avatar sx={{ width: 40, height: 40, fontSize: 14 }}>
-                  {state.currentUser.name.charAt(0)}
+                  {displayUserName?.charAt(0)}
                 </Avatar>
                 <Tooltip title="Sign out" placement="bottom" arrow>
                   <IconButton
@@ -452,10 +453,10 @@ export function Layout({ children }: { children: React.ReactNode }) {
               }}
             >
               <Avatar sx={{ width: 48, height: 48, fontSize: 17 }}>
-                {state.currentUser.name.charAt(0)}
+                {displayUserName?.charAt(0)}
               </Avatar>
               <Box>
-                <Typography sx={{ fontWeight: 800, fontSize: 15 }}>{state.currentUser.name}</Typography>
+                <Typography sx={{ fontWeight: 800, fontSize: 15 }}>{displayUserName}</Typography>
                 <Typography
                   sx={{
                     fontWeight: 800,
@@ -465,7 +466,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
                     fontSize: 10,
                   }}
                 >
-                  {state.currentUser.role}
+                  {state.currentUser.role === 'reviewer' ? 'Moderator' : state.currentUser.role.replace(/_/g, ' ')}
                 </Typography>
               </Box>
             </Box>

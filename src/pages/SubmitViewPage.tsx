@@ -84,6 +84,9 @@ export function SubmitViewPage() {
           author_name_public: showName ? state.currentUser.name : undefined,
         },
       });
+      for (const match of result.match_proposals || []) {
+        dispatch({ type: 'ADD_MATCH', payload: match });
+      }
       setSubmitting(false);
       setSuccess({ receiptId, publicId });
       setTimeout(fireConfetti, 120);
