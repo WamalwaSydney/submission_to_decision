@@ -106,6 +106,13 @@ class CommitteeReport(Base):
     bill_number = Column(Integer)
     bill_year = Column(Integer)
     source_url = Column(String(1000))
+    source_sha256 = Column(String(64))
+    source_mime_type = Column(String(100))
+    source_size_bytes = Column(BigInteger)
+    source_storage_ref = Column(String(1000))
+    extracted_text = Column(Text)
+    provenance = Column(JSON, default={})
+    uploaded_by = Column(UUID(as_uuid=True), ForeignKey("users.id"))
 
     bill = relationship("LegislativeItem", back_populates="reports")
     entries = relationship("ReportEntry", back_populates="report")

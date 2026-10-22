@@ -42,6 +42,16 @@ async def _extract_and_match_bill_reports(bill_id: UUID) -> None:
         _scheduled_report_bills.discard(key)
 
 
+async def _extract_and_match_uploaded_report(report_id: UUID, bill_id: UUID) -> None:
+    """Run slow OCR after the upload response has been sent to the client."""
+    try:
+        async with async_session() as session:
+            await ingestion_service.process_uploaded_report(report_id)
+            await linking_service.propose_matches(session, bill_id, use_llm=True)
+    except Exception:
+        log.exception("Background upload extraction/matching failed for report %s", report_id)
+
+
 class LoginRequest(BaseModel):
     email: str
     password: str
@@ -759,6 +769,7 @@ async def reject_match(
 
 @router.post("/reports/upload")
 async def upload_report(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     bill_ref: str = Form(...),
     institution: str = Form(...),
@@ -767,24 +778,35 @@ async def upload_report(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_role("committee_officer")),
 ):
-    # Never trust the client filename: strip any path and prefix a random id
+    if file.content_type != "application/pdf" and not (file.filename or "").lower().endswith(".pdf"):
+        raise HTTPException(status_code=422, detail="Committee reports must be PDF files")
     content = await file.read()
+    if len(content) > 35 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="The report must be 35 MB or smaller")
     provenance = storage_service.persist_report(content, file.filename or "report.pdf")
-    report = await ingestion_service.ingest_report(
-        db=db, bill_ref=bill_ref, institution=institution,
-        file_path=provenance["storage_ref"], date_tabled=date_tabled,
+    bill_uuid = UUID(bill_ref)
+    report = CommitteeReport(
+        bill_ref=bill_uuid,
+        institution=institution.strip(),
+        date_tabled=date.fromisoformat(date_tabled),
+        source_document_ref=Path(provenance["storage_ref"]).name,
         source_url=source_url,
-        source_metadata={
+        extraction_status="pending",
+        ocr_used=False,
+        source_sha256=provenance["sha256"],
+        source_mime_type=provenance["mime_type"],
+        source_size_bytes=provenance["size_bytes"],
+        source_storage_ref=provenance["storage_ref"],
+        provenance={
             "original_filename": os.path.basename(file.filename or "report.pdf"),
             "uploaded_at": datetime.utcnow().isoformat() + "Z",
             "sha256": provenance["sha256"],
             "storage_ref": provenance["storage_ref"],
-        }, uploaded_by=current_user.id,
+        },
+        uploaded_by=current_user.id,
     )
-    report.source_sha256 = provenance["sha256"]
-    report.source_mime_type = provenance["mime_type"]
-    report.source_size_bytes = provenance["size_bytes"]
-    report.source_storage_ref = provenance["storage_ref"]
+    db.add(report)
+    await db.flush()
     await record_audit(db, entity_type="committee_report", entity_id=report.id,
                        action="uploaded", actor_id=current_user.id,
                        details={"sha256": provenance["sha256"], "source_url": source_url})
@@ -794,16 +816,18 @@ async def upload_report(
         await notification_service.notify_receipt_event(
             db, receipt, f"report:{report.id}:receipt:{receipt.id}:received", "report_received",
         )
-    proposals = await linking_service.propose_matches(db, report.bill_ref, use_llm=True)
+    await db.commit()
+    background_tasks.add_task(_extract_and_match_uploaded_report, report.id, bill_uuid)
 
     return {
         "report_id": report.id,
         "source_sha256": report.source_sha256,
         "source_url": report.source_url,
         "source_storage_ref": report.source_storage_ref,
-        "extraction_status": report.extraction_status,
+        "extraction_status": "pending",
         "ocr_used": report.ocr_used,
-        "match_proposals": [to_dict(match) for match in proposals],
+        "match_proposals": [],
+        "processing": True,
     }
 
 

@@ -11,6 +11,8 @@ import tempfile
 import logging
 import asyncio
 import subprocess
+import signal
+import time
 from datetime import date, datetime
 from pathlib import Path
 from typing import List, Tuple
@@ -33,14 +35,13 @@ PDFINFO_TIMEOUT = int(os.getenv("PDFINFO_TIMEOUT", "30"))
 PDF_DOWNLOAD_TOTAL_TIMEOUT = int(os.getenv("PDF_DOWNLOAD_TOTAL_TIMEOUT", "240"))
 PDF_MAX_BYTES = int(os.getenv("PDF_MAX_BYTES", str(35 * 1024 * 1024)))
 
-# Each attempt has its own hard timeout. Lower DPI is used if a page is too slow.
-OCR_ATTEMPTS = (
-    (120, int(os.getenv("TESSERACT_TIMEOUT_120_DPI", "120"))),
-    (90, int(os.getenv("TESSERACT_TIMEOUT_90_DPI", "90"))),
-    (72, int(os.getenv("TESSERACT_TIMEOUT_72_DPI", "60"))),
-)
-PDF_RENDER_TIMEOUT = int(os.getenv("PDF_RENDER_TIMEOUT", "60"))
-MAX_OCR_PAGES = int(os.getenv("MAX_OCR_PAGES", "500"))
+# One modest pass is substantially faster and safer on a free Render instance
+# than retrying every page at three resolutions.
+OCR_DPI = int(os.getenv("OCR_DPI", "150"))
+TESSERACT_TIMEOUT = int(os.getenv("TESSERACT_TIMEOUT", "25"))
+PDF_RENDER_TIMEOUT = int(os.getenv("PDF_RENDER_TIMEOUT", "20"))
+OCR_TOTAL_TIMEOUT = int(os.getenv("OCR_TOTAL_TIMEOUT", "240"))
+MAX_OCR_PAGES = int(os.getenv("MAX_OCR_PAGES", "100"))
 
 
 def normalize_line(value: str) -> str:
@@ -48,7 +49,11 @@ def normalize_line(value: str) -> str:
 
 
 def _has_ocr_failures(text: str) -> bool:
-    return "[OCR_FAILED_PAGE " in text or "[OCR_PAGE_LIMIT_EXCEEDED" in text
+    return (
+        "[OCR_FAILED_PAGE " in text
+        or "[OCR_PAGE_LIMIT_EXCEEDED" in text
+        or "[OCR_TOTAL_TIMEOUT" in text
+    )
 
 
 async def ingest_report(
@@ -153,10 +158,30 @@ def _get_pdf_page_count(file_path: str) -> int:
     return page_count
 
 
+def _run_pdf_command(args: list[str], *, timeout: int, text: bool = False):
+    """Run a PDF/OCR child in its own process group and kill the whole group."""
+    process = subprocess.Popen(
+        args,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=text,
+        encoding="utf-8" if text else None,
+        errors="replace" if text else None,
+        start_new_session=True,
+    )
+    try:
+        stdout, stderr = process.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        os.killpg(process.pid, signal.SIGKILL)
+        process.wait()
+        raise
+    return subprocess.CompletedProcess(args, process.returncode, stdout, stderr)
+
+
 def _render_page(file_path: str, page_number: int, prefix: str, dpi: int) -> str:
     """Render one PDF page and return the image path."""
     image_path = f"{prefix}.jpg"
-    rendered = subprocess.run(
+    rendered = _run_pdf_command(
         [
             "pdftoppm",
             "-f", str(page_number),
@@ -168,12 +193,10 @@ def _render_page(file_path: str, page_number: int, prefix: str, dpi: int) -> str
             file_path,
             prefix,
         ],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
         timeout=PDF_RENDER_TIMEOUT,
     )
     if rendered.returncode != 0 or not Path(image_path).exists():
-        stderr = rendered.stderr.decode("utf-8", errors="replace")[-1000:]
+        stderr = (rendered.stderr or b"").decode("utf-8", errors="replace")[-1000:]
         raise RuntimeError(
             f"Poppler could not render page {page_number} at {dpi} DPI: {stderr}"
         )
@@ -181,64 +204,35 @@ def _render_page(file_path: str, page_number: int, prefix: str, dpi: int) -> str
 
 
 def _ocr_page(file_path: str, page_number: int, directory: str) -> str:
-    """OCR a page with bounded retries at lower resolutions."""
-    last_error = None
-
-    for dpi, timeout_seconds in OCR_ATTEMPTS:
-        prefix = str(Path(directory) / f"page_{page_number}_{dpi}")
-        image_path = None
-        try:
-            image_path = _render_page(file_path, page_number, prefix, dpi)
-            ocr = subprocess.run(
-                ["tesseract", image_path, "stdout", "--dpi", str(dpi)],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=timeout_seconds,
+    """OCR one page once; retries multiply cost and cause Render timeouts."""
+    prefix = str(Path(directory) / f"page_{page_number}")
+    image_path = None
+    try:
+        image_path = _render_page(file_path, page_number, prefix, OCR_DPI)
+        ocr = _run_pdf_command(
+            ["tesseract", image_path, "stdout", "--dpi", str(OCR_DPI), "--psm", "6"],
+            timeout=TESSERACT_TIMEOUT,
+            text=True,
+        )
+        if ocr.returncode != 0:
+            raise RuntimeError(
+                f"Tesseract exited {ocr.returncode} on page {page_number}: "
+                f"{(ocr.stderr or '')[-1000:]}"
             )
-            if ocr.returncode != 0:
-                raise RuntimeError(
-                    f"Tesseract exited {ocr.returncode} on page {page_number} "
-                    f"at {dpi} DPI: {ocr.stderr[-1000:]}"
-                )
-
-            result = ocr.stdout.strip()
-            if result:
-                return result
-
-            # Empty OCR is not necessarily a timeout, but a lower-resolution
-            # retry may help with unusual or very noisy pages.
-            last_error = RuntimeError(
-                f"Tesseract returned no text for page {page_number} at {dpi} DPI"
-            )
-        except subprocess.TimeoutExpired:
-            last_error = TimeoutError(
-                f"Tesseract timed out on page {page_number} at {dpi} DPI "
-                f"after {timeout_seconds} seconds"
-            )
-            log.warning("%s; retrying at a lower DPI if available", last_error)
-        except (OSError, subprocess.SubprocessError, RuntimeError) as exc:
-            last_error = exc
-            log.warning(
-                "OCR attempt failed for page %s at %s DPI: %s",
-                page_number, dpi, exc,
-            )
-        finally:
-            if image_path:
-                Path(image_path).unlink(missing_ok=True)
-
-    raise RuntimeError(
-        f"OCR failed for page {page_number} after all configured attempts: "
-        f"{last_error}"
-    )
+        result = ocr.stdout.strip()
+        if not result:
+            raise RuntimeError(f"Tesseract returned no text for page {page_number}")
+        return result
+    finally:
+        if image_path:
+            Path(image_path).unlink(missing_ok=True)
 
 
 def ocr_extract(file_path: str) -> str:
-    """OCR every page; preserve successful pages if an individual page fails."""
+    """OCR pages within a report-wide budget and preserve successful pages."""
     page_count = _get_pdf_page_count(file_path)
     pages = []
+    deadline = time.monotonic() + OCR_TOTAL_TIMEOUT
 
     if page_count > MAX_OCR_PAGES:
         log.error(
@@ -256,6 +250,9 @@ def ocr_extract(file_path: str) -> str:
 
     with tempfile.TemporaryDirectory(prefix="parliament-ocr-page-") as directory:
         for page_number in range(1, page_count_to_process + 1):
+            if time.monotonic() >= deadline:
+                pages.append(f"[OCR_TOTAL_TIMEOUT pages_completed={page_number - 1}]")
+                break
             try:
                 page_text = _ocr_page(file_path, page_number, directory)
                 pages.append(f"[Page {page_number}]\n{page_text}")
@@ -361,6 +358,54 @@ def _finalize(item: dict) -> Tuple[str, str, str, str | None]:
         item["treatment"] or "unclassified",
         item["reason"],
     )
+
+
+async def process_uploaded_report(report_id) -> None:
+    """Extract a stored upload after the HTTP request has returned."""
+    from app.database import async_session
+
+    async with _report_extraction_lock:
+        async with async_session() as db:
+            result = await db.execute(
+                select(CommitteeReport).where(CommitteeReport.id == report_id)
+            )
+            report = result.scalar_one_or_none()
+            if report is None or report.extraction_status not in {"pending", "extracting"}:
+                return
+            report.extraction_status = "extracting"
+            await db.commit()
+
+            try:
+                async with _pdf_ocr_semaphore:
+                    text, ocr_used = await asyncio.to_thread(
+                        extract_text, report.source_storage_ref
+                    )
+                entries = parse_report_entries(text)
+                if not entries:
+                    entries = parse_unstructured_report_entries(text)
+                entries = [entry for entry in entries if entry[1].strip()]
+                for clause_ref, summary, treatment, reason in entries:
+                    db.add(ReportEntry(
+                        report_ref=report.id,
+                        clause_ref=clause_ref,
+                        extracted_summary=summary,
+                        treatment=treatment,
+                        stated_reason=reason,
+                    ))
+                report.extracted_text = text
+                report.ocr_used = ocr_used
+                report.extraction_status = (
+                    "needs_review" if _has_ocr_failures(text)
+                    else ("ocr_used" if ocr_used else "extracted")
+                )
+                await db.commit()
+            except Exception:
+                log.exception("Could not extract uploaded committee report %s", report_id)
+                await db.rollback()
+                failed = await db.get(CommitteeReport, report_id)
+                if failed:
+                    failed.extraction_status = "needs_review"
+                    await db.commit()
 
 
 async def extract_pending_linked_reports(
