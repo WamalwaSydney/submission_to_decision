@@ -1,7 +1,8 @@
-"""Free hosted LLM proposal matching through Google Gemini.
+"""AI proposal matching through Google Gemini.
 
-This service proposes links only. It never confirms a legislative outcome. The
-caller must keep the deterministic fallback and human moderation workflow.
+This service is the only proposal generator. It never confirms a legislative
+outcome; human moderation remains required. There is intentionally no lexical
+or clause-based fallback.
 """
 from __future__ import annotations
 import json

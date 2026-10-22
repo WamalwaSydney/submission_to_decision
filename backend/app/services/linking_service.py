@@ -2,7 +2,6 @@
 from typing import List
 import hashlib
 import logging
-from rapidfuzz import fuzz
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.models import ParticipationReceipt, ReportEntry, SubmissionMatch, CommitteeReport, LegislativeItem
@@ -68,16 +67,20 @@ async def propose_matches(db: AsyncSession, bill_id: str, use_llm: bool = True) 
     if not receipts_to_score:
         return []
 
-    llm_candidates = []
-    if use_llm and llm_matching_service.is_configured():
-        try:
-            llm_candidates = await llm_matching_service.propose_matches(
-                [{"id": r.id, "clause_ref": r.clause_ref, "submission_text": r.submission_text} for r in receipts_to_score],
-                [{"id": e.id, "clause_ref": e.clause_ref, "extracted_summary": e.extracted_summary} for e in entries],
-            )
-        except Exception:
-            # Provider outages must not prevent the deterministic fallback or report processing.
-            llm_candidates = []
+    if not use_llm:
+        raise RuntimeError("AI matching is required; deterministic matching is disabled")
+    if not llm_matching_service.is_configured():
+        raise RuntimeError(
+            "AI matching is unavailable because GEMINI_API_KEY is not configured"
+        )
+
+    # Gemini is the only proposal generator. If it is unavailable or omits an
+    # uncertain receipt, leave that receipt unmatched rather than silently
+    # replacing an AI decision with lexical similarity.
+    llm_candidates = await llm_matching_service.propose_matches(
+        [{"id": r.id, "clause_ref": r.clause_ref, "submission_text": r.submission_text} for r in receipts_to_score],
+        [{"id": e.id, "clause_ref": e.clause_ref, "extracted_summary": e.extracted_summary} for e in entries],
+    )
 
     receipt_by_id = {str(r.id): r for r in receipts}
     entry_by_id = {str(e.id): e for e in entries}
@@ -107,37 +110,9 @@ async def propose_matches(db: AsyncSession, bill_id: str, use_llm: bool = True) 
             matches.append(match)
             continue
 
-        # AI may omit an item when uncertain or fail entirely. Still run the
-        # deterministic clause/text scorer for that receipt so AI coverage of
-        # other submissions cannot suppress its automatic proposal.
-        best_match = None
-        best_score = 0.0
-        best_method = None
-        best_explanation = ""
-        for entry in entries:
-            if receipt.clause_ref and entry.clause_ref and receipt.clause_ref.strip().lower() == entry.clause_ref.strip().lower():
-                score, method = 0.95, "clause"
-                explanation = f"Exact clause reference match: both reference {receipt.clause_ref}"
-            else:
-                similarity = fuzz.token_sort_ratio(receipt.submission_text.lower(), entry.extracted_summary.lower())
-                score, method = similarity / 100.0, "text-similarity"
-                explanation = f"Text similarity proposal ({score * 100:.1f}%): submission discusses '{receipt.submission_text[:50]}...' and report entry '{entry.extracted_summary[:50]}...' ."
-            if best_match is None or score > best_score:
-                best_score, best_method, best_explanation, best_match = score, method, explanation, entry
-        if best_match:
-            if best_score < 0.30:
-                best_explanation = (
-                    f"Low-confidence fallback proposal ({best_score * 100:.1f}% lexical similarity). "
-                    "No clear semantic match was returned; moderator review is required. "
-                    f"Top candidate report entry: '{best_match.extracted_summary[:180]}'."
-                )
-            match = SubmissionMatch(
-                receipt_ref=receipt.id, report_entry_ref=best_match.id, match_method=best_method,
-                confidence_score=best_score, explanation=best_explanation,
-                reviewer_decision="pending", actor_type="automated_system",
-            )
-            db.add(match)
-            matches.append(match)
+        # No Gemini proposal means the model was uncertain. Do not create a
+        # non-AI substitute; the receipt remains unmatched and can be retried.
+        log.info("Gemini returned no defensible match for receipt %s", receipt.id)
 
     await db.commit()
     report_ids = sorted({str(entry.report_ref) for entry in entries})
