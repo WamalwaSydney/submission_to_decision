@@ -24,11 +24,19 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-cors_origins = [
-    origin.strip()
-    for origin in os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",")
+default_cors_origins = {
+    "http://localhost:3000",
+    "https://uraia-2.netlify.app",
+    "https://uraia1.netlify.app",
+}
+configured_cors_origins = {
+    origin.strip().rstrip("/")
+    for origin in os.getenv("CORS_ORIGINS", "").split(",")
     if origin.strip()
-]
+}
+# Keep the known production sites allowed even if Render has an older
+# CORS_ORIGINS value set; deployments can add additional exact origins there.
+cors_origins = sorted(default_cors_origins | configured_cors_origins)
 
 app.add_middleware(
     CORSMiddleware,
