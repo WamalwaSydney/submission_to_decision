@@ -71,27 +71,34 @@ def extract_text(file_path: str) -> Tuple[str, bool]:
 
 
 def ocr_extract(file_path: str) -> str:
-    import pytesseract
-    from pdf2image import convert_from_path, pdfinfo_from_path
-
-    page_count = int(pdfinfo_from_path(file_path).get("Pages", 0))
+    info = subprocess.run(
+        ["pdfinfo", file_path], check=True, stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE, text=True, timeout=20,
+    ).stdout
+    page_line = next((line for line in info.splitlines() if line.startswith("Pages:")), None)
+    page_count = int(page_line.split(":", 1)[1].strip()) if page_line else 0
+    if page_count < 1:
+        raise ValueError("PDF has no readable pages")
     pages = []
-    for page_number in range(1, page_count + 1):
-        images = convert_from_path(
-            file_path,
-            first_page=page_number,
-            last_page=page_number,
-            dpi=140,
-            grayscale=True,
-            thread_count=1,
-            fmt="jpeg",
-        )
-        try:
-            if images:
-                pages.append(f"[Page {page_number}]\n{pytesseract.image_to_string(images[0])}")
-        finally:
-            for image in images:
-                image.close()
+    with tempfile.TemporaryDirectory(prefix="parliament-ocr-page-") as directory:
+        prefix = str(Path(directory) / "page")
+        image_path = f"{prefix}.jpg"
+        for page_number in range(1, page_count + 1):
+            rendered = subprocess.run(
+                ["pdftoppm", "-f", str(page_number), "-l", str(page_number), "-singlefile", "-r", "120", "-gray", "-jpeg", file_path, prefix],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=45,
+            )
+            if rendered.returncode != 0 or not Path(image_path).exists():
+                raise RuntimeError(f"Poppler could not render PDF page {page_number}")
+            ocr = subprocess.run(
+                ["tesseract", image_path, "stdout", "--dpi", "120"],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                encoding="utf-8", errors="replace", timeout=60,
+            )
+            if ocr.returncode != 0:
+                raise RuntimeError(f"Tesseract could not OCR PDF page {page_number}")
+            pages.append(f"[Page {page_number}]\n{ocr.stdout}")
+            Path(image_path).unlink(missing_ok=True)
     return "\n".join(pages)
 
 
