@@ -100,6 +100,7 @@ export interface LegislativeItem {
   stage: string;
   documents: { name: string; url?: string }[];
   source_updated_at?: string;
+  stage_as_at?: string;
   status_history: { date: string; stage: string; note: string }[];
   is_simulated: boolean;
   committee_id?: string;

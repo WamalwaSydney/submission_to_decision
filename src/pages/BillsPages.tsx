@@ -171,6 +171,25 @@ export function BillPage() {
   const billNotices = state.notices.filter(n => n.bill_ref === bill.id);
   const billReports = state.reports.filter(r => r.bill_ref === bill.id);
   const billStageSource = (bill.documents || []).find(doc => /official bills tracker/i.test(doc.name));
+  const timelineHistory: Array<{ date: string; stage: string; note: string; isLatestStage?: boolean; sourceUrl?: string }> = (bill.status_history || []).map(item => ({ ...item }));
+  const stageTimelineDate = bill.stage_as_at || bill.source_updated_at || '';
+  const stageTimelineIndex = timelineHistory.findIndex(item => item.stage === bill.stage && item.date === (stageTimelineDate || 'Latest record'));
+  if (bill.stage && stageTimelineIndex >= 0) {
+    timelineHistory[stageTimelineIndex] = {
+      ...timelineHistory[stageTimelineIndex],
+      note: billStageSource ? 'Current stage recorded in the official National Assembly Bills Tracker.' : timelineHistory[stageTimelineIndex].note,
+      isLatestStage: true,
+      sourceUrl: billStageSource?.url,
+    };
+  } else if (bill.stage) {
+    timelineHistory.push({
+      date: stageTimelineDate || 'Latest record',
+      stage: bill.stage,
+      note: billStageSource ? 'Current stage recorded in the official National Assembly Bills Tracker.' : 'Last stage recorded in the Parliament legislative proposals tracker.',
+      isLatestStage: true,
+      sourceUrl: billStageSource?.url,
+    });
+  }
   const outcomes = getBillOutcomes(bill.id);
   const billMatches = state.matches.filter(m => billReceipts.some(r => r.id === m.receipt_ref));
   const confirmedMatches = billMatches.filter(m => m.reviewer_decision === 'confirmed');
@@ -368,7 +387,7 @@ export function BillPage() {
         <div className="relative pl-2 md:pl-4">
           <div className="absolute left-0 top-2 bottom-2 w-px bg-gradient-to-b from-primary-300 via-accent-300 to-warm-300" />
           <div className="space-y-5">
-            {bill.status_history.map((sh, i) => (
+            {timelineHistory.map((sh, i) => (
               <motion.div
                 key={i}
                 initial={{ opacity: 0, x: -12 }}
@@ -384,8 +403,10 @@ export function BillPage() {
                   <div className="flex items-center gap-3 mb-1 flex-wrap">
                     <span className="font-mono text-xs font-bold text-surface-500 bg-surface-100 px-2.5 py-1 rounded-md border border-surface-200 w-28 text-center">{sh.date}</span>
                     <span className="font-black text-surface-900 text-[15px]">{sh.stage}</span>
+                    {sh.isLatestStage && <span className="rounded-full bg-primary-50 border border-primary-200 px-2.5 py-1 text-[10px] font-black uppercase tracking-wider text-primary-700">Latest stage</span>}
                   </div>
                   <span className="text-sm text-surface-600 leading-relaxed font-medium">— {sh.note}</span>
+                  {sh.isLatestStage && sh.sourceUrl && <a href={sh.sourceUrl} target="_blank" rel="noreferrer" className="mt-2 inline-flex text-xs font-bold text-primary-700 hover:text-primary-900 underline underline-offset-2">Open official National Assembly tracker</a>}
                 </div>
               </motion.div>
             ))}
