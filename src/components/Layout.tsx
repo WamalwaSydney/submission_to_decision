@@ -65,6 +65,7 @@ const publicLinksByRole: Record<string, typeof publicLinks> = {
   // and research tools that are unrelated to their operational workspace.
   committee_officer: publicLinks.filter(link => ['/','/bills','/notices'].includes(link.to)),
   reviewer: publicLinks.filter(link => ['/','/bills','/receipt-lookup'].includes(link.to)),
+  moderator: publicLinks.filter(link => ['/','/bills','/receipt-lookup'].includes(link.to)),
   administrator: publicLinks.filter(link => ['/','/bills'].includes(link.to)),
 };
 
@@ -75,6 +76,10 @@ const authenticatedLinksMap: Record<string, { to: string; label: string; icon: a
     { to: '/messages', label: 'Automated Updates', icon: MessageSquarePlus },
   ],
   reviewer: [
+    { to: '/reviewer/queue', label: 'Match Review', icon: ClipboardList },
+    { to: '/reviewer/reports', label: 'Reported Content', icon: Flag },
+  ],
+  moderator: [
     { to: '/reviewer/queue', label: 'Match Review', icon: ClipboardList },
     { to: '/reviewer/reports', label: 'Reported Content', icon: Flag },
   ],

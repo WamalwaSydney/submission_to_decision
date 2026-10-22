@@ -15,13 +15,16 @@ export function ReviewerQueuePage() {
   const [decisionMatchId, setDecisionMatchId] = useState<string | null>(null);
   const [decisionError, setDecisionError] = useState('');
   const [generatingBillId, setGeneratingBillId] = useState<string | null>(null);
+  const [generationFeedback, setGenerationFeedback] = useState<Record<string, string>>({});
+  const [recentGeneratedMatches, setRecentGeneratedMatches] = useState<any[]>([]);
   const pendingMatches = state.matches.filter(m => m.reviewer_decision === 'pending');
   const reviewedMatches = state.matches.filter(m => m.reviewer_decision !== 'pending');
   const unmatchedReceipts = state.receipts.filter(receipt => !state.matches.some(match => match.receipt_ref === receipt.id));
+  const canModerate = state.currentUser?.role === 'reviewer' || state.currentUser?.role === 'moderator';
 
   useEffect(() => {
     let cancelled = false;
-    if (state.currentUser?.role !== 'reviewer') {
+    if (state.currentUser?.role !== 'reviewer' && state.currentUser?.role !== 'moderator') {
       setQueueLoading(false);
       return () => { cancelled = true; };
     }
@@ -74,14 +77,27 @@ export function ReviewerQueuePage() {
         timestamp: new Date().toISOString(),
       }
     });
+    setRecentGeneratedMatches(previous => previous.filter(match => match.id !== matchId));
     setDecisionMatchId(null);
   };
 
-  const generateForReceipt = async (billId: string) => {
+  const generateForReceipt = async (receiptId: string, billId: string) => {
     setGeneratingBillId(billId);
     setQueueError('');
+    setGenerationFeedback(previous => ({ ...previous, [receiptId]: 'Scoring this submission against the bill’s extracted committee report…' }));
     try {
-      await api.generateMatches(billId);
+      const generated = await api.generateMatches(billId);
+      const forReceipt = generated.matches.filter(match => match.receipt_ref === receiptId);
+      if (forReceipt.length) {
+        setRecentGeneratedMatches(previous => {
+          const byId = new Map(previous.map(match => [match.id, match]));
+          for (const match of forReceipt) byId.set(match.id, match);
+          return [...byId.values()];
+        });
+        setGenerationFeedback(previous => ({ ...previous, [receiptId]: `Scoring complete: ${forReceipt.length} proposal${forReceipt.length === 1 ? '' : 's'} created. Review the score and report entry below, then confirm or reject.` }));
+      } else {
+        setGenerationFeedback(previous => ({ ...previous, [receiptId]: 'Scoring completed, but no new proposal was returned for this submission. Check that the report has extracted entries and that a proposal is not already pending or previously reviewed.' }));
+      }
       const [snapshot, pending, queueReceipts] = await Promise.all([api.bootstrap(), api.pendingMatches(), api.reviewQueueReceipts()]);
       dispatch({ type: 'HYDRATE', payload: {
         bills: snapshot.bills,
@@ -272,17 +288,46 @@ export function ReviewerQueuePage() {
                     <p className="text-sm text-surface-800 leading-relaxed">{receipt.submission_text}</p>
                     <p className="text-xs text-surface-500 mt-2">Bill: {bill?.title || 'Bill information unavailable'} · {reportAvailable ? 'Committee report available; no proposal is currently recorded.' : 'Awaiting a committee report.'}</p>
                   </div>
-                  {reportAvailable && bill && (
-                    <button type="button" onClick={() => generateForReceipt(bill.id)} disabled={!state.currentUser || generatingBillId !== null} className="btn-secondary inline-flex min-h-10 shrink-0 items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-60">
+                  {reportAvailable && bill && canModerate && (
+                    <button type="button" onClick={() => generateForReceipt(receipt.id, bill.id)} disabled={generatingBillId !== null} className="btn-secondary inline-flex min-h-10 shrink-0 items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-60">
                       <Sparkles className="h-4 w-4" /> {generatingBillId === bill.id ? 'Scoring…' : 'Generate AI proposal'}
                     </button>
                   )}
+                  {generationFeedback[receipt.id] && <p role="status" className="w-full text-sm font-semibold text-primary-700">{generationFeedback[receipt.id]}</p>}
                 </div>
               );
             })}
           </div>
         )}
       </Card>
+
+      {recentGeneratedMatches.length > 0 && (
+        <Card className="!p-7 md:!p-8 relative overflow-hidden mb-8 border border-accent-200">
+          <div className="inline-flex items-center gap-3 mb-5">
+            <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-accent-500 to-primary-600 flex items-center justify-center text-white shadow-md"><Sparkles className="h-5 w-5" /></div>
+            <div><div className="text-xs font-black uppercase tracking-[0.18em] text-accent-700 mb-1">Scoring Feedback</div><h2 className="text-2xl font-black text-surface-900 tracking-tight">New proposals ({recentGeneratedMatches.length})</h2></div>
+          </div>
+          <div className="space-y-4">
+            {recentGeneratedMatches.map(match => {
+              const receipt = state.receipts.find(item => item.id === match.receipt_ref);
+              const entry = state.reportEntries.find(item => item.id === match.report_entry_ref);
+              const bill = receipt && state.bills.find(item => item.id === receipt.legislative_item_id);
+              const score = Math.round(match.confidence_score * 100);
+              return <div key={match.id} className="rounded-xl border border-surface-200 bg-white p-4 md:p-5">
+                <div className="flex flex-wrap items-center gap-3 mb-3"><Badge variant="blue">{match.match_method}</Badge><span className="text-sm font-black text-primary-800">Proposal score: {score}%</span><span className="text-xs font-semibold text-surface-500">{bill?.title || 'Bill'}</span></div>
+                <div className="mb-3 h-2.5 w-full overflow-hidden rounded-full bg-surface-100"><div className={`h-full rounded-full ${confidenceBarClass(match.confidence_score)}`} style={{ width: `${score}%` }} /></div>
+                <p className="text-sm font-semibold text-surface-700 mb-1">Report entry: {entry?.clause_ref || 'Entry'}{entry?.treatment && entry.treatment !== 'unclassified' ? ` · ${entry.treatment}` : entry?.treatment === 'unclassified' ? ' · Treatment unclassified' : ''}</p>
+                <p className="text-sm text-surface-700 leading-relaxed mb-2">{entry?.extracted_summary || 'Report entry details are loading.'}</p>
+                <p className="text-xs text-surface-600 leading-relaxed mb-4">{match.explanation}</p>
+                <div className="flex flex-wrap gap-3">
+                  <button type="button" onClick={() => handleDecision(match.id, 'confirmed')} disabled={!canModerate || decisionMatchId !== null} className="btn-primary inline-flex min-h-10 items-center gap-2 !bg-gradient-to-r !from-green-600 !to-emerald-700 disabled:opacity-60"><CheckCircle2 className="h-4 w-4" />{decisionMatchId === match.id ? 'Saving…' : 'Confirm Match'}</button>
+                  <button type="button" onClick={() => handleDecision(match.id, 'rejected')} disabled={!canModerate || decisionMatchId !== null} className="btn-danger inline-flex min-h-10 items-center gap-2 disabled:opacity-60"><XCircle className="h-4 w-4" />Reject Match</button>
+                </div>
+              </div>;
+            })}
+          </div>
+        </Card>
+      )}
 
       <Card className="!p-7 md:!p-8 relative overflow-hidden">
         <div className="absolute -top-24 -right-24 w-56 h-56 rounded-full bg-accent-100/50 blur-3xl pointer-events-none" />

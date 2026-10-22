@@ -2,6 +2,7 @@
 import os
 import re
 import tempfile
+import logging
 from datetime import date, datetime
 from pathlib import Path
 from typing import List, Tuple
@@ -10,6 +11,8 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import CommitteeReport, ReportEntry
+
+log = logging.getLogger(__name__)
 
 
 def normalize_line(value: str) -> str:
@@ -183,6 +186,7 @@ async def extract_pending_linked_reports(db: AsyncSession, bill_ref) -> int:
         except Exception:
             # Keep the citizen submission intact; moderators can still inspect
             # the linked PDF and the report remains visibly flagged for review.
+            log.exception("Could not extract linked committee report %s", report.id)
             report.extraction_status = "needs_review"
 
     if reports:

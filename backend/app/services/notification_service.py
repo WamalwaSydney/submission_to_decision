@@ -6,6 +6,7 @@ from typing import Any
 from uuid import UUID
 import httpx
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import Message, ParticipationReceipt, User, LegislativeItem
 from app.audit import record_audit
@@ -93,9 +94,6 @@ async def notify_receipt_event(
 ) -> Message | None:
     if event_type not in TEMPLATES:
         return None
-    already = await db.execute(select(Message.id).where(Message.event_key == event_key))
-    if already.scalar_one_or_none():
-        return None
     user_result = await db.execute(select(User).where(User.id == receipt.author_id))
     user = user_result.scalar_one_or_none()
     if not user:
@@ -119,15 +117,19 @@ async def notify_receipt_event(
             "receipt_id": str(receipt.id),
         },
     }
-    msg = Message(
-        sender_id=None, recipient_user_id=user.id, bill_id=receipt.legislative_item_id,
-        receipt_id=receipt.id, subject=subject, body=text, message_type=event_type,
-        sender_type="system", event_key=event_key, language=language,
-        generation_source=source, source_snapshot=snapshot, delivery_status="delivered",
-    )
-    db.add(msg)
-    await db.flush()
-    await record_audit(db, entity_type="message", entity_id=msg.id, action="notification_created", actor_id=None,
+    message_id = (await db.execute(
+        pg_insert(Message).values(
+            sender_id=None, recipient_user_id=user.id, bill_id=receipt.legislative_item_id,
+            receipt_id=receipt.id, subject=subject, body=text, message_type=event_type,
+            sender_type="system", event_key=event_key, language=language,
+            generation_source=source, source_snapshot=snapshot, delivery_status="delivered",
+        ).on_conflict_do_nothing(index_elements=[Message.event_key]).returning(Message.id)
+    )).scalar_one_or_none()
+    if message_id is None:
+        # A concurrent request already created this idempotent event.
+        return None
+    await record_audit(db, entity_type="message", entity_id=message_id, action="notification_created", actor_id=None,
                        details={"event_key": event_key, "event_type": event_type, "language": language, "generation_source": source, "receipt_id": str(receipt.id)})
     await db.commit()
-    return msg
+    message_result = await db.execute(select(Message).where(Message.id == message_id))
+    return message_result.scalar_one_or_none()

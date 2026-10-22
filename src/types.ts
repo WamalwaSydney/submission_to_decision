@@ -30,6 +30,7 @@ export type UserRole =
   | 'citizen'
   | 'committee_officer'
   | 'reviewer'
+  | 'moderator'
   | 'administrator';
 
 export type Institution = 

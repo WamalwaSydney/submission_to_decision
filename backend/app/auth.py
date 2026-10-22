@@ -67,10 +67,13 @@ async def get_current_user(
 def require_role(*allowed_roles: str):
     """Dependency that checks if user has one of the allowed roles."""
     async def role_checker(current_user: User = Depends(get_current_user)):
-        if current_user.role not in allowed_roles:
+        role_aliases = {"reviewer": "moderator", "moderator": "reviewer"}
+        accepted_roles = set(allowed_roles)
+        accepted_roles.update(role_aliases[role] for role in allowed_roles if role in role_aliases)
+        if current_user.role not in accepted_roles:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Role '{current_user.role}' not authorized. Required: {', '.join(allowed_roles)}"
+                detail=f"Role '{current_user.role}' not authorized. Required: {', '.join(sorted(accepted_roles))}"
             )
         return current_user
     return role_checker
