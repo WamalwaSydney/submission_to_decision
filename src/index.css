@@ -113,3 +113,27 @@
   @media (max-width:540px) { .committee-dashboard-hero { padding:22px 20px; } .committee-dashboard-hero-mark { width:48px; height:48px; border-radius:14px; } .committee-dashboard-hero-mark svg { width:23px; } .committee-dashboard-stats { grid-template-columns:1fr 1fr; gap:9px; } .committee-dashboard-stat { gap:9px; padding:12px 10px; } .committee-dashboard-stat-icon { width:36px; height:36px; } .committee-dashboard-stat small { font-size:.68rem; } .committee-dashboard-bill-row { align-items:flex-start; flex-wrap:wrap; } .committee-dashboard-flow-link { margin-left:53px; } }
   @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration:.01ms !important; transition-duration:.01ms !important; scroll-behavior:auto !important; } }
 }
+
+
+@layer components {
+  .committee-directory { display:grid; gap:18px; }
+  .committee-directory-heading { display:flex; align-items:flex-end; justify-content:space-between; gap:20px; }
+  .committee-directory-heading h2,.committee-bills-view-heading h2 { margin:5px 0 0; color:#182020; font-size:clamp(1.45rem,2.5vw,2rem); font-weight:850; letter-spacing:-.035em; }
+  .committee-directory-heading p:last-child,.committee-bills-view-heading p:last-child { margin:5px 0 0; color:#687575; font-size:.9rem; }
+  .committee-directory-heading > span { flex:0 0 auto; padding:7px 12px; border:1px solid #e2ded5; border-radius:999px; background:#fff; color:#526060; font-size:.76rem; font-weight:750; }
+  .committee-directory-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,330px),1fr)); gap:12px; }
+  .committee-directory-card { display:flex; min-width:0; align-items:center; gap:13px; padding:16px; border:1px solid #e7e3da; border-radius:16px; background:#fff; box-shadow:0 4px 16px rgba(24,32,32,.035); text-align:left; cursor:pointer; transition:transform .18s ease,border-color .18s ease,box-shadow .18s ease; }
+  .committee-directory-card:hover,.committee-directory-card:focus-visible { transform:translateY(-2px); border-color:#b7d4bd; box-shadow:0 10px 24px rgba(23,107,43,.09); outline:none; }
+  .committee-directory-icon { display:grid; width:46px; height:46px; flex:0 0 auto; place-items:center; border-radius:14px; background:linear-gradient(140deg,#fff0ee,#edf7ef); color:#176b2b; }
+  .committee-directory-copy { display:grid; min-width:0; flex:1; gap:4px; }
+  .committee-directory-copy strong { overflow:hidden; color:#182020; font-size:.9rem; font-weight:800; line-height:1.3; text-overflow:ellipsis; }
+  .committee-directory-copy small { color:#718080; font-size:.73rem; }
+  .committee-directory-count { flex:0 0 auto; color:#596767; font-size:.72rem; font-weight:750; white-space:nowrap; }
+  .committee-directory-arrow { flex:0 0 auto; color:#94a09d; transition:transform .18s ease,color .18s ease; }
+  .committee-directory-card:hover .committee-directory-arrow { transform:translateX(3px); color:#176b2b; }
+  .committee-bills-view { display:grid; gap:18px; }
+  .committee-bills-view-heading { display:grid; justify-items:start; gap:14px; padding:19px 21px; border:1px solid #e7e3da; border-left:4px solid #176b2b; border-radius:16px; background:linear-gradient(110deg,#fff 0%,#f6faf6 100%); }
+  .committee-back-button { display:inline-flex; align-items:center; gap:7px; padding:8px 11px; border:1px solid #e2ded5; border-radius:10px; background:#fff; color:#465454; font-size:.78rem; font-weight:750; cursor:pointer; }
+  .committee-back-button:hover { border-color:#b7d4bd; color:#176b2b; }
+  @media (max-width:560px) { .committee-directory-heading { align-items:flex-start; flex-direction:column; gap:9px; } .committee-directory-grid { grid-template-columns:1fr; } .committee-directory-card { gap:10px; padding:13px; } .committee-directory-count { font-size:.67rem; } }
+}

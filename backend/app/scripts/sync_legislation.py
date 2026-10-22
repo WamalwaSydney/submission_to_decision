@@ -444,6 +444,59 @@ def bill_documents(row: BillRow) -> list[dict]:
     return [{"name": "Legislative Proposals Tracker", "url": row.source_url}]
 
 
+GENERIC_COMMITTEE_NAMES = {"committee", "national assembly committee", "national assembly"}
+
+
+async def ensure_committee_id(conn, name: str | None, institution: str = "National Assembly"):
+    """Find or create the committee named by an official Parliament source."""
+    clean_name = clean(name or "")
+    if not clean_name or clean_name.casefold() in GENERIC_COMMITTEE_NAMES:
+        return None
+    existing = await conn.execute(
+        text("SELECT id FROM committees WHERE lower(trim(name))=lower(trim(:name)) ORDER BY id LIMIT 1"),
+        {"name": clean_name},
+    )
+    row = existing.first()
+    if row:
+        return row[0]
+
+    committee_id = uuid.uuid4()
+    await conn.execute(
+        text("INSERT INTO committees (id,name,institution,status) VALUES (:id,:name,:institution,'active') ON CONFLICT (name) DO NOTHING"),
+        {"id": committee_id, "name": clean_name, "institution": institution or "National Assembly"},
+    )
+    existing = await conn.execute(
+        text("SELECT id FROM committees WHERE lower(trim(name))=lower(trim(:name)) ORDER BY id LIMIT 1"),
+        {"name": clean_name},
+    )
+    row = existing.first()
+    return row[0] if row else None
+
+
+async def merge_bill_document(conn, bill_id, name: str, url: str) -> None:
+    """Add a Parliament document to a bill without duplicating or replacing its tracker."""
+    if not url:
+        return
+    result = await conn.execute(text("SELECT documents FROM legislative_items WHERE id=:id"), {"id": bill_id})
+    row = result.first()
+    if not row:
+        return
+    documents = row[0] or []
+    if isinstance(documents, str):
+        try:
+            documents = json.loads(documents)
+        except json.JSONDecodeError:
+            documents = []
+    documents = list(documents) if isinstance(documents, (list, tuple)) else []
+    if any(isinstance(document, dict) and document.get("url") == url for document in documents):
+        return
+    documents.append({"name": name, "url": url})
+    await conn.execute(
+        text("UPDATE legislative_items SET documents=CAST(:documents AS jsonb) WHERE id=:id"),
+        {"id": bill_id, "documents": json.dumps(documents)},
+    )
+
+
 # --------------------------------------------------------------------------
 # Bills
 # --------------------------------------------------------------------------
@@ -509,10 +562,18 @@ async def upsert_bills(conn, rows: list[BillRow], as_at: date) -> tuple[int, int
 async def _upsert_notice(conn, notice: NoticeRow) -> None:
     result = await conn.execute(text("SELECT id FROM legislative_items WHERE bill_house=:house AND bill_number IS NOT DISTINCT FROM :number AND bill_year=:year ORDER BY id LIMIT 1"), {"house": notice.bill_house, "number": notice.bill_number, "year": notice.bill_year})
     bill = result.first()
+    committee_id = await ensure_committee_id(conn, notice.committee_name)
     if not bill:
         identifier = f"{notice.bill_house.upper()}/{notice.bill_year}/Notice-{hashlib.sha1(notice.bill_title.lower().encode()).hexdigest()[:10]}"
-        await conn.execute(text("""INSERT INTO legislative_items (id,title,identifier,institution,stage,documents,status_history,is_simulated,bill_house,bill_number,bill_year,source_url,source_status) VALUES (:id,:title,:identifier,'National Assembly','Public participation',CAST(:documents AS jsonb),'[]'::jsonb,false,:house,:number,:year,:source_url,'Public participation') ON CONFLICT (identifier) DO NOTHING"""), {"id": uuid.uuid4(), "title": notice.bill_title[:500], "identifier": identifier, "documents": json.dumps([{"name": "Memoranda notice", "url": notice.source_url}, *({"name": "Bill text", "url": u} for u in notice.document_urls)]), "house": notice.bill_house, "number": notice.bill_number, "year": notice.bill_year, "source_url": notice.source_url})
+        await conn.execute(text("""INSERT INTO legislative_items (id,title,identifier,institution,stage,documents,status_history,is_simulated,bill_house,bill_number,bill_year,source_url,source_status,committee_id) VALUES (:id,:title,:identifier,'National Assembly','Public participation',CAST(:documents AS jsonb),'[]'::jsonb,false,:house,:number,:year,:source_url,'Public participation',:committee_id) ON CONFLICT (identifier) DO NOTHING"""), {"id": uuid.uuid4(), "title": notice.bill_title[:500], "identifier": identifier, "documents": json.dumps([{"name": "Memoranda notice", "url": notice.source_url}]), "house": notice.bill_house, "number": notice.bill_number, "year": notice.bill_year, "source_url": notice.source_url, "committee_id": committee_id})
         bill = (await conn.execute(text("SELECT id FROM legislative_items WHERE identifier=:identifier"), {"identifier": identifier})).first()
+    if bill and committee_id:
+        # Only attach a bill when its official house/number/year reference matched above.
+        await conn.execute(text("UPDATE legislative_items SET committee_id=COALESCE(committee_id,:committee_id) WHERE id=:id AND is_simulated=false"), {"id": bill[0], "committee_id": committee_id})
+
+    if bill:
+        for document_url in notice.document_urls:
+            await merge_bill_document(conn, bill[0], "Official bill document (Parliament PDF)", document_url)
     await conn.execute(text("""INSERT INTO notice_records (id,bill_ref,institution,notice_date,window_start,window_end,mode,bill_text_accessible,source_url,source_title,committee_name,published_date) VALUES (:id,:bill,'National Assembly',:notice_date,:notice_date,:deadline,:mode,:accessible,:source_url,:title,:committee,:published) ON CONFLICT (source_url) WHERE source_url IS NOT NULL DO UPDATE SET bill_ref=EXCLUDED.bill_ref, notice_date=EXCLUDED.notice_date, window_start=EXCLUDED.window_start, window_end=EXCLUDED.window_end, mode=EXCLUDED.mode, bill_text_accessible=EXCLUDED.bill_text_accessible, source_title=EXCLUDED.source_title, committee_name=EXCLUDED.committee_name, published_date=EXCLUDED.published_date"""), {"id": uuid.uuid4(), "bill": bill[0], "notice_date": notice.notice_date, "deadline": notice.deadline, "mode": "Parliament website notice", "accessible": bool(notice.document_urls), "source_url": notice.source_url, "title": notice.title, "committee": notice.committee_name, "published": notice.notice_date})
 
 
@@ -539,6 +600,12 @@ async def _upsert_report(conn, row: dict) -> bool:
         bill = await conn.execute(text("SELECT id FROM legislative_items WHERE bill_house=:house AND bill_number=:number AND bill_year=:year ORDER BY id LIMIT 1"), {"house": row["bill_house"], "number": row["bill_number"], "year": row["bill_year"]})
         found = bill.first()
         bill_id = found[0] if found else None
+    if bill_id is not None:
+        committee_id = await ensure_committee_id(conn, row.get("committee_name"), row.get("institution") or "National Assembly")
+        if committee_id:
+            # Committee reports are official evidence of referral. Do not overwrite a
+            # bill assignment already made by an administrator or a matching notice.
+            await conn.execute(text("UPDATE legislative_items SET committee_id=COALESCE(committee_id,:committee_id) WHERE id=:id AND is_simulated=false"), {"id": bill_id, "committee_id": committee_id})
     existing = (await conn.execute(text("SELECT id FROM committee_reports WHERE source_url=:source_url AND committee_url=:committee_url"), {"source_url": row["source_url"], "committee_url": row["committee_url"]})).first()
     params = {**row, "bill_ref": bill_id, "source_document_ref": row["source_url"], "date_tabled": row["date_tabled"] or date.today(), "extraction_status": "pending", "ocr_used": False, "is_simulated": False}
     if existing:
