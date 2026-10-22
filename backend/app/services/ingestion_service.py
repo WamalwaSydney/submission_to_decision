@@ -4,17 +4,19 @@ import re
 import tempfile
 import logging
 import asyncio
+import subprocess
 from datetime import date, datetime
 from pathlib import Path
 from typing import List, Tuple
 from urllib.parse import urlparse
 import httpx
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import CommitteeReport, ReportEntry
 
 log = logging.getLogger(__name__)
 _pdf_ocr_semaphore = asyncio.Semaphore(1)
+_report_extraction_lock = asyncio.Lock()
 
 
 def normalize_line(value: str) -> str:
@@ -50,14 +52,17 @@ async def ingest_report(db: AsyncSession, bill_ref: str, institution: str, file_
 
 def extract_text(file_path: str) -> Tuple[str, bool]:
     try:
-        import pdfplumber
-        pages = []
-        with pdfplumber.open(file_path) as pdf:
-            for page_number, page in enumerate(pdf.pages, start=1):
-                page_text = page.extract_text() or ""
-                if page_text.strip():
-                    pages.append(f"[Page {page_number}]\n{page_text}")
-        text = "\n".join(pages)
+        native = subprocess.run(
+            ["pdftotext", "-layout", file_path, "-"],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=45,
+        )
+        text = native.stdout
         if len(text.strip()) >= 100:
             return text, False
     except Exception:
@@ -93,9 +98,9 @@ def ocr_extract(file_path: str) -> str:
 CLAUSE_RE = re.compile(r"^(?:clause|section|article|paragraph)\s+([A-Za-z0-9().\-]+)\s*[:\-–—]?\s*(.*)$", re.I)
 REASON_RE = re.compile(r"^(?:reason|rationale|justification)\s*[:\-]\s*(.*)$", re.I)
 TREATMENT_PATTERNS = (
-    ("rejected with reasons", re.compile(r"\b(reject(?:ed|ion)?|not accepted|declined)\b", re.I)),
-    ("amended", re.compile(r"\b(amend(?:ed|ment)?|modified|revised)\b", re.I)),
-    ("adopted", re.compile(r"\b(adopt(?:ed|ion)?|accepted|approved)\b", re.I)),
+    ("rejected with reasons", re.compile(r"\b(?:committee\s+(?:rejected|rejects|declined|recommends?\s+rejecting)|rejected\s+by\s+the\s+committee)\b", re.I)),
+    ("amended", re.compile(r"\b(?:committee\s+(?:amended|modif(?:ied|ies)|revised|recommends?\s+amending)|amended\s+by\s+the\s+committee)\b", re.I)),
+    ("adopted", re.compile(r"\b(?:committee\s+(?:adopted|accepts?|approved|recommends?\s+adoption)|adopted\s+by\s+the\s+committee)\b", re.I)),
 )
 
 
@@ -132,94 +137,108 @@ def parse_report_entries(text: str) -> List[Tuple[str, str, str, str | None]]:
 
 
 def _finalize(item: dict) -> Tuple[str, str, str, str | None]:
-    return item["ref"], normalize_line(" ".join(item["summary"])), item["treatment"] or "not addressed", item["reason"]
+    return item["ref"], normalize_line(" ".join(item["summary"])), item["treatment"] or "unclassified", item["reason"]
 
 
-async def extract_pending_linked_reports(db: AsyncSession, bill_ref) -> int:
+async def extract_pending_linked_reports(db: AsyncSession, bill_ref=None, *, report_id=None) -> int:
     """Download and extract linked official Parliament PDFs before matching.
 
     Only HTTPS URLs on parliament.go.ke (or its subdomains) are accepted. The
     document is size-limited, and extraction status prevents repeated downloads
     for reports that have already been processed or need manual review.
     """
-    result = await db.execute(
-        select(CommitteeReport).where(
-            CommitteeReport.bill_ref == bill_ref,
-            CommitteeReport.extraction_status == "pending",
-            CommitteeReport.source_url.is_not(None),
-        )
+    query = select(CommitteeReport.id).where(
+        CommitteeReport.extraction_status.in_(["pending", "extracting"]),
+        CommitteeReport.source_url.is_not(None),
     )
-    reports = list(result.scalars().all())
+    if report_id is not None:
+        query = query.where(CommitteeReport.id == report_id)
+    elif bill_ref is not None:
+        query = query.where(CommitteeReport.bill_ref == bill_ref)
+    else:
+        return 0
+    result = await db.execute(query)
+    report_ids = list(result.scalars().all())
     extracted_count = 0
-    for report in reports:
-        claim = await db.execute(
-            update(CommitteeReport)
-            .where(CommitteeReport.id == report.id, CommitteeReport.extraction_status == "pending")
-            .values(extraction_status="extracting")
-            .returning(CommitteeReport.id)
-        )
-        if claim.scalar_one_or_none() is None:
-            continue
-        await db.commit()
-        parsed = urlparse(report.source_url or "")
-        if parsed.scheme != "https" or not parsed.hostname or not (
-            parsed.hostname == "parliament.go.ke" or parsed.hostname.endswith(".parliament.go.ke")
-        ):
-            report.extraction_status = "needs_review"
-            continue
-
-        try:
-            chunks = []
-            total_bytes = 0
-            async with httpx.AsyncClient(timeout=45, follow_redirects=True, headers={"User-Agent": "ParticipationTrace/1.0 (official report text extraction)"}) as client:
-                async with client.stream("GET", report.source_url) as response:
-                    response.raise_for_status()
-                    final_host = urlparse(str(response.url)).hostname or ""
-                    if final_host != "parliament.go.ke" and not final_host.endswith(".parliament.go.ke"):
-                        raise ValueError("PDF redirect left the official Parliament domain")
-                    async for chunk in response.aiter_bytes():
-                        total_bytes += len(chunk)
-                        if total_bytes > 35 * 1024 * 1024:
-                            raise ValueError("PDF exceeded the 35 MB extraction limit")
-                        chunks.append(chunk)
-            pdf_bytes = b"".join(chunks)
-            if not pdf_bytes.startswith(b"%PDF"):
-                raise ValueError("The linked document is not a readable PDF")
-
-            with tempfile.TemporaryDirectory(prefix="parliament-report-") as directory:
-                pdf_path = Path(directory) / "report.pdf"
-                pdf_path.write_bytes(pdf_bytes)
-                async with _pdf_ocr_semaphore:
-                    text, ocr_used = await asyncio.to_thread(extract_text, str(pdf_path))
-            entries = parse_report_entries(text)
-            if not entries:
-                entries = parse_unstructured_report_entries(text)
-            if not entries:
-                report.extraction_status = "needs_review"
-                report.ocr_used = ocr_used
+    for report_id in report_ids:
+        async with _report_extraction_lock:
+            # `extracting` is included to recover rows left by older versions
+            # that committed this state before Render killed the process.
+            result = await db.execute(
+                select(CommitteeReport)
+                .where(
+                    CommitteeReport.id == report_id,
+                    CommitteeReport.extraction_status.in_(["pending", "extracting"]),
+                )
+                .with_for_update()
+            )
+            report = result.scalar_one_or_none()
+            if report is None:
                 continue
+            report.extraction_status = "extracting"
+            try:
+                parsed = urlparse(report.source_url or "")
+                if parsed.scheme != "https" or not parsed.hostname or not (
+                    parsed.hostname == "parliament.go.ke" or parsed.hostname.endswith(".parliament.go.ke")
+                ):
+                    raise ValueError("The linked report URL is not on the official Parliament HTTPS domain")
 
-            for clause_ref, summary, treatment, reason in entries:
-                if not summary:
+                chunks = []
+                total_bytes = 0
+                async with httpx.AsyncClient(timeout=90, follow_redirects=True, headers={"User-Agent": "ParticipationTrace/1.0 (official report text extraction)"}) as client:
+                    async with client.stream("GET", report.source_url) as response:
+                        response.raise_for_status()
+                        final_host = urlparse(str(response.url)).hostname or ""
+                        if final_host != "parliament.go.ke" and not final_host.endswith(".parliament.go.ke"):
+                            raise ValueError("PDF redirect left the official Parliament domain")
+                        async for chunk in response.aiter_bytes():
+                            total_bytes += len(chunk)
+                            if total_bytes > 35 * 1024 * 1024:
+                                raise ValueError("PDF exceeded the 35 MB extraction limit")
+                            chunks.append(chunk)
+                pdf_bytes = b"".join(chunks)
+                if not pdf_bytes.startswith(b"%PDF"):
+                    raise ValueError("The linked document is not a readable PDF")
+
+                with tempfile.TemporaryDirectory(prefix="parliament-report-") as directory:
+                    pdf_path = Path(directory) / "report.pdf"
+                    pdf_path.write_bytes(pdf_bytes)
+                    async with _pdf_ocr_semaphore:
+                        text, ocr_used = await asyncio.to_thread(extract_text, str(pdf_path))
+                entries = parse_report_entries(text)
+                if not entries:
+                    entries = parse_unstructured_report_entries(text)
+                entries = [entry for entry in entries if entry[1].strip()]
+                if not entries:
+                    report.extraction_status = "needs_review"
+                    report.ocr_used = ocr_used
+                    await db.commit()
                     continue
-                db.add(ReportEntry(
-                    report_ref=report.id,
-                    clause_ref=clause_ref,
-                    extracted_summary=summary,
-                    treatment=treatment,
-                    stated_reason=reason,
-                ))
-            report.extraction_status = "ocr_used" if ocr_used else "extracted"
-            report.ocr_used = ocr_used
-            extracted_count += 1
-        except Exception:
-            # Keep the citizen submission intact; moderators can still inspect
-            # the linked PDF and the report remains visibly flagged for review.
-            log.exception("Could not extract linked committee report %s", report.id)
-            report.extraction_status = "needs_review"
 
-    if reports:
-        await db.commit()
+                for clause_ref, summary, treatment, reason in entries:
+                    db.add(ReportEntry(
+                        report_ref=report.id,
+                        clause_ref=clause_ref,
+                        extracted_summary=summary,
+                        treatment=treatment,
+                        stated_reason=reason,
+                    ))
+                report.extraction_status = "ocr_used" if ocr_used else "extracted"
+                report.ocr_used = ocr_used
+                await db.commit()
+                extracted_count += 1
+            except Exception:
+                log.exception("Could not extract linked committee report %s", report.id)
+                await db.rollback()
+                failed_result = await db.execute(
+                    select(CommitteeReport)
+                    .where(CommitteeReport.id == report_id)
+                    .with_for_update()
+                )
+                failed_report = failed_result.scalar_one_or_none()
+                if failed_report:
+                    failed_report.extraction_status = "needs_review"
+                    await db.commit()
     return extracted_count
 
 

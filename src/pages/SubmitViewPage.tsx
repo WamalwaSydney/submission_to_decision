@@ -223,6 +223,7 @@ export function SubmitViewPage() {
                   {success.matchingStatus === 'pending_review' && 'A match proposal was generated from the available committee report and sent to the Moderator Pending Review queue. A moderator must confirm or reject the proposal.'}
                   {success.matchingStatus === 'submission_triage' && 'No linked committee report is available yet. Your submission is in the Moderator Submission Triage queue until a report becomes available.'}
                   {success.matchingStatus === 'report_extraction_required' && 'A report is linked, but it has not yielded usable entries yet. Your submission is flagged for moderator triage while the report is checked.'}
+                  {success.matchingStatus === 'report_reference_mismatch' && 'The linked report’s official bill reference does not match the bill you selected. The submission is flagged for moderator review rather than being matched against potentially incorrect evidence.'}
                   {success.matchingStatus === 'already_processed' && 'A committee report is available, but this submission has no new proposal. It remains visible to the moderator for follow-up.'}
                 </div>
               </motion.div>

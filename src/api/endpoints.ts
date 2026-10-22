@@ -65,6 +65,7 @@ export const api = {
   pendingMatches: () => apiFetch<{ matches: any[] }>('/matches/pending'),
   autoProcessMatches: () => apiFetch<{ bills_processed: number; proposals_created: number }>('/matches/auto-process', { method: 'POST' }),
   generateMatches: (billRef: string) => apiFetch<{ matches: any[] }>(`/reports/${encodeURIComponent(billRef)}/generate-matches`, { method: 'POST' }),
+  retryReportExtraction: (reportId: string) => apiFetch<{ report: any; entries_extracted: number; matches: any[] }>(`/reports/${encodeURIComponent(reportId)}/retry-extraction`, { method: 'POST' }),
   decideMatch: (matchId: string, decision: 'confirm' | 'reject') => apiFetch<any>(`/matches/${matchId}/${decision}`, { method: 'POST' }),
   report: (reportId: string) => apiFetch<any>(`/reports/${encodeURIComponent(reportId)}`),
   updateReportEntry: (reportId: string, entryId: string, treatment: string, statedReason?: string) => apiFetch<any>(`/reports/${encodeURIComponent(reportId)}/entries/${encodeURIComponent(entryId)}`, { method: 'PUT', body: JSON.stringify({ treatment, stated_reason: statedReason }) }),

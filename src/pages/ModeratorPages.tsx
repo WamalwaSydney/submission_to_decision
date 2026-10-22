@@ -15,6 +15,7 @@ export function ReviewerQueuePage() {
   const [decisionMatchId, setDecisionMatchId] = useState<string | null>(null);
   const [decisionError, setDecisionError] = useState('');
   const [generatingBillId, setGeneratingBillId] = useState<string | null>(null);
+  const [extractingReportId, setExtractingReportId] = useState<string | null>(null);
   const [generationFeedback, setGenerationFeedback] = useState<Record<string, string>>({});
   const [recentGeneratedMatches, setRecentGeneratedMatches] = useState<any[]>([]);
   const pendingMatches = state.matches.filter(m => m.reviewer_decision === 'pending');
@@ -110,6 +111,40 @@ export function ReviewerQueuePage() {
       setQueueError(error instanceof Error ? error.message : 'Unable to generate match proposals.');
     } finally {
       setGeneratingBillId(null);
+    }
+  };
+
+  const retryExtractionForReceipt = async (receiptId: string, reportId: string) => {
+    setExtractingReportId(reportId);
+    setGenerationFeedback(previous => ({ ...previous, [receiptId]: 'Re-extracting the official Parliament PDF one page at a time…' }));
+    try {
+      const result = await api.retryReportExtraction(reportId);
+      const proposals = result.matches.filter(match => match.receipt_ref === receiptId);
+      if (proposals.length) {
+        setRecentGeneratedMatches(previous => {
+          const byId = new Map(previous.map(match => [match.id, match]));
+          proposals.forEach(match => byId.set(match.id, match));
+          return [...byId.values()];
+        });
+      }
+      setGenerationFeedback(previous => ({
+        ...previous,
+        [receiptId]: result.entries_extracted
+          ? `Extracted ${result.entries_extracted} reviewable report entr${result.entries_extracted === 1 ? 'y' : 'ies'}.${proposals.length ? ` Created ${proposals.length} proposal${proposals.length === 1 ? '' : 's'}; review the score below.` : ' No proposal was returned for this submission; check the bill reference and existing moderation decisions.'}`
+          : 'The Parliament PDF still yielded no reviewable entries. Check the backend extraction log and confirm the linked report is the correct bill report.',
+      }));
+      const [snapshot, pending, queueReceipts] = await Promise.all([api.bootstrap(), api.pendingMatches(), api.reviewQueueReceipts()]);
+      dispatch({ type: 'HYDRATE', payload: {
+        bills: snapshot.bills,
+        receipts: queueReceipts.receipts,
+        reports: snapshot.reports,
+        reportEntries: snapshot.report_entries,
+        matches: [...snapshot.matches.filter(match => match.reviewer_decision !== 'pending'), ...pending.matches],
+      } });
+    } catch (error) {
+      setGenerationFeedback(previous => ({ ...previous, [receiptId]: error instanceof Error ? error.message : 'Unable to extract the linked report PDF.' }));
+    } finally {
+      setExtractingReportId(null);
     }
   };
 
@@ -282,14 +317,26 @@ export function ReviewerQueuePage() {
               const bill = state.bills.find(item => item.id === receipt.legislative_item_id);
               const billReports = state.reports.filter(report => report.bill_ref === receipt.legislative_item_id);
               const reportAvailable = billReports.length > 0;
-              const reportEntriesAvailable = state.reportEntries.some(entry => billReports.some(report => report.id === entry.report_ref));
+              const reportNeedingExtraction = billReports.find(report => report.source_url && !state.reportEntries.some(entry => entry.report_ref === report.id));
+              const houseKey = (value?: string) => value?.toLowerCase().includes('senate') ? 'senate' : value?.toLowerCase().includes('national assembly') || value?.toLowerCase() === 'na' ? 'na' : value?.toLowerCase();
+              const reportReferenceMismatch = billReports.some(report =>
+                (report.bill_year != null && bill?.bill_year != null && report.bill_year !== bill.bill_year) ||
+                (report.bill_number != null && bill?.bill_number != null && report.bill_number !== bill.bill_number) ||
+                (report.bill_house && bill?.bill_house && houseKey(report.bill_house) !== houseKey(bill.bill_house))
+              );
+              const reportEntriesAvailable = !reportReferenceMismatch && state.reportEntries.some(entry => billReports.some(report => report.id === entry.report_ref));
               return (
                 <div key={receipt.id} className="rounded-xl border border-surface-200 bg-white p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
                   <div className="min-w-0">
                     <p className="font-mono text-xs font-bold text-primary-700 mb-1">{receipt.public_id || receipt.id}</p>
                     <p className="text-sm text-surface-800 leading-relaxed">{receipt.submission_text}</p>
-                    <p className="text-xs text-surface-500 mt-2">Bill: {bill?.title || 'Bill information unavailable'} · {!reportAvailable ? 'No linked committee report yet; awaiting report and triage follow-up.' : !reportEntriesAvailable ? 'A report is linked, but its contents have not been extracted into reviewable entries.' : 'Report entries are available; no proposal is currently recorded.'}</p>
+                    <p className="text-xs text-surface-500 mt-2">Bill: {bill?.title || 'Bill information unavailable'} · {reportReferenceMismatch ? 'The official report house/number/year conflicts with this bill; verify the report link before matching.' : !reportAvailable ? 'No linked committee report yet; awaiting report and triage follow-up.' : !reportEntriesAvailable ? 'A report is linked, but its contents have not been extracted into reviewable entries.' : 'Report entries are available; no proposal is currently recorded.'}</p>
                   </div>
+                  {!reportReferenceMismatch && reportNeedingExtraction && canModerate && (
+                    <button type="button" onClick={() => retryExtractionForReceipt(receipt.id, reportNeedingExtraction.id)} disabled={extractingReportId !== null} className="btn-secondary inline-flex min-h-10 shrink-0 items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-60">
+                      <FileText className="h-4 w-4" /> {extractingReportId === reportNeedingExtraction.id ? 'Extracting PDF…' : 'Retry PDF extraction'}
+                    </button>
+                  )}
                   {reportEntriesAvailable && bill && canModerate && (
                     <button type="button" onClick={() => generateForReceipt(receipt.id, bill.id)} disabled={generatingBillId !== null} className="btn-secondary inline-flex min-h-10 shrink-0 items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-60">
                       <Sparkles className="h-4 w-4" /> {generatingBillId === bill.id ? 'Scoring…' : 'Generate AI proposal'}

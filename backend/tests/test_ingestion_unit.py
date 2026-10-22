@@ -11,6 +11,13 @@ def test_parser_handles_clause_section_reason_and_treatment():
     assert rows[1][2] == 'rejected with reasons'
 
 
+def test_bill_clause_text_does_not_infer_committee_treatment():
+    text = "Clause 6: Flexible working hours\nAn employer may reject an application for flexible working arrangements."
+    rows = parse_report_entries(text)
+    assert rows[0][0] == 'Clause 6'
+    assert rows[0][2] == 'unclassified'
+
+
 def test_native_fixture_extracts_without_ocr():
     text, ocr_used = extract_text('evaluation/fixtures/native_report.pdf')
     assert 'Clause 4' in text

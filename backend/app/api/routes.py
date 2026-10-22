@@ -497,9 +497,10 @@ async def create_receipt(
     match_proposals = await linking_service.propose_matches(db, bill_uuid, use_llm=True)
     receipt_match_proposals = [match for match in match_proposals if match.receipt_ref == receipt.id]
     report_result = await db.execute(
-        select(CommitteeReport.id).where(CommitteeReport.bill_ref == bill_uuid).limit(1)
+        select(CommitteeReport).where(CommitteeReport.bill_ref == bill_uuid)
     )
-    report_exists = report_result.scalar_one_or_none() is not None
+    linked_reports = list(report_result.scalars().all())
+    report_exists = bool(linked_reports)
     entry_result = await db.execute(
         select(ReportEntry.id)
         .join(CommitteeReport, ReportEntry.report_ref == CommitteeReport.id)
@@ -507,10 +508,29 @@ async def create_receipt(
         .limit(1)
     )
     report_has_entries = entry_result.scalar_one_or_none() is not None
+    bill_reference_result = await db.execute(select(LegislativeItem).where(LegislativeItem.id == bill_uuid))
+    bill_record = bill_reference_result.scalar_one_or_none()
+    def house_key(value):
+        if not value:
+            return None
+        normalized = value.strip().casefold()
+        if "senate" in normalized:
+            return "senate"
+        if normalized == "na" or "national assembly" in normalized:
+            return "na"
+        return normalized
+    report_reference_mismatch = any(
+        (report.bill_year is not None and bill_record and bill_record.bill_year is not None and report.bill_year != bill_record.bill_year)
+        or (report.bill_number is not None and bill_record and bill_record.bill_number is not None and report.bill_number != bill_record.bill_number)
+        or (report.bill_house and bill_record and bill_record.bill_house and house_key(report.bill_house) != house_key(bill_record.bill_house))
+        for report in linked_reports
+    )
     if receipt_match_proposals:
         matching_status = "pending_review"
     elif not report_exists:
         matching_status = "submission_triage"
+    elif report_reference_mismatch:
+        matching_status = "report_reference_mismatch"
     elif not report_has_entries:
         matching_status = "report_extraction_required"
     else:
@@ -825,6 +845,44 @@ async def generate_match_proposals(
         raise HTTPException(status_code=404, detail="Bill not found")
     matches = await linking_service.propose_matches(db, bill_ref, use_llm=True)
     return {"matches": [to_dict(match) for match in matches]}
+
+
+@router.post("/reports/{report_id}/retry-extraction")
+async def retry_committee_report_extraction(
+    report_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_role("reviewer")),
+):
+    report_result = await db.execute(select(CommitteeReport).where(CommitteeReport.id == report_id))
+    report = report_result.scalar_one_or_none()
+    if not report:
+        raise HTTPException(status_code=404, detail="Committee report not found")
+    if not report.source_url:
+        raise HTTPException(status_code=422, detail="This report has no linked source PDF to re-extract")
+    existing_entries = await db.execute(
+        select(ReportEntry.id).where(ReportEntry.report_ref == report.id).limit(1)
+    )
+    if existing_entries.scalar_one_or_none() is not None:
+        raise HTTPException(status_code=409, detail="This report already has extracted entries")
+
+    report.extraction_status = "pending"
+    report.ocr_used = False
+    await db.commit()
+    extracted_reports = await ingestion_service.extract_pending_linked_reports(
+        db, report_id=report.id
+    )
+    entry_result = await db.execute(select(ReportEntry).where(ReportEntry.report_ref == report.id))
+    entries = list(entry_result.scalars().all())
+    matches = []
+    if entries and report.bill_ref:
+        matches = await linking_service.propose_matches(db, report.bill_ref, use_llm=True)
+    await db.refresh(report)
+    return {
+        "report": to_dict(report),
+        "reports_extracted": extracted_reports,
+        "entries_extracted": len(entries),
+        "matches": [to_dict(match) for match in matches],
+    }
 
 
 @router.get("/matches/confirmed")

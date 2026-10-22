@@ -17,6 +17,7 @@ export type ProfileLabel = 'verified' | 'pilot' | 'simulated' | 'unclaimed';
 
 export type ExtractionStatus = 
   | 'pending'
+  | 'extracting'
   | 'extracted'
   | 'ocr_used'
   | 'needs_review'
@@ -103,6 +104,9 @@ export interface LegislativeItem {
   documents: { name: string; url?: string }[];
   source_updated_at?: string;
   stage_as_at?: string;
+  bill_house?: string;
+  bill_number?: number;
+  bill_year?: number;
   status_history: { date: string; stage: string; note: string }[];
   is_simulated: boolean;
   committee_id?: string;
@@ -129,6 +133,9 @@ export interface CommitteeReport {
   date_tabled: string;
   source_document_ref: string;
   source_url?: string;
+  bill_house?: string;
+  bill_number?: number;
+  bill_year?: number;
   title?: string;
   extraction_status: ExtractionStatus;
   ocr_used: boolean;

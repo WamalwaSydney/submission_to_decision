@@ -1,21 +1,59 @@
 # Matching proposals and human-confirmed decisions for public submissions.
 from typing import List
 import hashlib
+import logging
 from rapidfuzz import fuzz
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from app.models import ParticipationReceipt, ReportEntry, SubmissionMatch
+from app.models import ParticipationReceipt, ReportEntry, SubmissionMatch, CommitteeReport, LegislativeItem
 from app.audit import record_audit
 from app.services import ingestion_service, llm_matching_service, notification_service
+
+log = logging.getLogger(__name__)
+
+
+def _house_key(value: str | None) -> str | None:
+    if not value:
+        return None
+    normalized = value.strip().casefold()
+    if "senate" in normalized:
+        return "senate"
+    if normalized in {"na", "national assembly"} or "national assembly" in normalized:
+        return "na"
+    return normalized
 
 async def propose_matches(db: AsyncSession, bill_id: str, use_llm: bool = True) -> List[SubmissionMatch]:
     # Parliament sync stores linked report PDFs as pending records. Extract them
     # on the first automatic matching attempt so link-only reports are usable.
     await ingestion_service.extract_pending_linked_reports(db, bill_id)
+    bill_result = await db.execute(select(LegislativeItem).where(LegislativeItem.id == bill_id))
+    bill = bill_result.scalar_one_or_none()
+    if bill is None:
+        return []
     receipt_result = await db.execute(select(ParticipationReceipt).where(ParticipationReceipt.legislative_item_id == bill_id))
     receipts = list(receipt_result.scalars().all())
-    entry_result = await db.execute(select(ReportEntry).join(ReportEntry.report).where(ReportEntry.report.has(bill_ref=bill_id)))
-    entries = [entry for entry in entry_result.scalars().all() if (entry.extracted_summary or "").strip()]
+    entry_result = await db.execute(
+        select(ReportEntry, CommitteeReport)
+        .join(CommitteeReport, ReportEntry.report_ref == CommitteeReport.id)
+        .where(CommitteeReport.bill_ref == bill_id)
+    )
+    entries = []
+    for entry, report in entry_result.all():
+        conflicts = []
+        if report.bill_house and bill.bill_house and _house_key(report.bill_house) != _house_key(bill.bill_house):
+            conflicts.append("house")
+        if report.bill_number is not None and bill.bill_number is not None and report.bill_number != bill.bill_number:
+            conflicts.append("bill number")
+        if report.bill_year is not None and bill.bill_year is not None and report.bill_year != bill.bill_year:
+            conflicts.append("bill year")
+        if conflicts:
+            log.warning(
+                "Skipping committee report %s for bill %s because official reference conflicts on %s",
+                report.id, bill.id, ", ".join(conflicts),
+            )
+            continue
+        if (entry.extracted_summary or "").strip():
+            entries.append(entry)
     if not receipts or not entries:
         return []
 
