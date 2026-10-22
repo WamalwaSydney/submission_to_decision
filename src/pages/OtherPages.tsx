@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import { Download, FileText, BarChart3, Shield, AlertTriangle, Users, Eye, Clock, CheckCircle2, XCircle, Sparkles, Lock, Flag, Info, FileCheck2 } from 'lucide-react';
@@ -8,6 +8,7 @@ import {
   PieChart, Pie, Cell,
 } from 'recharts';
 import { Card, DisclaimerBox, InfoBox, Badge, Label, InputField } from '../components/UI';
+import { api } from '../api/endpoints';
 
 export function ResearchExportPage() {
   const { state, getSubmissionStatus, getBillOutcomes } = useApp();
@@ -533,6 +534,22 @@ export function RepresentativeDashboardPage() {
 
 export function MyReceiptsPage() {
   const { state, getSubmissionStatus } = useApp();
+  const [accountReceipts, setAccountReceipts] = useState<any[] | null>(null);
+  const [receiptsError, setReceiptsError] = useState('');
+
+  useEffect(() => {
+    if (!state.currentUser) return;
+    let cancelled = false;
+    api.myReceipts().then(result => {
+      if (!cancelled) {
+        setAccountReceipts(result.receipts);
+        setReceiptsError('');
+      }
+    }).catch(error => {
+      if (!cancelled) setReceiptsError(error instanceof Error ? error.message : 'Unable to load your saved receipts.');
+    });
+    return () => { cancelled = true; };
+  }, [state.currentUser?.id]);
 
   if (!state.currentUser) {
     return (
@@ -546,7 +563,7 @@ export function MyReceiptsPage() {
     );
   }
 
-  const myReceipts = state.receipts.filter(r => r.author_id === state.currentUser?.id);
+  const myReceipts = accountReceipts ?? state.receipts.filter(r => r.author_id === state.currentUser?.id);
 
   const statusMap: Record<string, any> = {
     'awaiting committee report': 'yellow',
@@ -567,6 +584,8 @@ export function MyReceiptsPage() {
       <p className="text-lg text-surface-600 leading-relaxed max-w-3xl mb-8">
         All receipts issued for your submissions.
       </p>
+
+      {receiptsError && <div role="alert" className="mb-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-800">Your receipts could not be refreshed from the server: {receiptsError}</div>}
 
       {myReceipts.length === 0 ? (
         <Card className="!p-12 relative overflow-hidden text-center">

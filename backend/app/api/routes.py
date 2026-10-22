@@ -590,7 +590,7 @@ async def get_pending_matches(
     current_user: User = Depends(require_role("reviewer")),
 ):
     matches = await linking_service.get_pending_matches(db)
-    return {"matches": matches}
+    return {"matches": [to_dict(match) for match in matches]}
 
 
 @router.post("/matches/{match_id}/confirm")

@@ -14,8 +14,10 @@ export function ReviewerQueuePage() {
   const [queueError, setQueueError] = useState('');
   const [decisionMatchId, setDecisionMatchId] = useState<string | null>(null);
   const [decisionError, setDecisionError] = useState('');
+  const [generatingBillId, setGeneratingBillId] = useState<string | null>(null);
   const pendingMatches = state.matches.filter(m => m.reviewer_decision === 'pending');
   const reviewedMatches = state.matches.filter(m => m.reviewer_decision !== 'pending');
+  const unmatchedReceipts = state.receipts.filter(receipt => !state.matches.some(match => match.receipt_ref === receipt.id));
 
   useEffect(() => {
     let cancelled = false;
@@ -69,6 +71,26 @@ export function ReviewerQueuePage() {
       }
     });
     setDecisionMatchId(null);
+  };
+
+  const generateForReceipt = async (billId: string) => {
+    setGeneratingBillId(billId);
+    setQueueError('');
+    try {
+      await api.generateMatches(billId);
+      const [snapshot, pending] = await Promise.all([api.bootstrap(), api.pendingMatches()]);
+      dispatch({ type: 'HYDRATE', payload: {
+        bills: snapshot.bills,
+        receipts: snapshot.receipts,
+        reports: snapshot.reports,
+        reportEntries: snapshot.report_entries,
+        matches: [...snapshot.matches.filter(match => match.reviewer_decision !== 'pending'), ...pending.matches],
+      } });
+    } catch (error) {
+      setQueueError(error instanceof Error ? error.message : 'Unable to generate match proposals.');
+    } finally {
+      setGeneratingBillId(null);
+    }
   };
 
   return (
@@ -220,6 +242,42 @@ export function ReviewerQueuePage() {
             </div>
           )}
         </div>
+      </Card>
+
+      <Card className="!p-7 md:!p-8 relative overflow-hidden mb-8">
+        <div className="inline-flex items-center gap-3 mb-5">
+          <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-warm-500 to-orange-600 flex items-center justify-center text-white shadow-md">
+            <Users className="h-5 w-5" />
+          </div>
+          <div>
+            <div className="text-xs font-black uppercase tracking-[0.18em] text-warm-700 mb-1">Submission Triage</div>
+            <h2 className="text-2xl font-black text-surface-900 tracking-tight">Submissions Without a Proposal ({unmatchedReceipts.length})</h2>
+          </div>
+        </div>
+        {unmatchedReceipts.length === 0 ? (
+          <p className="text-sm text-surface-500">Every visible submission has a match proposal or a recorded moderation decision.</p>
+        ) : (
+          <div className="space-y-3">
+            {unmatchedReceipts.map(receipt => {
+              const bill = state.bills.find(item => item.id === receipt.legislative_item_id);
+              const reportAvailable = state.reports.some(report => report.bill_ref === receipt.legislative_item_id);
+              return (
+                <div key={receipt.id} className="rounded-xl border border-surface-200 bg-white p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                  <div className="min-w-0">
+                    <p className="font-mono text-xs font-bold text-primary-700 mb-1">{receipt.public_id || receipt.id}</p>
+                    <p className="text-sm text-surface-800 leading-relaxed">{receipt.submission_text}</p>
+                    <p className="text-xs text-surface-500 mt-2">Bill: {bill?.title || 'Bill information unavailable'} · {reportAvailable ? 'Committee report available; no proposal is currently recorded.' : 'Awaiting a committee report.'}</p>
+                  </div>
+                  {reportAvailable && bill && (
+                    <button type="button" onClick={() => generateForReceipt(bill.id)} disabled={!state.currentUser || generatingBillId !== null} className="btn-secondary inline-flex min-h-10 shrink-0 items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-60">
+                      <Sparkles className="h-4 w-4" /> {generatingBillId === bill.id ? 'Scoring…' : 'Generate AI proposal'}
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </Card>
 
       <Card className="!p-7 md:!p-8 relative overflow-hidden">
