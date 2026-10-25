@@ -187,15 +187,24 @@ async def register(payload: RegisterRequest, db: AsyncSession = Depends(get_db))
     )
     db.add(user)
     await db.flush()
+    # Create the initial backup set at signup. Return raw codes only in this
+    # signup response; persist only their hashes for subsequent recovery.
+    recovery_codes = generate_recovery_codes()
+    user.recovery_codes_generated_at = datetime.now().astimezone()
+    db.add_all([
+        PasswordRecoveryCode(user_id=user.id, code_hash=digest_recovery_code(code))
+        for code in recovery_codes
+    ])
     await db.commit()
     await db.refresh(user)
     if payload.role == "committee_officer":
         return {
             "status": "pending_approval",
-            "message": f"Your request to access {committee.name} has been sent to the platform administrator. You can sign in after approval.",
+            "message": f"Your request to access {committee.name} has been sent for administrator approval. Save your recovery codes now; they will not be shown again.",
+            "recovery_codes": recovery_codes,
         }
     token = create_access_token({"sub": str(user.id), "ver": user.auth_version or 0})
-    response = {"access_token": token, "token_type": "bearer", "user": public_user(user)}
+    response = {"access_token": token, "token_type": "bearer", "user": public_user(user), "recovery_codes": recovery_codes}
     return response
 
 
