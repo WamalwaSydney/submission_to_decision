@@ -13,6 +13,7 @@ export interface RegisterResponse {
   user?: User;
   status?: 'pending_approval';
   message?: string;
+  recovery_codes?: string[];
 }
 export interface BootstrapResponse {
   bills: any[];

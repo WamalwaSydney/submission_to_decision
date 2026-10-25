@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Alert, Box, IconButton, InputAdornment, MenuItem, TextField, Typography } from '@mui/material';
-import { ArrowRight, Eye, EyeOff, LockKeyhole, UserRoundPlus } from 'lucide-react';
+import { ArrowRight, Copy, Download, Eye, EyeOff, LockKeyhole, UserRoundPlus } from 'lucide-react';
 import { Card } from '../components/UI';
 import { useApp } from '../context/AppContext';
 import { api } from '../api/endpoints';
@@ -27,6 +27,8 @@ export function SignupPage() {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [error, setError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
+  const [recoveryCodes, setRecoveryCodes] = useState<string[]>([]);
+  const [pendingApproval, setPendingApproval] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [committeesLoading, setCommitteesLoading] = useState(true);
   const [committeesError, setCommitteesError] = useState('');
@@ -59,8 +61,8 @@ export function SignupPage() {
       setError('Enter your name to create a profile.');
       return;
     }
-    if (password.length < 8) {
-      setError('Use a password with at least 8 characters.');
+    if (password.length < 12) {
+      setError('Use a password with at least 12 characters.');
       return;
     }
     if (password !== confirmPassword) {
@@ -78,15 +80,18 @@ export function SignupPage() {
         notification_language: notificationLanguage,
         ...(role === 'committee_officer' ? { committee_id: committeeId } : {}),
       });
+      if (!response.recovery_codes?.length) throw new Error('The recovery codes were not returned. Contact support before leaving this page.');
       if (response.status === 'pending_approval') {
-        setSuccessMessage(response.message || 'Your Clerk’s Office access request was sent for administrator approval. You can sign in after approval.');
+        setPendingApproval(true);
+        setSuccessMessage(response.message || 'Your access request is pending administrator approval. Save the recovery codes before leaving this page.');
+        setRecoveryCodes(response.recovery_codes);
         return;
       }
       if (!response.access_token || !response.user) throw new Error('The registration response was incomplete. Please try again.');
       localStorage.setItem('access_token', response.access_token);
       localStorage.setItem('current_user', JSON.stringify(response.user));
       dispatch({ type: 'SET_USER', payload: response.user });
-      navigate(response.user.recovery_codes_configured ? '/' : '/account-security');
+      setRecoveryCodes(response.recovery_codes);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to create the account.');
     } finally {
@@ -122,7 +127,18 @@ export function SignupPage() {
       </Box>
 
       <Card className="!p-5 sm:!p-7">
-        <Box component="form" onSubmit={handleSubmit} sx={{ display: 'grid', gap: 2 }}>
+        {recoveryCodes.length ? <Box sx={{ display: 'grid', gap: 2 }}>
+          <Alert severity="warning" role="alert">These ten one-time recovery codes were created with your account and are shown only now. Save them offline before continuing. We store only their hashes, so we cannot show them again.</Alert>
+          {successMessage && <Alert severity="success" role="status">{successMessage}</Alert>}
+          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 1, p: 2, border: '1px solid #d7e0e0', borderRadius: 2, background: '#f7faf9' }}>
+            {recoveryCodes.map((code, index) => <Box key={code} component="code" sx={{ fontFamily: 'monospace', fontWeight: 800, p: 1, background: '#fff', borderRadius: 1 }}>{String(index + 1).padStart(2, '0')}. {code}</Box>)}
+          </Box>
+          <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+            <button type="button" onClick={() => { const blob = new Blob([`Participation Trace recovery codes\n\n${recoveryCodes.join('\n')}\n\nEach code works once. Store securely offline.\n`], { type: 'text/plain' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'participation-trace-recovery-codes.txt'; a.click(); URL.revokeObjectURL(url); }} className="btn-secondary inline-flex items-center gap-2"><Download size={16} />Download codes</button>
+            <button type="button" onClick={() => void navigator.clipboard.writeText(recoveryCodes.join('\n'))} className="btn-secondary inline-flex items-center gap-2"><Copy size={16} />Copy codes</button>
+          </Box>
+          <button type="button" onClick={() => { setRecoveryCodes([]); if (pendingApproval) navigate('/signin'); else navigate('/'); }} className="btn-primary w-full !py-3">I saved these codes — continue</button>
+        </Box> : <Box component="form" onSubmit={handleSubmit} sx={{ display: 'grid', gap: 2 }}>
           {error && <Alert severity="error" role="alert">{error}</Alert>}
           {successMessage && <Alert severity="success" role="status">{successMessage} <Link to="/signin" className="font-bold underline">Go to sign in</Link>.</Alert>}
 
@@ -256,7 +272,7 @@ export function SignupPage() {
             {submitting ? 'Submitting...' : role === 'committee_officer' ? 'Request Clerk’s Office access' : 'Create account'}
             {!submitting && <ArrowRight className="h-4 w-4" />}
           </button>
-        </Box>
+        </Box>}
       </Card>
 
       <Typography sx={{ textAlign: 'center', mt: 2.5, color: '#526060', fontSize: 13 }}>
