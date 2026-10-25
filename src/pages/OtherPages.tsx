@@ -643,12 +643,12 @@ export function MyReceiptsPage() {
                       <p className="text-sm text-surface-800 leading-relaxed line-clamp-2">{receipt.submission_text}</p>
                     </div>
                     <div className="flex flex-wrap items-center gap-3 pt-3 border-t border-surface-100">
-                      <a
-                        href={`/receipt-lookup?id=${receipt.public_id}`}
+                      <Link
+                        to={`/receipt-lookup?id=${receipt.public_id}`}
                         className="btn-secondary inline-flex items-center gap-2 text-sm !py-2 !px-4"
                       >
                         <Eye className="h-4 w-4" /> View Details
-                      </a>
+                      </Link>
                       <span className="text-xs font-semibold text-surface-500 ml-auto flex items-center gap-1.5">
                         <FileCheck2 className="h-3.5 w-3.5" />
                         Lodging: <span className="font-bold text-surface-700">{receipt.lodging_status}</span>
