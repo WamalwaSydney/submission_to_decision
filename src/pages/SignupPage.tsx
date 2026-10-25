@@ -6,11 +6,13 @@ import { Card } from '../components/UI';
 import { useApp } from '../context/AppContext';
 import { api } from '../api/endpoints';
 
-type PublicSignupRole = 'citizen' | 'committee_officer';
+type PublicSignupRole = 'citizen' | 'committee_officer' | 'reviewer' | 'administrator';
 
 const ROLE_OPTIONS: { value: PublicSignupRole; label: string }[] = [
   { value: 'citizen', label: 'Citizen / public participant' },
-  { value: 'committee_officer', label: 'Committee Officer' },
+  { value: 'committee_officer', label: 'Clerk’s Office / Committee Secretariat' },
+  { value: 'reviewer', label: 'Moderator' },
+  { value: 'administrator', label: 'Administrator' },
 ];
 
 export function SignupPage() {
@@ -65,7 +67,7 @@ export function SignupPage() {
         ...(role === 'committee_officer' ? { committee_id: committeeId } : {}),
       });
       if (response.status === 'pending_approval') {
-        setSuccessMessage(response.message || 'Your committee access request was sent for administrator approval. You can sign in after approval.');
+        setSuccessMessage(response.message || 'Your Clerk’s Office access request was sent for administrator approval. You can sign in after approval.');
         return;
       }
       if (!response.access_token || !response.user) throw new Error('The registration response was incomplete. Please try again.');
@@ -158,7 +160,7 @@ export function SignupPage() {
           {role === 'committee_officer' && (
             <>
               <Alert severity="info" sx={{ borderRadius: '12px' }}>
-                Select the existing committee record synced from Parliament. An administrator must approve your officer access before you can sign in.
+                Select the existing committee record synced from Parliament. An administrator must approve your Clerk’s Office access before you can sign in.
               </Alert>
               <TextField
                 select
@@ -239,7 +241,7 @@ export function SignupPage() {
             disabled={submitting}
             className="btn-primary w-full inline-flex items-center justify-center gap-2 !py-3"
           >
-            {submitting ? 'Submitting...' : role === 'committee_officer' ? 'Request committee access' : 'Create account'}
+            {submitting ? 'Submitting...' : role === 'committee_officer' ? 'Request Clerk’s Office access' : 'Create account'}
             {!submitting && <ArrowRight className="h-4 w-4" />}
           </button>
         </Box>

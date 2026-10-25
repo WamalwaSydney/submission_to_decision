@@ -189,7 +189,7 @@ export function AdminPage() {
                           transition={{ duration: 0.35, delay: idx * 0.02 }}
                         >
                           <td className="role-management-user"><div className="flex items-center gap-3"><span className="role-management-avatar"><UserRound className="h-4 w-4" /></span><span><strong>{u.name}</strong><small>{u.email}</small></span></div></td>
-                          <td><select aria-label={`Set ${u.name} role`} className="input-field !py-2 !text-xs role-management-select" value={(userEdits[u.id]?.role ?? u.role)} onChange={event => handleUserEdit(u, 'role', event.target.value)}><option value="citizen">Citizen</option><option value="committee_officer">Committee officer</option><option value="reviewer">Reviewer</option><option value="administrator">Administrator</option></select></td>
+                          <td><select aria-label={`Set ${u.name} role`} className="input-field !py-2 !text-xs role-management-select" value={(userEdits[u.id]?.role ?? u.role)} onChange={event => handleUserEdit(u, 'role', event.target.value)}><option value="citizen">Citizen</option><option value="committee_officer">Clerk’s Office / Committee Secretariat</option><option value="reviewer">Moderator</option><option value="administrator">Administrator</option></select></td>
                           <td>{(userEdits[u.id]?.role ?? u.role) === 'committee_officer' ? (
                             <select aria-label={`Assign ${u.name} to committee`} className="input-field !py-2 !text-xs role-management-select min-w-48" value={userEdits[u.id]?.committee_id ?? u.committee_id ?? ''} onChange={event => handleUserEdit(u, 'committee_id', event.target.value)}><option value="">Select committee</option>{committeeDirectory.map(committee => <option key={committee.id} value={committee.id}>{committee.name}</option>)}</select>
                           ) : <span className="text-xs font-semibold text-surface-500">{committeeDirectory.find(committee => committee.id === u.committee_id)?.name || 'No committee'}</span>}</td>
@@ -247,7 +247,7 @@ export function AdminPage() {
 
       {activeTab === 'committees' && (
         <div className="space-y-6">
-          <Card className="!p-6"><h2 className="text-2xl font-black text-surface-900 mb-2">Create committee access</h2><p className="text-sm text-surface-600 mb-5">Administrators can create a committee record and its first officer account here.</p>
+          <Card className="!p-6"><h2 className="text-2xl font-black text-surface-900 mb-2">Create Clerk’s Office access</h2><p className="text-sm text-surface-600 mb-5">Administrators can create a committee record and its first Clerk’s Office account here.</p>
             <form onSubmit={handleCreateCommittee} className="grid gap-3 md:grid-cols-2">
               <input className="input-field" placeholder="Committee name" value={committeeForm.name} onChange={e => setCommitteeForm({ ...committeeForm, name: e.target.value })} required />
               <select className="input-field" value={committeeForm.institution} onChange={e => setCommitteeForm({ ...committeeForm, institution: e.target.value })}><option>National Assembly</option><option>Nairobi County Assembly</option><option>Trans Nzoia County Assembly</option></select>

@@ -43,11 +43,11 @@ export function CommitteeDashboardPage() {
     setBillFile(file);
   };
 
-  if (!isCommittee) return <Card><h1 className="text-2xl font-black">Committee area</h1><p className="mt-2">Sign in with a committee account to ingest and manage bills.</p></Card>;
+  if (!isCommittee) return <Card><h1 className="text-2xl font-black">Clerk’s Office area</h1><p className="mt-2">Sign in with a Clerk’s Office / Committee Secretariat account to ingest and manage bills.</p></Card>;
   return <div className="committee-dashboard space-y-7">
     <header className="committee-dashboard-hero">
       <div>
-        <span className="committee-dashboard-kicker">Committee workspace</span>
+        <span className="committee-dashboard-kicker">Clerk’s Office workspace</span>
         <h1>Committee dashboard</h1>
         <p>Publish bills and official documents so citizens can follow legislation and its participation trail.</p>
       </div>

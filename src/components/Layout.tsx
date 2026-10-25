@@ -347,7 +347,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
                       fontSize: 10,
                     }}
                   >
-                    {state.currentUser.role === 'reviewer' ? 'Moderator' : state.currentUser.role.replace(/_/g, ' ')}
+                    {state.currentUser.role === 'reviewer' ? 'Moderator' : state.currentUser.role === 'committee_officer' ? 'Clerk’s Office / Committee Secretariat' : state.currentUser.role.replace(/_/g, ' ')}
                   </Typography>
                 </Box>
                 <Avatar sx={{ width: 40, height: 40, fontSize: 14 }}>
@@ -471,7 +471,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
                     fontSize: 10,
                   }}
                 >
-                  {state.currentUser.role === 'reviewer' ? 'Moderator' : state.currentUser.role.replace(/_/g, ' ')}
+                  {state.currentUser.role === 'reviewer' ? 'Moderator' : state.currentUser.role === 'committee_officer' ? 'Clerk’s Office / Committee Secretariat' : state.currentUser.role.replace(/_/g, ' ')}
                 </Typography>
               </Box>
             </Box>

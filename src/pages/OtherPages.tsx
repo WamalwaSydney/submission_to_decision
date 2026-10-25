@@ -411,7 +411,7 @@ export function RepresentativeDashboardPage() {
           <Shield className="h-10 w-10 text-surface-400" />
         </div>
         <p className="text-lg font-semibold text-surface-700 mb-1">Sign in required</p>
-        <p className="text-surface-500">Sign in as a committee officer to view your dashboard.</p>
+        <p className="text-surface-500">Sign in through the Clerk’s Office / Committee Secretariat to view your dashboard.</p>
       </div>
     );
   }

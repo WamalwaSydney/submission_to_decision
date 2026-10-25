@@ -125,7 +125,7 @@ async def login(payload: LoginRequest, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=401, detail="Invalid email or password")
     if user.status != "active":
         if user.status == "pending_approval":
-            raise HTTPException(status_code=403, detail="Committee access request is pending administrator approval")
+            raise HTTPException(status_code=403, detail="Clerk’s Office access request is pending administrator approval")
         raise HTTPException(status_code=403, detail="Account is not active")
     token = create_access_token({"sub": str(user.id)})
     return {"access_token": token, "token_type": "bearer", "user": public_user(user)}
@@ -133,7 +133,7 @@ async def login(payload: LoginRequest, db: AsyncSession = Depends(get_db)):
 
 @router.post("/auth/register")
 async def register(payload: RegisterRequest, db: AsyncSession = Depends(get_db)):
-    allowed_roles = {"citizen", "committee_officer"}
+    allowed_roles = {"citizen", "committee_officer", "reviewer", "administrator"}
     if payload.role not in allowed_roles:
         raise HTTPException(status_code=400, detail="Unsupported account role")
     if len(payload.password) < 8:
@@ -218,7 +218,7 @@ async def update_user(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     if payload.role == "committee_officer" and not payload.committee_id:
-        raise HTTPException(status_code=422, detail="Committee officers must be linked to a committee")
+        raise HTTPException(status_code=422, detail="Clerk’s Office accounts must be linked to a committee")
     if payload.committee_id:
         committee_result = await db.execute(select(Committee).where(Committee.id == payload.committee_id, Committee.status == "active"))
         if not committee_result.scalar_one_or_none():
@@ -243,7 +243,7 @@ async def approve_committee_officer(
     user_result = await db.execute(select(User).where(User.id == user_id))
     user = user_result.scalar_one_or_none()
     if not user or user.role != "committee_officer":
-        raise HTTPException(status_code=404, detail="Committee officer request not found")
+        raise HTTPException(status_code=404, detail="Clerk’s Office access request not found")
     if user.status != "pending_approval":
         raise HTTPException(status_code=409, detail="This account is not awaiting approval")
     committee_id = payload.committee_id or user.committee_id
@@ -308,10 +308,10 @@ async def list_committees(db: AsyncSession = Depends(get_db)):
 @router.post("/committees")
 async def create_committee(payload: CommitteeCreate, db: AsyncSession = Depends(get_db), current_user: User = Depends(require_role("administrator"))):
     if len(payload.account_password) < 8:
-        raise HTTPException(status_code=422, detail="Committee account password must be at least 8 characters")
+        raise HTTPException(status_code=422, detail="Clerk’s Office account password must be at least 8 characters")
     existing = await db.execute(select(User).where(User.email == payload.account_email.strip().lower()))
     if existing.scalar_one_or_none():
-        raise HTTPException(status_code=409, detail="Committee account email already exists")
+        raise HTTPException(status_code=409, detail="Clerk’s Office account email already exists")
     committee = Committee(name=payload.name.strip(), institution=payload.institution.strip(), description=payload.description, contact_email=payload.contact_email, created_by=current_user.id)
     db.add(committee); await db.flush()
     account = User(name=payload.account_name.strip(), email=payload.account_email.strip().lower(), role="committee_officer", password_hash=get_password_hash(payload.account_password), committee_id=committee.id, status="active")
@@ -336,7 +336,7 @@ async def committee_ingest_bill(
     current_user: User = Depends(require_role("committee_officer")),
 ):
     if not current_user.committee_id:
-        raise HTTPException(status_code=409, detail="Committee account is not linked to a committee")
+        raise HTTPException(status_code=409, detail="Clerk’s Office account is not linked to a committee")
     clean_title = title.strip()
     clean_identifier = identifier.strip()
     if not clean_title or not clean_identifier:

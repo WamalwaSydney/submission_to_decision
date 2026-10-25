@@ -448,7 +448,7 @@ export function CommitteeOfficerIngestionPage() {
             <h3 className="font-bold text-surface-900 mb-1.5">Ingestion Pipeline</h3>
             <p className="text-sm text-surface-700 leading-relaxed">
               1. Upload PDF → 2. Try native text extraction (pdfplumber/PyMuPDF) → 3. If text layer is missing/insufficient, rasterize + Tesseract OCR → 
-              4. Parse into structured entries (clause ref, summary, treatment, reason) → 5. Committee Officer verifies completeness and formatting.
+              4. Parse into structured entries (clause ref, summary, treatment, reason) → 5. The Clerk’s Office verifies completeness and formatting.
             </p>
           </div>
         </div>

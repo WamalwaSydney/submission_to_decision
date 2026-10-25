@@ -175,7 +175,7 @@ export function ProfileDetailPage() {
 
   const handleClaim = async () => {
     if (!state.currentUser || state.currentUser.role !== 'committee_officer') {
-      alert('Only committee officer accounts can claim profiles. Please sign in as a representative.');
+      alert('Only Clerk’s Office / Committee Secretariat accounts can claim profiles. Please sign in as a representative.');
       return;
     }
     try {
@@ -374,7 +374,7 @@ export function ClaimProfilePage() {
       <InfoBox className="!p-5">
         <div className="flex items-start gap-3">
           <Shield className="h-5 w-5 text-primary-600 flex-shrink-0 mt-0.5" />
-          <p className="text-sm leading-relaxed">Only committee officers can request a claim. Profile details remain public, and claims stay pending until an administrator verifies the office, jurisdiction, and contact channels.</p>
+              <p className="text-sm leading-relaxed">Only Clerk’s Office / Committee Secretariat accounts can request a claim. Profile details remain public, and claims stay pending until an administrator verifies the office, jurisdiction, and contact channels.</p>
         </div>
       </InfoBox>
 
@@ -383,7 +383,7 @@ export function ClaimProfilePage() {
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <div>
               <h2 className="text-xl font-black text-surface-900 mb-1">Representative sign-in required</h2>
-              <p className="text-sm text-surface-600">Sign in with a committee officer account to submit a profile claim.</p>
+              <p className="text-sm text-surface-600">Sign in with a Clerk’s Office / Committee Secretariat account to submit a profile claim.</p>
             </div>
             <Link to="/signin" className="btn-primary inline-flex items-center gap-2 self-start sm:self-auto"><ArrowRight className="h-4 w-4" /> Sign in</Link>
           </div>
