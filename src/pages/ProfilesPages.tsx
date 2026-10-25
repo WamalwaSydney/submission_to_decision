@@ -265,7 +265,6 @@ export function ProfileDetailPage() {
               <p className="text-sm text-surface-600 leading-relaxed">
                 {profile.profile_label === 'unclaimed' && 'Built from public institutional data. Not yet claimed by the office holder.'}
                 {profile.profile_label === 'verified' && 'Claimed and verified by an administrator.'}
-                {profile.profile_label === 'simulated' && 'This is a demo/simulated profile for testing.'}
                 {profile.profile_label === 'pilot' && 'This is a verified profile in a participating area.'}
               </p>
             </div>

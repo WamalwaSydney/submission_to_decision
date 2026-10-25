@@ -48,7 +48,7 @@ export function SubmitViewPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!state.currentUser) {
-      alert('Please sign in to submit a view. (Demo: sign in from the header.)');
+      alert('Please sign in to submit a view.');
       return;
     }
     if (!selectedBill || !submissionText.trim()) return;
@@ -353,7 +353,7 @@ export function SubmitViewPage() {
             <Link to="/signin" className="underline decoration-primary-400 decoration-2 hover:text-primary-800 font-black">
               Sign in
             </Link>
-            {' '}to submit a view. (Demo accounts are available on the sign-in page.)
+            {' '}to submit a view.
           </div>
         </DisclaimerBox>
       )}
@@ -377,7 +377,7 @@ export function SubmitViewPage() {
               <option value="">Select a bill...</option>
               {state.bills.map(bill => (
                 <option key={bill.id} value={bill.id}>
-                  {bill.title} ({bill.institution}) {bill.is_simulated ? '[SIMULATED]' : ''}
+                  {bill.title} ({bill.institution})
                 </option>
               ))}
             </select>

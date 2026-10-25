@@ -187,7 +187,7 @@ export function ReceiptLookupPage() {
                       <span className="font-mono text-xs font-bold text-surface-500 bg-surface-100 px-2 py-0.5 rounded-md border border-surface-200">
                         {bill.identifier}
                       </span>
-                      {bill.is_simulated && <Badge variant="gray" className="!text-[10px]">SIMULATED</Badge>}
+                      
                     </div>
                   </div>
 

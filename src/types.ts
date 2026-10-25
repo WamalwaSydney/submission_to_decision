@@ -13,7 +13,7 @@ export type RepresentativeStatus =
   | 'verified and active'
   | 'verified but inactive';
 
-export type ProfileLabel = 'verified' | 'pilot' | 'simulated' | 'unclaimed';
+export type ProfileLabel = 'verified' | 'pilot' | 'unclaimed';
 
 export type ExtractionStatus = 
   | 'pending'
@@ -52,6 +52,7 @@ export interface User {
   committee_id?: string;
   notification_language?: 'en' | 'sw';
   created_date: string;
+  recovery_codes_configured?: boolean;
 }
 
 export interface Committee {

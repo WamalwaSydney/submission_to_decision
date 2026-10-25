@@ -1,5 +1,5 @@
 import { ParticipationReceipt, ChainVerificationResult } from '../types';
-import { GENESIS_HASH } from '../data/seed';
+export const GENESIS_HASH = '0000000000000000000000000000000000000000000000000000000000000000';
 
 // SHA-256 hash using Web Crypto API
 export async function computeSHA256(data: string): Promise<string> {
@@ -36,12 +36,13 @@ export async function computeReceiptHash(receipt: Omit<ParticipationReceipt, 'ha
 
 // Verify the entire chain
 export async function verifyChain(receipts: ParticipationReceipt[]): Promise<ChainVerificationResult> {
+  const ordered = [...receipts].sort((a, b) => a.timestamp.localeCompare(b.timestamp) || a.id.localeCompare(b.id));
   const details: ChainVerificationResult['details'] = [];
   let firstBrokenIndex: number | undefined;
 
-  for (let i = 0; i < receipts.length; i++) {
-    const receipt = receipts[i];
-    const expectedPreviousHash = i === 0 ? GENESIS_HASH : receipts[i - 1].hash;
+  for (let i = 0; i < ordered.length; i++) {
+    const receipt = ordered[i];
+    const expectedPreviousHash = i === 0 ? GENESIS_HASH : ordered[i - 1].hash;
     
     const expectedHash = await computeReceiptHash({
       id: receipt.id,
@@ -73,7 +74,7 @@ export async function verifyChain(receipts: ParticipationReceipt[]): Promise<Cha
   return {
     valid: firstBrokenIndex === undefined,
     firstBrokenIndex,
-    totalChecked: receipts.length,
+    totalChecked: ordered.length,
     details,
   };
 }

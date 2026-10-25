@@ -7,6 +7,8 @@ import { BillsListPage, BillPage } from './pages/BillsPages';
 import { ReceiptLookupPage, ReceiptVerifyPage } from './pages/ReceiptPages';
 import { SubmitViewPage } from './pages/SubmitViewPage';
 import { LoginPage } from './pages/LoginPage';
+import { ResetPasswordPage } from './pages/ResetPasswordPage';
+import { AccountSecurityPage } from './pages/AccountSecurityPage';
 import { NoticesPage } from './pages/NoticesPage';
 import { SignupPage } from './pages/SignupPage';
 import { ReviewerQueuePage, ReportedContentPage } from './pages/ModeratorPages';
@@ -80,6 +82,8 @@ function AppRoutes() {
         <Route path="/login" element={<LoginPage />} />
         <Route path="/signin" element={<LoginPage />} />
         <Route path="/signup" element={<SignupPage />} />
+        <Route path="/reset-password" element={<ResetPasswordPage />} />
+        <Route path="/account-security" element={<AccountSecurityPage />} />
         <Route path="/notices" element={<NoticesPage />} />
         <Route path="/my-receipts" element={<MyReceiptsPage />} />
         

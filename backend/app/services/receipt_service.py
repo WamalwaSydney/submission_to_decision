@@ -3,7 +3,7 @@
 import hashlib
 import json
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, text
@@ -58,7 +58,7 @@ async def create_receipt(
     
     # Allocate the primary key before flush so the complete hash payload can
     # be computed before PostgreSQL validates the NOT NULL hash column.
-    timestamp = datetime.utcnow()
+    timestamp = datetime.now(timezone.utc)
     receipt_id = uuid.uuid4()
     hash_payload = {
         "id": receipt_id,
@@ -113,9 +113,10 @@ async def verify_chain(db: AsyncSession) -> dict:
     
     for i, row in enumerate(receipts):
         expected_previous = GENESIS_HASH if i == 0 else receipts[i-1].hash
+        expected_sequence = i + 1
         
         # Recompute hash
-        expected_hash = compute_receipt_hash({
+        hash_payload = {
             "id": row.id,
             "author_id": row.author_id,
             "legislative_item_id": row.legislative_item_id,
@@ -123,9 +124,18 @@ async def verify_chain(db: AsyncSession) -> dict:
             "submission_text": row.submission_text,
             "timestamp": row.timestamp,
             "previous_hash": expected_previous,
-        })
+        }
+        expected_hash = compute_receipt_hash(hash_payload)
+        # Older records were hashed with naive UTC datetimes before insertion;
+        # PostgreSQL returns those values as timezone-aware UTC. Verify the old
+        # canonical representation as a read-only compatibility fallback.
+        legacy_hash = None
+        if row.timestamp.tzinfo is not None:
+            legacy_hash = compute_receipt_hash({**hash_payload, "timestamp": row.timestamp.replace(tzinfo=None)})
         
-        valid = row.hash == expected_hash and row.previous_hash == expected_previous
+        valid = (row.hash in {expected_hash, legacy_hash} and row.previous_hash == expected_previous
+                 and row.chain_sequence == expected_sequence
+                 and len(row.hash or "") == 64 and len(row.previous_hash or "") == 64)
         
         details.append({
             "index": i,
@@ -133,6 +143,8 @@ async def verify_chain(db: AsyncSession) -> dict:
             "valid": valid,
             "expected_hash": expected_hash,
             "actual_hash": row.hash,
+            "sequence": row.chain_sequence,
+            "expected_sequence": expected_sequence,
         })
         
         if not valid and first_broken is None:

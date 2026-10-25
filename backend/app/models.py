@@ -35,6 +35,8 @@ class User(Base):
     status = Column(String(20), default="active")
     committee_id = Column(UUID(as_uuid=True), ForeignKey("committees.id"))
     created_date = Column(DateTime(timezone=True), server_default=func.now())
+    auth_version = Column(Integer, nullable=False, default=0, server_default="0")
+    recovery_codes_generated_at = Column(DateTime(timezone=True), nullable=True)
 
     receipts = relationship("ParticipationReceipt", back_populates="author")
     committee = relationship("Committee", foreign_keys=[committee_id], back_populates="users")
@@ -231,3 +233,24 @@ class AuditLog(Base):
     details = Column(Text, nullable=False)
     actor_id = Column(UUID(as_uuid=True), ForeignKey("users.id"))
     timestamp = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class PasswordResetToken(Base):
+    __tablename__ = "password_reset_tokens"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    token_hash = Column(String(64), nullable=False, unique=True)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    used_at = Column(DateTime(timezone=True))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class PasswordRecoveryCode(Base):
+    __tablename__ = "password_recovery_codes"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    code_hash = Column(String(64), nullable=False, unique=True)
+    used_at = Column(DateTime(timezone=True))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())

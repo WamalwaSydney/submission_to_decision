@@ -25,7 +25,7 @@ export function LoginPage() {
       localStorage.setItem('access_token', response.access_token);
       localStorage.setItem('current_user', JSON.stringify(response.user));
       dispatch({ type: 'SET_USER', payload: response.user });
-      navigate('/');
+      navigate(response.user.recovery_codes_configured ? '/' : '/account-security');
     } catch (error) {
       setError(error instanceof Error ? error.message : 'Unable to sign in.');
     }
@@ -92,6 +92,9 @@ export function LoginPage() {
             </button>
           </Box>
 
+          <Typography sx={{ textAlign: 'center', mt: 2, fontSize: 13 }}>
+            <Link to="/reset-password" className="font-bold text-primary-700 hover:text-primary-800">Forgot your password?</Link>
+          </Typography>
           <Divider sx={{ my: 2.5, color: '#778181', fontSize: 12 }}>or</Divider>
           <Typography sx={{ textAlign: 'center', color: '#526060', fontSize: 13 }}>
             New to the platform? <Link to="/signup" className="font-extrabold text-primary-700 hover:text-primary-800">Create an account</Link>

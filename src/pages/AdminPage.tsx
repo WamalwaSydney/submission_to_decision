@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { api } from '../api/endpoints';
-import { Shield, Users, Download, Settings, AlertTriangle, Info, Upload, Gauge, ChevronLeft, ChevronRight, Save, UserRound } from 'lucide-react';
+import { Shield, Users, Download, Settings, AlertTriangle, Info, Upload, Gauge, ChevronLeft, ChevronRight, Save, UserRound, KeyRound, Copy } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { Badge, DisclaimerBox, InfoBox, Card } from '../components/UI';
 
@@ -13,6 +13,8 @@ export function AdminPage() {
   const [userMessage, setUserMessage] = useState('');
   const [committeeDirectory, setCommitteeDirectory] = useState(state.committees);
   const [savingUserId, setSavingUserId] = useState<string | null>(null);
+  const [resetCode, setResetCode] = useState<{ userId: string; userName: string; link: string; expiresAt: string } | null>(null);
+  const [issuingReset, setIssuingReset] = useState<string | null>(null);
   const [userEdits, setUserEdits] = useState<Record<string, { role: any; status: any; committee_id: string }>>({});
   const [committeeForm, setCommitteeForm] = useState({ name: '', institution: 'National Assembly', description: '', contact_email: '', account_name: '', account_email: '', account_password: '' });
   const [committeeMessage, setCommitteeMessage] = useState('');
@@ -32,7 +34,7 @@ export function AdminPage() {
         }
       })
       .catch(() => {
-        // Keep the seeded/local registry visible if the protected request fails.
+        // The live registry remains empty when the protected request fails.
       });
     return () => { cancelled = true; };
   }, [activeTab, state.currentUser?.role]);
@@ -58,6 +60,19 @@ export function AdminPage() {
       setUserMessage(`${user.name}'s account was updated.`);
     } catch (error) { setUserMessage(error instanceof Error ? error.message : 'Unable to update this account.'); }
     finally { setSavingUserId(null); }
+  };
+
+  const handleIssuePasswordReset = async (user: any) => {
+    const confirmed = window.confirm(`Only continue after verifying ${user.name}'s identity through a trusted, independent channel. Generate a single-use password recovery code?`);
+    if (!confirmed) return;
+    setIssuingReset(user.id); setUserMessage(''); setResetCode(null);
+    try {
+      const result = await api.issuePasswordReset(user.id);
+      const link = `${window.location.origin}${window.location.pathname}#/reset-password?token=${encodeURIComponent(result.reset_code)}`;
+      setResetCode({ userId: user.id, userName: user.name, link, expiresAt: result.expires_at });
+      setUserMessage(`A one-time recovery link for ${user.name} was generated. Copy it now and deliver it only through the verified channel.`);
+    } catch (error) { setUserMessage(error instanceof Error ? error.message : 'Unable to issue a recovery code.'); }
+    finally { setIssuingReset(null); }
   };
 
   const handleCreateCommittee = async (event: React.FormEvent) => {
@@ -195,13 +210,14 @@ export function AdminPage() {
                           ) : <span className="text-xs font-semibold text-surface-500">{committeeDirectory.find(committee => committee.id === u.committee_id)?.name || 'No committee'}</span>}</td>
                           <td><select aria-label={`Set ${u.name} status`} className="input-field !py-2 !text-xs role-management-select" value={(userEdits[u.id]?.status ?? u.status)} onChange={event => handleUserEdit(u, 'status', event.target.value)}><option value="active">Active</option><option value="suspended">Suspended</option><option value="pending_approval">Pending approval</option></select></td>
                           <td className="text-xs font-semibold text-surface-500 whitespace-nowrap">{new Date(u.created_date).toLocaleDateString()}</td>
-                          <td><button type="button" onClick={() => handleSaveUser(u)} disabled={savingUserId !== null || !userEdits[u.id]} className="role-management-save btn-primary !px-3 !py-2 text-xs disabled:opacity-50"><Save className="h-3.5 w-3.5" />{savingUserId === u.id ? 'Saving…' : 'Save'}</button></td>
+                          <td><div className="flex flex-col gap-2 items-start"><button type="button" onClick={() => handleSaveUser(u)} disabled={savingUserId !== null || !userEdits[u.id]} className="role-management-save btn-primary !px-3 !py-2 text-xs disabled:opacity-50"><Save className="h-3.5 w-3.5" />{savingUserId === u.id ? 'Saving…' : 'Save'}</button><button type="button" onClick={() => handleIssuePasswordReset(u)} disabled={issuingReset !== null || u.status !== 'active'} className="inline-flex items-center gap-1 rounded-lg border border-amber-300 bg-amber-50 px-2 py-1.5 text-xs font-bold text-amber-900 disabled:opacity-50" title="Verify identity first; code is shown once"><KeyRound className="h-3.5 w-3.5" />{issuingReset === u.id ? 'Creating…' : 'Recovery link'}</button></div></td>
                         </motion.tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
                 {userMessage && <p role="status" className="mt-4 text-sm font-semibold text-primary-700">{userMessage}</p>}
+                {resetCode && <div className="mt-4 rounded-xl border border-amber-300 bg-amber-50 p-4" role="alert"><p className="font-bold text-amber-950">One-time password recovery link for {resetCode.userName}</p><p className="mt-1 text-xs text-amber-900">Expires {new Date(resetCode.expiresAt).toLocaleString()}. It is shown only once. Deliver it only after independent identity verification; do not send it to the account email unless that channel was verified separately.</p><div className="mt-3 flex flex-col gap-2 sm:flex-row"><input aria-label="One-time recovery link" readOnly value={resetCode.link} className="input-field min-w-0 flex-1 text-xs" /><button type="button" onClick={() => void navigator.clipboard.writeText(resetCode.link)} className="inline-flex items-center justify-center gap-2 rounded-lg bg-amber-900 px-3 py-2 text-xs font-bold text-white"><Copy className="h-3.5 w-3.5" />Copy link</button></div></div>}
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mt-5 pt-4 border-t border-surface-200">
                   <p className="text-xs font-semibold text-surface-500">
                     Showing {adminUsers.length === 0 ? 0 : (userPage - 1) * usersPerPage + 1}–{Math.min(userPage * usersPerPage, adminUsers.length)} of {adminUsers.length} users

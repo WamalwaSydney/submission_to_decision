@@ -5,10 +5,6 @@ import {
   ModerationAction, AuditLogEntry, UserRole, SubmissionStatus,
   RepresentativeStatus, ReviewerDecision, LodgingStatus, Committee
 } from '../types';
-import {
-  seedUsers, seedBills, seedReceipts, seedReports, seedReportEntries,
-  seedMatches, seedNotices, seedProfiles, seedModerationActions, seedAuditLog, seedCommittees
-} from '../data/seed';
 import { api } from '../api/endpoints';
 
 interface AppState {
@@ -51,17 +47,17 @@ type Action =
   | { type: 'UPDATE_REPORT_ENTRY'; payload: { entryId: string; treatment: SubmissionStatus; stated_reason?: string } };
 
 const initialState: AppState = {
-  users: seedUsers,
-  committees: seedCommittees,
-  bills: seedBills,
-  receipts: seedReceipts,
-  reports: seedReports,
-  reportEntries: seedReportEntries,
-  matches: seedMatches,
-  notices: seedNotices,
-  profiles: seedProfiles,
-  moderationActions: seedModerationActions,
-  auditLog: seedAuditLog,
+  users: [],
+  committees: [],
+  bills: [],
+  receipts: [],
+  reports: [],
+  reportEntries: [],
+  matches: [],
+  notices: [],
+  profiles: [],
+  moderationActions: [],
+  auditLog: [],
   currentUser: null,
   isOnline: true,
   isLoading: true,
@@ -174,11 +170,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     api.bootstrap().then(data => {
       if (cancelled) return;
       dispatch({ type: 'HYDRATE', payload: {
-        // Keep the bundled demo bills available when the API is reachable but
-        // has not been seeded yet. This is especially important for clerk
-        // report ingestion, which must always have a bill to attach to.
-        bills: data.bills.length > 0 ? data.bills : seedBills,
-        committees: data.committees?.length ? data.committees : seedCommittees,
+        bills: data.bills,
+        committees: data.committees || [],
         receipts: data.receipts,
         reports: data.reports,
         reportEntries: data.report_entries,

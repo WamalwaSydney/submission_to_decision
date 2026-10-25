@@ -1,6 +1,6 @@
 import React from 'react';
 import { useApp } from '../context/AppContext';
-import { getDaysOfNotice, getWindowLength } from '../data/seed';
+import { getDaysOfNotice, getWindowLength } from '../utils/noticeDates';
 import { Link } from 'react-router-dom';
 import { Clock, Download, AlertTriangle, Info, FileText } from 'lucide-react';
 import { motion } from 'framer-motion';

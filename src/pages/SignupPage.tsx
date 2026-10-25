@@ -11,8 +11,6 @@ type PublicSignupRole = 'citizen' | 'committee_officer' | 'reviewer' | 'administ
 const ROLE_OPTIONS: { value: PublicSignupRole; label: string }[] = [
   { value: 'citizen', label: 'Citizen / public participant' },
   { value: 'committee_officer', label: 'Clerk’s Office / Committee Secretariat' },
-  { value: 'reviewer', label: 'Moderator' },
-  { value: 'administrator', label: 'Administrator' },
 ];
 
 export function SignupPage() {
@@ -30,11 +28,25 @@ export function SignupPage() {
   const [error, setError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [committeesLoading, setCommitteesLoading] = useState(true);
+  const [committeesError, setCommitteesError] = useState('');
 
   useEffect(() => {
-    if (state.committees.length) return;
-    api.committees().then(({ committees }) => dispatch({ type: 'HYDRATE', payload: { committees } })).catch(() => {});
-  }, [dispatch, state.committees.length]);
+    let cancelled = false;
+    setCommitteesLoading(true);
+    setCommitteesError('');
+    api.committees()
+      .then(({ committees }) => {
+        if (!cancelled) dispatch({ type: 'HYDRATE', payload: { committees } });
+      })
+      .catch(error => {
+        if (!cancelled) setCommitteesError(error instanceof Error ? error.message : 'Unable to load synced committees.');
+      })
+      .finally(() => {
+        if (!cancelled) setCommitteesLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [dispatch]);
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -74,7 +86,7 @@ export function SignupPage() {
       localStorage.setItem('access_token', response.access_token);
       localStorage.setItem('current_user', JSON.stringify(response.user));
       dispatch({ type: 'SET_USER', payload: response.user });
-      navigate('/');
+      navigate(response.user.recovery_codes_configured ? '/' : '/account-security');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to create the account.');
     } finally {
@@ -169,9 +181,9 @@ export function SignupPage() {
                 onChange={event => setCommitteeId(event.target.value)}
                 required
                 fullWidth
-                helperText={state.committees.length ? 'Your account will only access this committee’s workspace.' : 'No synced committees are available yet.'}
+                helperText={committeesLoading ? 'Loading synced committees from Parliament…' : committeesError ? committeesError : state.committees.length ? 'Your account will only access this committee’s workspace.' : 'No synced committees are available yet.'}
               >
-                <MenuItem value="">Select a committee</MenuItem>
+                <MenuItem value="">{committeesLoading ? 'Loading synced committees…' : 'Select a committee'}</MenuItem>
                 {state.committees.map(committee => <MenuItem key={committee.id} value={committee.id}>{committee.name} — {committee.institution}</MenuItem>)}
               </TextField>
             </>
@@ -185,7 +197,7 @@ export function SignupPage() {
             required
             fullWidth
             autoComplete="new-password"
-            helperText="At least 8 characters. It will be sent securely to the API."
+            helperText="At least 12 characters (maximum 128). Choose a unique password."
             slotProps={{
               input: {
                 endAdornment: (

@@ -10,7 +10,15 @@ DATABASE_URL = os.getenv(
     "postgresql+asyncpg://postgres:postgres@localhost:5432/participation_platform",
 )
 
-engine = create_async_engine(DATABASE_URL, echo=False)
+# Neon and other hosted PostgreSQL services may close idle TCP connections
+# while SQLAlchemy still has them in its pool. Validate a connection before
+# reuse and recycle older pooled connections before the provider does.
+engine = create_async_engine(
+    DATABASE_URL,
+    echo=False,
+    pool_pre_ping=True,
+    pool_recycle=300,
+)
 async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 Base = declarative_base()

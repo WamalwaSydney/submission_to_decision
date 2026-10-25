@@ -373,7 +373,7 @@ export function CommitteeOfficerIngestionPage() {
                         <span className="px-2.5 py-1 rounded-lg bg-surface-50 border border-surface-100">Tabled: {report.date_tabled}</span>
                         <span className="px-2.5 py-1 rounded-lg bg-surface-50 border border-surface-100">{extractionLabel[report.extraction_status] || 'Text extraction in progress'}</span>
                         {report.ocr_used && <Badge variant="blue" className="!text-[10px]">OCR used</Badge>}
-                        {report.is_simulated && <Badge variant="gray" className="!text-[10px]">SIMULATED</Badge>}
+                        
                         <span className="px-2.5 py-1 rounded-lg bg-primary-50 text-primary-700 border border-primary-100">{entries.length} entries</span>
                       </div>
 

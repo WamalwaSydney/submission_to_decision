@@ -17,6 +17,7 @@ rapidfuzz==3.5.2
 python-dateutil==2.8.2
 pydantic>=2.5.2,<3.0.0
 pydantic-settings>=2.1.0,<3.0.0
+email-validator>=2.1.0,<3.0.0
 
 # Testing
 pytest==7.4.3

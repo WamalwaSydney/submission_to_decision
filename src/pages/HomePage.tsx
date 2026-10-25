@@ -410,7 +410,7 @@ export function HomePage() {
                 gap: { xs: 3, md: 5 },
               }}
             >
-              <StatCard icon={<FileText size={24} />} value={totalBills} label="Bills Tracked" tone="primary" badge="Simulated Data" />
+              <StatCard icon={<FileText size={24} />} value={totalBills} label="Bills Tracked" tone="primary" />
               <StatCard icon={<CheckCircle2 size={24} />} value={totalReceipts} label="Receipts Issued" tone="accent" />
               <StatCard icon={<BarChart3 size={24} />} value={confirmedMatches} label="Confirmed Matches" tone="warm" />
             </Box>

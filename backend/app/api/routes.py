@@ -11,8 +11,8 @@ from urllib.parse import urlparse
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFile, File, Form
 from fastapi.responses import FileResponse, RedirectResponse
-from pydantic import BaseModel
-from sqlalchemy import select, inspect as sa_inspect
+from pydantic import BaseModel, EmailStr, Field
+from sqlalchemy import select, update, inspect as sa_inspect
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db, async_session
@@ -20,12 +20,15 @@ from app.auth import get_current_user, require_role, verify_password, get_passwo
 from app.models import (
     User, Committee, LegislativeItem, ParticipationReceipt, Message,
     CommitteeReport, ReportEntry, SubmissionMatch, RepresentativeProfile, NoticeRecord,
-    ModerationAction,
+    ModerationAction, PasswordRecoveryCode,
 )
 from app.services import receipt_service, linking_service, ingestion_service, storage_service, notification_service
 from app.audit import record_audit
+from app.password_reset import issue_reset, consume_reset
+from app.recovery_codes import generate_recovery_codes, digest_recovery_code
 
 router = APIRouter()
+PUBLIC_SIGNUP_ROLES = {"citizen", "committee_officer"}
 log = logging.getLogger(__name__)
 _scheduled_report_bills: set[str] = set()
 
@@ -53,17 +56,32 @@ async def _extract_and_match_uploaded_report(report_id: UUID, bill_id: UUID) -> 
 
 
 class LoginRequest(BaseModel):
-    email: str
-    password: str
+    email: EmailStr
+    password: str = Field(min_length=1, max_length=128)
 
 
 class RegisterRequest(BaseModel):
-    name: str
-    email: str
-    password: str
+    name: str = Field(min_length=1, max_length=255)
+    email: EmailStr
+    password: str = Field(min_length=12, max_length=128)
     role: str = "citizen"
     committee_id: Optional[UUID] = None
     notification_language: str = "en"
+
+
+class PasswordResetComplete(BaseModel):
+    token: str = Field(min_length=32, max_length=256)
+    password: str = Field(min_length=12, max_length=128)
+
+
+class PasswordRecoveryCodeRequest(BaseModel):
+    email: EmailStr
+    recovery_code: str = Field(min_length=32, max_length=32, pattern=r"^[a-f0-9]{32}$")
+    password: str = Field(min_length=12, max_length=128)
+
+
+class RecoveryCodeGenerationRequest(BaseModel):
+    current_password: str = Field(min_length=1, max_length=128)
 
 
 class CommitteeCreate(BaseModel):
@@ -112,6 +130,7 @@ def public_user(user: User) -> dict:
         "committee_id": str(user.committee_id) if user.committee_id else None,
         "created_date": user.created_date,
         "notification_language": ((user.privacy_prefs or {}).get("notification_language", "en")),
+        "recovery_codes_configured": user.recovery_codes_generated_at is not None,
     }
 
 
@@ -127,17 +146,14 @@ async def login(payload: LoginRequest, db: AsyncSession = Depends(get_db)):
         if user.status == "pending_approval":
             raise HTTPException(status_code=403, detail="Clerk’s Office access request is pending administrator approval")
         raise HTTPException(status_code=403, detail="Account is not active")
-    token = create_access_token({"sub": str(user.id)})
+    token = create_access_token({"sub": str(user.id), "ver": user.auth_version or 0})
     return {"access_token": token, "token_type": "bearer", "user": public_user(user)}
 
 
 @router.post("/auth/register")
 async def register(payload: RegisterRequest, db: AsyncSession = Depends(get_db)):
-    allowed_roles = {"citizen", "committee_officer", "reviewer", "administrator"}
-    if payload.role not in allowed_roles:
-        raise HTTPException(status_code=400, detail="Unsupported account role")
-    if len(payload.password) < 8:
-        raise HTTPException(status_code=422, detail="Password must be at least 8 characters")
+    if payload.role not in PUBLIC_SIGNUP_ROLES:
+        raise HTTPException(status_code=403, detail="This account type requires an administrator invitation or approval")
     name = payload.name.strip()
     if not name:
         raise HTTPException(status_code=422, detail="Name is required")
@@ -178,9 +194,126 @@ async def register(payload: RegisterRequest, db: AsyncSession = Depends(get_db))
             "status": "pending_approval",
             "message": f"Your request to access {committee.name} has been sent to the platform administrator. You can sign in after approval.",
         }
-    token = create_access_token({"sub": str(user.id)})
+    token = create_access_token({"sub": str(user.id), "ver": user.auth_version or 0})
     response = {"access_token": token, "token_type": "bearer", "user": public_user(user)}
     return response
+
+
+@router.post("/auth/recovery-codes")
+async def generate_recovery_codes(
+    payload: RecoveryCodeGenerationRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if not verify_password(payload.current_password, current_user.password_hash):
+        raise HTTPException(status_code=401, detail="Current password is incorrect")
+    lock_result = await db.execute(
+        select(User.id).where(User.id == current_user.id).with_for_update()
+    )
+    if lock_result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=401, detail="Account is no longer available")
+    codes = generate_recovery_codes()
+    now = datetime.now().astimezone()
+    # Rotation invalidates prior unspent codes. A recovery-code bundle is shown only once.
+    await db.execute(
+        update(PasswordRecoveryCode)
+        .where(PasswordRecoveryCode.user_id == current_user.id, PasswordRecoveryCode.used_at.is_(None))
+        .values(used_at=now)
+    )
+    db.add_all([
+        PasswordRecoveryCode(user_id=current_user.id, code_hash=digest_recovery_code(code))
+        for code in codes
+    ])
+    current_user.recovery_codes_generated_at = now
+    await record_audit(
+        db, entity_type="user", entity_id=current_user.id,
+        action="password_recovery_codes_rotated", actor_id=current_user.id,
+        details={"code_count": len(codes)},
+    )
+    await db.commit()
+    return {"recovery_codes": codes, "message": "Save these codes offline. They will not be shown again."}
+
+
+@router.post("/auth/password-reset/recovery-code")
+async def reset_password_with_recovery_code(
+    payload: PasswordRecoveryCodeRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    email = str(payload.email).strip().lower()
+    user_result = await db.execute(
+        select(User).where(User.email == email, User.status == "active").with_for_update()
+    )
+    user = user_result.scalar_one_or_none()
+    code_hash = digest_recovery_code(payload.recovery_code)
+    code_result = None
+    if user:
+        code_result = await db.execute(
+            select(PasswordRecoveryCode).where(
+                PasswordRecoveryCode.user_id == user.id,
+                PasswordRecoveryCode.code_hash == code_hash,
+                PasswordRecoveryCode.used_at.is_(None),
+            ).with_for_update()
+        )
+    recovery_code = code_result.scalar_one_or_none() if code_result is not None else None
+    if user is None or recovery_code is None:
+        raise HTTPException(status_code=400, detail="Account details or recovery code are invalid")
+    now = datetime.now().astimezone()
+    user.password_hash = get_password_hash(payload.password)
+    user.auth_version = (user.auth_version or 0) + 1
+    user.recovery_codes_generated_at = None
+    # Consume the supplied code and revoke the rest of this bundle; require
+    # fresh authenticated enrollment before another recovery can be performed.
+    await db.execute(
+        update(PasswordRecoveryCode)
+        .where(PasswordRecoveryCode.user_id == user.id, PasswordRecoveryCode.used_at.is_(None))
+        .values(used_at=now)
+    )
+    await record_audit(
+        db, entity_type="user", entity_id=user.id,
+        action="password_reset_with_recovery_code", actor_id=user.id,
+        details={"method": "offline_recovery_code"},
+    )
+    await db.commit()
+    return {"message": "Password updated. Sign in and generate a new recovery-code set."}
+
+
+@router.post("/users/{user_id}/password-reset")
+async def issue_user_password_reset(
+    user_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_role("administrator")),
+):
+    """Issue a one-time code after the administrator has independently verified identity."""
+    result = await db.execute(select(User).where(User.id == user_id).with_for_update())
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if user.status != "active":
+        raise HTTPException(status_code=409, detail="Only active accounts can be recovered")
+    code, expires_at = await issue_reset(db, user)
+    await record_audit(
+        db,
+        entity_type="user",
+        entity_id=user.id,
+        action="admin_password_reset_code_issued",
+        actor_id=current_user.id,
+        details={"expires_at": expires_at.isoformat()},
+    )
+    await db.commit()
+    return {
+        "reset_code": code,
+        "expires_at": expires_at,
+        "message": "Give this code to the user through a separately verified channel. It is shown only once.",
+    }
+
+
+@router.post("/auth/password-reset/complete")
+async def complete_password_reset(payload: PasswordResetComplete, db: AsyncSession = Depends(get_db)):
+    if not await consume_reset(db, payload.token, get_password_hash(payload.password)):
+        await db.rollback()
+        raise HTTPException(status_code=400, detail="Reset link is invalid or expired. Request a new password reset.")
+    await db.commit()
+    return {"message": "Password updated. Please sign in with your new password."}
 
 
 @router.get("/auth/me")
@@ -302,13 +435,13 @@ PUBLIC_RECEIPT_EXCLUDE = {"author_id"}
 
 @router.get("/committees")
 async def list_committees(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Committee).where(Committee.status == "active").order_by(Committee.name.asc()))
+    result = await db.execute(select(Committee).where(Committee.status == "active", ~Committee.name.ilike("%simulated%")).order_by(Committee.name.asc()))
     return {"committees": [to_dict(c) for c in result.scalars().all()]}
 
 @router.post("/committees")
 async def create_committee(payload: CommitteeCreate, db: AsyncSession = Depends(get_db), current_user: User = Depends(require_role("administrator"))):
-    if len(payload.account_password) < 8:
-        raise HTTPException(status_code=422, detail="Clerk’s Office account password must be at least 8 characters")
+    if len(payload.account_password) < 12 or len(payload.account_password) > 128:
+        raise HTTPException(status_code=422, detail="Clerk’s Office account password must be between 12 and 128 characters")
     existing = await db.execute(select(User).where(User.email == payload.account_email.strip().lower()))
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=409, detail="Clerk’s Office account email already exists")
@@ -322,7 +455,7 @@ async def create_committee(payload: CommitteeCreate, db: AsyncSession = Depends(
 
 @router.get("/committees/me/bills")
 async def committee_bills(db: AsyncSession = Depends(get_db), current_user: User = Depends(require_role("committee_officer"))):
-    result = await db.execute(select(LegislativeItem).where(LegislativeItem.committee_id == current_user.committee_id).order_by(LegislativeItem.source_updated_at.desc().nullslast(), LegislativeItem.title.asc()))
+    result = await db.execute(select(LegislativeItem).where(LegislativeItem.committee_id == current_user.committee_id, LegislativeItem.is_simulated.is_(False)).order_by(LegislativeItem.source_updated_at.desc().nullslast(), LegislativeItem.title.asc()))
     return {"bills": [to_dict(b) for b in result.scalars().all()]}
 
 @router.post("/committees/me/bills")
@@ -387,7 +520,7 @@ async def list_bills(
     search: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
 ):
-    query = select(LegislativeItem)
+    query = select(LegislativeItem).where(LegislativeItem.is_simulated.is_(False))
 
     if institution:
         query = query.where(LegislativeItem.institution == institution)
@@ -409,7 +542,7 @@ async def list_bills(
 @router.get("/bills/{bill_id}")
 async def get_bill(bill_id: UUID, db: AsyncSession = Depends(get_db)):
     result = await db.execute(
-        select(LegislativeItem).where(LegislativeItem.id == bill_id)
+        select(LegislativeItem).where(LegislativeItem.id == bill_id, LegislativeItem.is_simulated.is_(False))
     )
     bill = result.scalar_one_or_none()
 
@@ -469,19 +602,34 @@ async def get_bill(bill_id: UUID, db: AsyncSession = Depends(get_db)):
 async def bootstrap(db: AsyncSession = Depends(get_db)):
     """Return the non-secret application data needed by the initial client shell."""
     async def all_rows(model, exclude=frozenset()):
-        result = await db.execute(select(model))
+        query = select(model)
+        if model in (LegislativeItem, CommitteeReport):
+            query = query.where(model.is_simulated.is_(False))
+        if model is Committee:
+            query = query.where(~Committee.name.ilike("%simulated%"))
+        result = await db.execute(query)
         rows = result.scalars().all()
         return [report_to_dict(row) if model is CommitteeReport else to_dict(row, exclude=exclude) for row in rows]
 
+    bills = await all_rows(LegislativeItem)
+    live_bill_ids = {bill["id"] for bill in bills}
+    reports = await all_rows(CommitteeReport)
+    live_report_ids = {report["id"] for report in reports}
+    receipts = [receipt for receipt in await all_rows(ParticipationReceipt, exclude=PUBLIC_RECEIPT_EXCLUDE) if receipt.get("legislative_item_id") in live_bill_ids]
+    notices = [notice for notice in await all_rows(NoticeRecord) if notice.get("bill_ref") in live_bill_ids]
+    report_entries = [entry for entry in await all_rows(ReportEntry) if entry.get("report_ref") in live_report_ids]
+    report_entry_ids = {entry["id"] for entry in report_entries}
+    matches = [match for match in await all_rows(SubmissionMatch) if match.get("report_entry_ref") in report_entry_ids]
+
     return {
         "committees": await all_rows(Committee),
-        "bills": await all_rows(LegislativeItem),
-        "receipts": await all_rows(ParticipationReceipt, exclude=PUBLIC_RECEIPT_EXCLUDE),
-        "reports": await all_rows(CommitteeReport),
-        "report_entries": await all_rows(ReportEntry),
-        "matches": await all_rows(SubmissionMatch),
-        "notices": await all_rows(NoticeRecord),
-        "profiles": await all_rows(RepresentativeProfile, exclude=PROFILE_PUBLIC_EXCLUDE),
+        "bills": bills,
+        "receipts": receipts,
+        "reports": reports,
+        "report_entries": report_entries,
+        "matches": matches,
+        "notices": notices,
+        "profiles": [profile for profile in await all_rows(RepresentativeProfile, exclude=PROFILE_PUBLIC_EXCLUDE) if profile.get("profile_label") != "simulated"],
     }
 
 

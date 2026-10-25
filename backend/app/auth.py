@@ -13,7 +13,12 @@ import os
 from app.database import get_db
 from app.models import User
 
-SECRET_KEY = os.getenv("JWT_SECRET_KEY", "local-development-secret-change-me")
+SECRET_KEY = os.getenv("JWT_SECRET_KEY")
+if not SECRET_KEY and os.getenv("APP_ENV", "development").lower() in {"production", "prod"}:
+    raise RuntimeError("JWT_SECRET_KEY must be configured in production")
+SECRET_KEY = SECRET_KEY or "local-development-secret-change-me"
+if SECRET_KEY == "local-development-secret-change-me" and os.getenv("APP_ENV", "development").lower() in {"production", "prod"}:
+    raise RuntimeError("The development JWT secret is forbidden in production")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
 
@@ -29,7 +34,7 @@ def get_password_hash(password: str) -> str:
 def create_access_token(data: dict) -> str:
     to_encode = data.copy()
     expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    to_encode.update({"exp": expire})
+    to_encode.update({"exp": expire, "iat": datetime.utcnow(), "iss": os.getenv("JWT_ISSUER", "participation-trace")})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
 async def get_current_user(
@@ -44,7 +49,10 @@ async def get_current_user(
     
     try:
         payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
+        if payload.get("iss") != os.getenv("JWT_ISSUER", "participation-trace"):
+            raise credentials_exception
         user_id: str = payload.get("sub")
+        token_version = payload.get("ver", 0)
         if user_id is None:
             raise credentials_exception
     except JWTError:
@@ -56,7 +64,7 @@ async def get_current_user(
     if user is None:
         raise credentials_exception
     
-    if user.status != "active":
+    if user.status != "active" or token_version != (user.auth_version or 0):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Account suspended"
