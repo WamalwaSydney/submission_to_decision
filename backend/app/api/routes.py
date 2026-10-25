@@ -25,7 +25,7 @@ from app.models import (
 from app.services import receipt_service, linking_service, ingestion_service, storage_service, notification_service
 from app.audit import record_audit
 from app.password_reset import issue_reset, consume_reset
-from app.recovery_codes import generate_recovery_codes, digest_recovery_code
+from app.recovery_codes import generate_recovery_codes as create_recovery_code_values, digest_recovery_code
 
 router = APIRouter()
 PUBLIC_SIGNUP_ROLES = {"citizen", "committee_officer"}
@@ -189,7 +189,7 @@ async def register(payload: RegisterRequest, db: AsyncSession = Depends(get_db))
     await db.flush()
     # Create the initial backup set at signup. Return raw codes only in this
     # signup response; persist only their hashes for subsequent recovery.
-    recovery_codes = generate_recovery_codes()
+    recovery_codes = create_recovery_code_values()
     user.recovery_codes_generated_at = datetime.now().astimezone()
     db.add_all([
         PasswordRecoveryCode(user_id=user.id, code_hash=digest_recovery_code(code))
@@ -221,7 +221,7 @@ async def generate_recovery_codes(
     )
     if lock_result.scalar_one_or_none() is None:
         raise HTTPException(status_code=401, detail="Account is no longer available")
-    codes = generate_recovery_codes()
+    codes = create_recovery_code_values()
     now = datetime.now().astimezone()
     # Rotation invalidates prior unspent codes. A recovery-code bundle is shown only once.
     await db.execute(
