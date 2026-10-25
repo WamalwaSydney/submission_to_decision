@@ -23,7 +23,7 @@ function OnlineStatusListener() {
   const { dispatch, state } = useApp();
 
   const syncDrafts = useCallback(async () => {
-    if (!state.currentUser || !navigator.onLine) return;
+    if (!state.currentUser || state.currentUser.role !== 'citizen' || !navigator.onLine) return;
     const drafts = await getUnsyncedDrafts();
     for (const draft of drafts) {
       try {
@@ -67,6 +67,13 @@ function OnlineStatusListener() {
   return null;
 }
 
+function CitizenSubmissionRoute() {
+  const { state } = useApp();
+  if (!state.currentUser) return <Navigate to="/login" replace />;
+  if (state.currentUser.role !== 'citizen') return <Navigate to="/" replace />;
+  return <SubmitViewPage />;
+}
+
 function AppRoutes() {
   return (
     <Layout>
@@ -77,7 +84,7 @@ function AppRoutes() {
         <Route path="/bill-flow/:id" element={<BillFlowPage />} />
         <Route path="/receipt-lookup" element={<ReceiptLookupPage />} />
         <Route path="/receipt-verify" element={<ReceiptVerifyPage />} />
-        <Route path="/submit" element={<SubmitViewPage />} />
+        <Route path="/submit" element={<CitizenSubmissionRoute />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/signin" element={<LoginPage />} />
         <Route path="/signup" element={<SignupPage />} />
