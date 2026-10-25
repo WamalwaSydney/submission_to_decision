@@ -137,3 +137,20 @@
   .committee-back-button:hover { border-color:#b7d4bd; color:#176b2b; }
   @media (max-width:560px) { .committee-directory-heading { align-items:flex-start; flex-direction:column; gap:9px; } .committee-directory-grid { grid-template-columns:1fr; } .committee-directory-card { gap:10px; padding:13px; } .committee-directory-count { font-size:.67rem; } }
 }
+
+@layer components {
+  .role-management-table { min-width: 980px; }
+  .role-management-table th { padding: 15px 18px; background: #faf8f3; color: #647070; font-size: .68rem; letter-spacing: .12em; text-transform: uppercase; white-space: nowrap; }
+  .role-management-table td { padding: 15px 18px; border-bottom: 1px solid #eeeae2; vertical-align: middle; }
+  .role-management-table tbody tr { transition: background .16s ease, box-shadow .16s ease; }
+  .role-management-table tbody tr:hover { background: #fbfcfa; box-shadow: inset 3px 0 0 #a52d29; }
+  .role-management-table tbody tr:last-child td { border-bottom: 0; }
+  .role-management-user strong, .role-management-user small { display: block; }
+  .role-management-user strong { color: #182020; font-size: .82rem; font-weight: 800; }
+  .role-management-user small { margin-top: 3px; color: #718080; font-size: .7rem; font-weight: 600; }
+  .role-management-avatar { display: grid; width: 34px; height: 34px; flex: 0 0 auto; place-items: center; border: 1px solid #ead6d4; border-radius: 11px; background: linear-gradient(140deg, #fff0ee, #f1f7f1); color: #a52d29; }
+  .role-management-select { min-width: 140px; border-color: #e1ded6; background-color: #fff; font-weight: 700; }
+  .role-management-select:focus { border-color: #a52d29; box-shadow: 0 0 0 3px rgba(165,45,41,.1); }
+  .role-management-save { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+  @media (max-width: 700px) { .role-management-table { min-width: 900px; } }
+}

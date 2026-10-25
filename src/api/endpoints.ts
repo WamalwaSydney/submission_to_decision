@@ -41,6 +41,7 @@ export const api = {
   },
   billFlow: (billId: string) => apiFetch<any>(`/bills/${encodeURIComponent(billId)}/flow`),
   users: () => apiFetch<{ users: User[] }>('/users'),
+  updateUser: (userId: string, data: { role: User['role']; status: User['status']; committee_id?: string }) => apiFetch<any>(`/users/${encodeURIComponent(userId)}`, { method: 'PUT', body: JSON.stringify(data) }),
   approveCommitteeOfficer: (userId: string, committeeId: string) => apiFetch<any>(`/users/${encodeURIComponent(userId)}/approve-committee-officer`, { method: 'POST', body: JSON.stringify({ committee_id: committeeId }) }),
   login: (email: string, password: string) => apiFetch<LoginResponse>('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
   register: (name: string, email: string, password: string, role: SignupRole, options: SignupOptions = {}) => apiFetch<RegisterResponse>('/auth/register', { method: 'POST', body: JSON.stringify({ name, email, password, role, ...options }) }),

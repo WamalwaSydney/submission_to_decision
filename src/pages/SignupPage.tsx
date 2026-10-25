@@ -231,7 +231,7 @@ export function SignupPage() {
             sx={{ borderRadius: '12px', '& .MuiAlert-message': { fontSize: 12, lineHeight: 1.55 } }}
           >
             Your account and password are stored and verified by the backend. Never use a
-            password you reuse elsewhere for a demo environment.
+            password you reuse elsewhere for this service.
           </Alert>
 
           <button

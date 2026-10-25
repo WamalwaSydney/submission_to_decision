@@ -1,46 +1,20 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Alert, Avatar, Box, Divider, IconButton, InputAdornment, TextField, Typography } from '@mui/material';
-import { ArrowRight, Eye, EyeOff, FileCheck, Gavel, LockKeyhole, Search, Settings, ShieldCheck, Users } from 'lucide-react';
+import { Alert, Box, Divider, IconButton, InputAdornment, TextField, Typography } from '@mui/material';
+import { ArrowRight, Eye, EyeOff, LockKeyhole } from 'lucide-react';
 import { Card } from '../components/UI';
 import { useApp } from '../context/AppContext';
-import { User, UserRole } from '../types';
 import { api } from '../api/endpoints';
 
-const roleIcons: Record<UserRole, React.ReactNode> = {
-  citizen: <Users size={17} />,
-  committee_officer: <Gavel size={17} />,
-  reviewer: <ShieldCheck size={17} />,
-  administrator: <Settings size={17} />,
-};
-
-const roleColors: Record<UserRole, string> = {
-  citizen: '#a52d29',
-  committee_officer: '#155f78',
-  reviewer: '#a66e0b',
-  administrator: '#641b19',
-};
 
 export function LoginPage() {
-  const { state, dispatch } = useApp();
+  const { dispatch } = useApp();
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
 
-  const signInAs = async (user: User) => {
-    setError('');
-    try {
-      const response = await api.login(user.email, 'password123');
-      localStorage.setItem('access_token', response.access_token);
-      localStorage.setItem('current_user', JSON.stringify(response.user));
-      dispatch({ type: 'SET_USER', payload: response.user });
-      navigate('/');
-    } catch (error) {
-      setError(error instanceof Error ? error.message : 'Unable to sign in.');
-    }
-  };
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -71,10 +45,9 @@ export function LoginPage() {
         </Typography>
       </Box>
 
-      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'minmax(0, 1fr)', lg: 'minmax(0, 1fr) minmax(0, 1fr)' }, gap: { xs: 2.5, md: 3 } }}>
+      <Box sx={{ maxWidth: 600, mx: 'auto' }}>
         <Card className="!p-5 sm:!p-7">
           <Typography sx={{ fontSize: 20, fontWeight: 850, color: '#182020', mb: 0.5 }}>Welcome back</Typography>
-          <Typography sx={{ color: '#526060', fontSize: 13, mb: 2.5 }}>Use a demo profile available in this browser session.</Typography>
 
           <Alert severity="info" icon={<LockKeyhole size={17} />} sx={{ mb: 2.5, borderRadius: '12px', '& .MuiAlert-message': { fontSize: 12.5, lineHeight: 1.55 } }}>
             Your password is sent securely to the API over HTTPS and is never stored in the browser.
@@ -121,58 +94,7 @@ export function LoginPage() {
 
           <Divider sx={{ my: 2.5, color: '#778181', fontSize: 12 }}>or</Divider>
           <Typography sx={{ textAlign: 'center', color: '#526060', fontSize: 13 }}>
-            New to the platform? <Link to="/signup" className="font-extrabold text-primary-700 hover:text-primary-800">Create a demo account</Link>
-          </Typography>
-        </Card>
-
-        <Card className="!p-5 sm:!p-7">
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25, mb: 0.5 }}>
-            <Users size={18} style={{ color: '#176b2b' }} />
-            <Typography sx={{ fontSize: 20, fontWeight: 850, color: '#182020' }}>Quick demo access</Typography>
-          </Box>
-          <Typography sx={{ color: '#526060', fontSize: 13, mb: 2.5 }}>Choose a sample role to explore its tools. These accounts are simulated.</Typography>
-
-          {state.users.length > 0 ? (
-            <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))' }, gap: 1.25 }}>
-              {state.users.map(user => (
-                <Box
-                  key={user.id}
-                  component="button"
-                  type="button"
-                  onClick={() => signInAs(user)}
-                  sx={{
-                    minWidth: 0,
-                    minHeight: 66,
-                    p: 1.25,
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 1.25,
-                    textAlign: 'left',
-                    border: '1px solid #e2ded5',
-                    borderRadius: '13px',
-                    background: '#fff',
-                    color: '#182020',
-                    cursor: 'pointer',
-                    transition: 'border-color .18s ease, background .18s ease, transform .18s ease',
-                    '&:hover': { borderColor: roleColors[user.role], background: '#fffdf8', transform: 'translateY(-1px)' },
-                    '&:focus-visible': { outline: '3px solid rgba(201,139,24,.45)', outlineOffset: 2 },
-                  }}
-                >
-                  <Avatar sx={{ width: 34, height: 34, bgcolor: roleColors[user.role], flexShrink: 0 }}>{roleIcons[user.role]}</Avatar>
-                  <Box sx={{ minWidth: 0, flex: 1 }}>
-                    <Typography sx={{ fontSize: 12.5, fontWeight: 800, lineHeight: 1.3 }}>{user.name}</Typography>
-                    <Typography sx={{ fontSize: 11, color: '#526060', textTransform: 'capitalize' }}>{user.role}</Typography>
-                  </Box>
-                  <ArrowRight size={15} style={{ flexShrink: 0, color: '#8b9694' }} />
-                </Box>
-              ))}
-            </Box>
-          ) : (
-            <Typography sx={{ py: 3, color: '#526060', fontSize: 14 }}>No sample accounts are available in this session. Create a demo account to continue.</Typography>
-          )}
-
-          <Typography sx={{ mt: 2, color: '#778181', fontSize: 11.5, lineHeight: 1.55 }}>
-            Signing in with a sample account switches the current demo role for this session only.
+            New to the platform? <Link to="/signup" className="font-extrabold text-primary-700 hover:text-primary-800">Create an account</Link>
           </Typography>
         </Card>
       </Box>

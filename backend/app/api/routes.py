@@ -79,6 +79,13 @@ class CommitteeCreate(BaseModel):
 class CommitteeOfficerApproval(BaseModel):
     committee_id: Optional[UUID] = None
 
+
+class AdminUserUpdate(BaseModel):
+    role: str
+    status: str
+    committee_id: Optional[UUID] = None
+
+
 class BillCreate(BaseModel):
     title: str
     identifier: str
@@ -189,6 +196,41 @@ async def list_users(
     """Return the complete user registry for the administrator console."""
     result = await db.execute(select(User).order_by(User.created_date.desc(), User.name.asc()))
     return {"users": [public_user(user) for user in result.scalars().all()]}
+
+
+@router.put("/users/{user_id}")
+async def update_user(
+    user_id: UUID,
+    payload: AdminUserUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_role("administrator")),
+):
+    allowed_roles = {"citizen", "committee_officer", "reviewer", "administrator"}
+    allowed_statuses = {"active", "suspended", "pending_approval"}
+    if payload.role not in allowed_roles:
+        raise HTTPException(status_code=422, detail="Unsupported account role")
+    if payload.status not in allowed_statuses:
+        raise HTTPException(status_code=422, detail="Unsupported account status")
+    if user_id == current_user.id and (payload.role != "administrator" or payload.status != "active"):
+        raise HTTPException(status_code=409, detail="You cannot remove your own active administrator access")
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if payload.role == "committee_officer" and not payload.committee_id:
+        raise HTTPException(status_code=422, detail="Committee officers must be linked to a committee")
+    if payload.committee_id:
+        committee_result = await db.execute(select(Committee).where(Committee.id == payload.committee_id, Committee.status == "active"))
+        if not committee_result.scalar_one_or_none():
+            raise HTTPException(status_code=404, detail="Selected committee was not found or is inactive")
+    old_role, old_status = user.role, user.status
+    user.role = payload.role
+    user.status = payload.status
+    user.committee_id = payload.committee_id if payload.role == "committee_officer" else None
+    await record_audit(db, entity_type="user", entity_id=user.id, action="admin_user_updated", actor_id=current_user.id, details={"old_role": old_role, "new_role": user.role, "old_status": old_status, "new_status": user.status})
+    await db.commit()
+    await db.refresh(user)
+    return {"user": public_user(user)}
 
 
 @router.post("/users/{user_id}/approve-committee-officer")

@@ -1,19 +1,25 @@
 import React, { useEffect, useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { api } from '../api/endpoints';
-import { RepresentativeStatus } from '../types';
-import { Shield, Users, Download, Settings, AlertTriangle, Info, CheckCircle2, XCircle, Upload, FileText, Gauge, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Shield, Users, Download, Settings, AlertTriangle, Info, Upload, Gauge, ChevronLeft, ChevronRight, Save, UserRound } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { Badge, DisclaimerBox, InfoBox, Card } from '../components/UI';
 
 export function AdminPage() {
-  const { state, dispatch } = useApp();
-  const [activeTab, setActiveTab] = useState<'profiles' | 'roles' | 'committees' | 'export' | 'settings'>('profiles');
+  const { state } = useApp();
+  const [activeTab, setActiveTab] = useState<'roles' | 'committees' | 'export' | 'settings'>('roles');
   const [adminUsers, setAdminUsers] = useState(state.users);
   const [userPage, setUserPage] = useState(1);
-  const [committeeAssignments, setCommitteeAssignments] = useState<Record<string, string>>({});
-  const [approvingUserId, setApprovingUserId] = useState<string | null>(null);
   const [userMessage, setUserMessage] = useState('');
+  const [committeeDirectory, setCommitteeDirectory] = useState(state.committees);
+  const [savingUserId, setSavingUserId] = useState<string | null>(null);
+  const [userEdits, setUserEdits] = useState<Record<string, { role: any; status: any; committee_id: string }>>({});
+  const [committeeForm, setCommitteeForm] = useState({ name: '', institution: 'National Assembly', description: '', contact_email: '', account_name: '', account_email: '', account_password: '' });
+  const [committeeMessage, setCommitteeMessage] = useState('');
+  const [settings, setSettings] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('admin_settings') || 'null') || { ocrThreshold: 10, maxFileSizeMb: 50, supportedFormats: 'PDF (native + scanned)', autoQuarantine: false, appealWindowDays: 14, rateLimit: 5, matchingMethod: 'Clause-reference matching (rule-based)', fallbackMethod: 'Text similarity (rapidfuzz)', minConfidence: 0.3 }; } catch { return { ocrThreshold: 10, maxFileSizeMb: 50, supportedFormats: 'PDF (native + scanned)', autoQuarantine: false, appealWindowDays: 14, rateLimit: 5, matchingMethod: 'Clause-reference matching (rule-based)', fallbackMethod: 'Text similarity (rapidfuzz)', minConfidence: 0.3 }; }
+  });
+  const [settingsMessage, setSettingsMessage] = useState('');
 
   useEffect(() => {
     if (activeTab !== 'roles' || state.currentUser?.role !== 'administrator') return;
@@ -35,33 +41,36 @@ export function AdminPage() {
   const totalUserPages = Math.max(1, Math.ceil(adminUsers.length / usersPerPage));
   const visibleUsers = adminUsers.slice((userPage - 1) * usersPerPage, userPage * usersPerPage);
 
-  const handleApproveOfficer = async (userId: string, currentCommitteeId?: string) => {
-    const committeeId = committeeAssignments[userId] || currentCommitteeId;
-    if (!committeeId) {
-      setUserMessage('Select one of the synced committees before approving this account.');
-      return;
-    }
-    setApprovingUserId(userId);
-    setUserMessage('');
-    try {
-      await api.approveCommitteeOfficer(userId, committeeId);
-      const { users } = await api.users();
-      setAdminUsers(users);
-      setUserMessage('Committee officer access approved. The officer can now sign in with their email and password.');
-    } catch (error) {
-      setUserMessage(error instanceof Error ? error.message : 'Unable to approve this committee officer.');
-    } finally {
-      setApprovingUserId(null);
-    }
+  const handleUserEdit = (user: any, field: string, value: string) => {
+    setUserEdits(previous => ({
+      ...previous,
+      [user.id]: { ...{ role: user.role, status: user.status, committee_id: user.committee_id || '' }, ...(previous[user.id] || {}), [field]: value },
+    }));
   };
 
-  const handleVerifyProfile = (profileId: string, status: RepresentativeStatus) => {
-    if (!state.currentUser) return;
-    dispatch({
-      type: 'VERIFY_PROFILE',
-      payload: { profileId, verifierId: state.currentUser.id, status }
-    });
+  const handleSaveUser = async (user: any) => {
+    const edit = userEdits[user.id] || { role: user.role, status: user.status, committee_id: user.committee_id || '' };
+    setSavingUserId(user.id); setUserMessage('');
+    try {
+      const response = await api.updateUser(user.id, { role: edit.role, status: edit.status, committee_id: edit.committee_id || undefined });
+      setAdminUsers(users => users.map(item => item.id === user.id ? response.user : item));
+      setUserEdits(previous => { const next = { ...previous }; delete next[user.id]; return next; });
+      setUserMessage(`${user.name}'s account was updated.`);
+    } catch (error) { setUserMessage(error instanceof Error ? error.message : 'Unable to update this account.'); }
+    finally { setSavingUserId(null); }
   };
+
+  const handleCreateCommittee = async (event: React.FormEvent) => {
+    event.preventDefault(); setCommitteeMessage('');
+    try {
+      const response = await api.createCommittee(committeeForm);
+      setCommitteeDirectory(previous => [...previous, response.committee]);
+      setCommitteeForm({ name: '', institution: 'National Assembly', description: '', contact_email: '', account_name: '', account_email: '', account_password: '' });
+      setCommitteeMessage('Committee and officer account created.');
+    } catch (error) { setCommitteeMessage(error instanceof Error ? error.message : 'Unable to create committee.'); }
+  };
+
+  const saveSettings = () => { localStorage.setItem('admin_settings', JSON.stringify(settings)); setSettingsMessage('Settings saved for this deployment.'); };
 
   const handleExportAnonymized = () => {
     // Anonymized export: no user identifiers
@@ -103,8 +112,7 @@ export function AdminPage() {
     URL.revokeObjectURL(url);
   };
 
-  const unclaimedProfiles = state.profiles.filter(p => p.verification_status === 'unclaimed');
-  const pendingClaims = unclaimedProfiles.filter(p => p.user_id);
+
 
   return (
     <div className="space-y-6">
@@ -117,152 +125,22 @@ export function AdminPage() {
           Platform <span className="gradient-text">Administration</span>
         </h1>
         <p className="text-lg text-surface-600 leading-relaxed max-w-3xl">
-          Manage profiles, roles, settings, and data exports.
+          Manage user access, committees, system settings, and data exports.
         </p>
       </div>
 
       <div className="flex flex-wrap gap-2 p-1.5 rounded-2xl bg-surface-100/70 border border-surface-200 mb-6">
         {[
-          { key: 'profiles', label: 'Profile Verification', icon: Shield },
           { key: 'roles', label: 'Role Management', icon: Users },
           { key: 'committees', label: 'Committees', icon: Users },
           { key: 'export', label: 'Data Export', icon: Download },
           { key: 'settings', label: 'Settings', icon: Settings },
         ].map(tab => (
-          <button
-            key={tab.key}
-            onClick={() => setActiveTab(tab.key as any)}
-            className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold transition-all ${
-              activeTab === tab.key
-                ? 'bg-white shadow-soft text-primary-700 border border-surface-200'
-                : 'text-surface-600 hover:bg-white/60'
-            }`}
-          >
-            <tab.icon className="h-4 w-4" />
-            {tab.label}
+          <button key={tab.key} onClick={() => setActiveTab(tab.key as any)} className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold transition-all ${activeTab === tab.key ? 'bg-white shadow-soft text-primary-700 border border-surface-200' : 'text-surface-600 hover:bg-white/60'}`}>
+            <tab.icon className="h-4 w-4" />{tab.label}
           </button>
         ))}
       </div>
-
-      {activeTab === 'profiles' && (
-        <div className="space-y-8">
-          <div>
-            <div className="inline-flex items-center gap-2 mb-5">
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary-500 to-primary-700 flex items-center justify-center text-white shadow-lg shadow-primary-500/25">
-                <Shield className="h-5 w-5" />
-              </div>
-              <div>
-                <div className="text-[11px] font-black uppercase tracking-[0.18em] text-primary-600">Approval Queue</div>
-                <h2 className="text-2xl font-black text-surface-900 tracking-tight">Pending Profile Claims</h2>
-              </div>
-            </div>
-
-            {pendingClaims.length === 0 ? (
-              <Card className="!p-10 text-center">
-                <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-surface-200/50 mb-4">
-                  <CheckCircle2 className="h-7 w-7 text-surface-400" />
-                </div>
-                <h3 className="text-xl font-bold text-surface-900 mb-1">No pending profile claims</h3>
-                <p className="text-surface-600">All claimed profiles have been reviewed. Check back later.</p>
-              </Card>
-            ) : (
-              <div className="space-y-4">
-                {pendingClaims.map((profile, idx) => (
-                  <motion.div
-                    key={profile.id}
-                    initial={{ opacity: 0, y: 16 }}
-                    whileInView={{ opacity: 1, y: 0 }}
-                    viewport={{ once: true }}
-                    transition={{ duration: 0.4, delay: idx * 0.04 }}
-                  >
-                    <Card className="!p-6 relative overflow-hidden">
-                      <div className="absolute -top-16 -right-16 w-40 h-40 rounded-full bg-warm-100/60 blur-3xl pointer-events-none" />
-                      <div className="relative flex flex-col md:flex-row md:items-start md:justify-between gap-4">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2 mb-1">
-                            <Badge variant="yellow" showIcon className="!text-[10px] !py-1">Awaiting Review</Badge>
-                            <Badge variant="gray" className="!text-[10px] !py-1 ml-1">{profile.profile_label.toUpperCase()}</Badge>
-                          </div>
-                          <h3 className="font-black text-surface-900 text-lg mb-0.5">{profile.office}</h3>
-                          <p className="text-sm text-surface-600 font-medium mb-1">
-                            <span className="text-surface-400">Jurisdiction:</span> {profile.jurisdiction}
-                          </p>
-                          <p className="text-sm text-surface-600 font-medium mb-2">
-                            <span className="text-surface-400">Institution:</span> {profile.institution}
-                          </p>
-                          <p className="text-xs text-surface-500 bg-surface-50 border border-surface-100 rounded-lg px-3 py-1.5 inline-flex items-center gap-1.5">
-                            <Users className="h-3 w-3" /> Claimed by user: <span className="font-bold">{profile.user_id}</span>
-                          </p>
-                        </div>
-                        <div className="flex flex-col sm:flex-row gap-2 md:shrink-0">
-                          <button onClick={() => handleVerifyProfile(profile.id, 'verified and active')} className="btn-primary text-sm inline-flex items-center gap-1.5">
-                            <CheckCircle2 className="h-4 w-4" /> Verify Active
-                          </button>
-                          <button onClick={() => handleVerifyProfile(profile.id, 'verified but inactive')} className="btn-secondary text-sm inline-flex items-center gap-1.5">
-                            <XCircle className="h-4 w-4" /> Verify Inactive
-                          </button>
-                        </div>
-                      </div>
-                    </Card>
-                  </motion.div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <div>
-            <div className="inline-flex items-center gap-2 mb-5">
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-accent-500 to-accent-700 flex items-center justify-center text-white shadow-lg shadow-accent-500/25">
-                <FileText className="h-5 w-5" />
-              </div>
-              <div>
-                <div className="text-[11px] font-black uppercase tracking-[0.18em] text-accent-600">Full Registry</div>
-                <h2 className="text-2xl font-black text-surface-900 tracking-tight">All Profiles</h2>
-              </div>
-            </div>
-
-            <Card className="!p-7 md:!p-8 relative overflow-hidden">
-              <div className="absolute -top-20 -right-20 w-48 h-48 rounded-full bg-accent-100/50 blur-3xl pointer-events-none" />
-              <div className="relative">
-                <div className="table-container">
-                  <table className="data-table">
-                    <thead>
-                      <tr>
-                        <th>Office</th>
-                        <th>Jurisdiction</th>
-                        <th>Institution</th>
-                        <th>Status</th>
-                        <th>Label</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {state.profiles.map((p, idx) => (
-                        <motion.tr
-                          key={p.id}
-                          initial={{ opacity: 0, y: 12 }}
-                          whileInView={{ opacity: 1, y: 0 }}
-                          viewport={{ once: true }}
-                          transition={{ duration: 0.35, delay: idx * 0.02 }}
-                        >
-                          <td className="font-semibold">{p.office}</td>
-                          <td>{p.jurisdiction}</td>
-                          <td className="text-xs font-medium">{p.institution}</td>
-                          <td>
-                            <Badge variant={p.verification_status === 'unclaimed' ? 'gray' : 'green'} showIcon className="!text-[10px]">
-                              {p.verification_status}
-                            </Badge>
-                          </td>
-                          <td><Badge variant="gray" className="!text-[10px]">{p.profile_label}</Badge></td>
-                        </motion.tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </Card>
-          </div>
-        </div>
-      )}
 
       {activeTab === 'roles' && (
         <div className="space-y-6">
@@ -277,15 +155,23 @@ export function AdminPage() {
               </div>
             </div>
 
-            <Card className="!p-7 md:!p-8 relative overflow-hidden">
-              <div className="absolute -top-24 -right-20 w-56 h-56 rounded-full bg-purple-100/50 blur-3xl pointer-events-none" />
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+              <div className="rounded-2xl border border-purple-100 bg-purple-50/70 p-4"><div className="text-xs font-black uppercase tracking-wider text-purple-600">Total users</div><div className="mt-1 text-2xl font-black text-surface-900">{adminUsers.length}</div></div>
+              <div className="rounded-2xl border border-green-100 bg-green-50/70 p-4"><div className="text-xs font-black uppercase tracking-wider text-green-700">Active</div><div className="mt-1 text-2xl font-black text-surface-900">{adminUsers.filter(user => user.status === 'active').length}</div></div>
+              <div className="rounded-2xl border border-warm-100 bg-warm-50/70 p-4"><div className="text-xs font-black uppercase tracking-wider text-warm-700">Pending</div><div className="mt-1 text-2xl font-black text-surface-900">{adminUsers.filter(user => user.status === 'pending_approval').length}</div></div>
+              <div className="rounded-2xl border border-surface-200 bg-white p-4"><div className="text-xs font-black uppercase tracking-wider text-surface-500">Unsaved</div><div className="mt-1 text-2xl font-black text-surface-900">{Object.keys(userEdits).length}</div></div>
+            </div>
+            <Card className="!p-0 relative overflow-hidden border border-surface-200 shadow-soft">
+              <div className="flex flex-col gap-2 border-b border-surface-200 bg-gradient-to-r from-purple-50 via-white to-white px-5 py-4 md:flex-row md:items-center md:justify-between md:px-6">
+                <div><h3 className="text-base font-black text-surface-900">Account access directory</h3><p className="text-xs text-surface-500 mt-1">Edit access in place, then save each account independently.</p></div>
+                <div className="inline-flex items-center gap-2 text-xs font-bold text-surface-500"><span className="h-2 w-2 rounded-full bg-green-500" /> Changes are administrator-only</div>
+              </div>
               <div className="relative">
                 <div className="table-container">
-                  <table className="data-table">
+                  <table className="data-table role-management-table">
                     <thead>
                       <tr>
-                        <th>Name</th>
-                        <th>Email</th>
+                        <th>User</th>
                         <th>Role</th>
                         <th>Committee</th>
                         <th>Status</th>
@@ -302,18 +188,14 @@ export function AdminPage() {
                           viewport={{ once: true }}
                           transition={{ duration: 0.35, delay: idx * 0.02 }}
                         >
-                          <td className="font-semibold">{u.name}</td>
-                          <td className="text-xs font-medium">{u.email}</td>
-                          <td><Badge variant="blue" showIcon className="!text-[10px] capitalize">{u.role}</Badge></td>
-                          <td className="text-xs">{u.status === 'pending_approval' ? (
-                            <select aria-label={`Assign ${u.name} to committee`} className="input-field !py-1.5 !text-xs min-w-48" value={committeeAssignments[u.id] ?? u.committee_id ?? ''} onChange={event => setCommitteeAssignments(previous => ({ ...previous, [u.id]: event.target.value }))}>
-                              <option value="">Select committee</option>
-                              {state.committees.map(committee => <option key={committee.id} value={committee.id}>{committee.name} — {committee.institution}</option>)}
-                            </select>
-                          ) : state.committees.find(committee => committee.id === u.committee_id)?.name || '—'}</td>
-                          <td><Badge variant={u.status === 'active' ? 'green' : u.status === 'pending_approval' ? 'yellow' : 'gray'} showIcon className="!text-[10px]">{u.status === 'pending_approval' ? 'pending approval' : u.status}</Badge></td>
-                          <td className="text-xs">{new Date(u.created_date).toLocaleDateString()}</td>
-                          <td>{u.role === 'committee_officer' && u.status === 'pending_approval' ? <button type="button" onClick={() => handleApproveOfficer(u.id, u.committee_id)} disabled={approvingUserId !== null} className="btn-primary !px-3 !py-2 text-xs disabled:opacity-50">{approvingUserId === u.id ? 'Approving…' : 'Approve access'}</button> : '—'}</td>
+                          <td className="role-management-user"><div className="flex items-center gap-3"><span className="role-management-avatar"><UserRound className="h-4 w-4" /></span><span><strong>{u.name}</strong><small>{u.email}</small></span></div></td>
+                          <td><select aria-label={`Set ${u.name} role`} className="input-field !py-2 !text-xs role-management-select" value={(userEdits[u.id]?.role ?? u.role)} onChange={event => handleUserEdit(u, 'role', event.target.value)}><option value="citizen">Citizen</option><option value="committee_officer">Committee officer</option><option value="reviewer">Reviewer</option><option value="administrator">Administrator</option></select></td>
+                          <td>{(userEdits[u.id]?.role ?? u.role) === 'committee_officer' ? (
+                            <select aria-label={`Assign ${u.name} to committee`} className="input-field !py-2 !text-xs role-management-select min-w-48" value={userEdits[u.id]?.committee_id ?? u.committee_id ?? ''} onChange={event => handleUserEdit(u, 'committee_id', event.target.value)}><option value="">Select committee</option>{committeeDirectory.map(committee => <option key={committee.id} value={committee.id}>{committee.name}</option>)}</select>
+                          ) : <span className="text-xs font-semibold text-surface-500">{committeeDirectory.find(committee => committee.id === u.committee_id)?.name || 'No committee'}</span>}</td>
+                          <td><select aria-label={`Set ${u.name} status`} className="input-field !py-2 !text-xs role-management-select" value={(userEdits[u.id]?.status ?? u.status)} onChange={event => handleUserEdit(u, 'status', event.target.value)}><option value="active">Active</option><option value="suspended">Suspended</option><option value="pending_approval">Pending approval</option></select></td>
+                          <td className="text-xs font-semibold text-surface-500 whitespace-nowrap">{new Date(u.created_date).toLocaleDateString()}</td>
+                          <td><button type="button" onClick={() => handleSaveUser(u)} disabled={savingUserId !== null || !userEdits[u.id]} className="role-management-save btn-primary !px-3 !py-2 text-xs disabled:opacity-50"><Save className="h-3.5 w-3.5" />{savingUserId === u.id ? 'Saving…' : 'Save'}</button></td>
                         </motion.tr>
                       ))}
                     </tbody>
@@ -364,18 +246,22 @@ export function AdminPage() {
       )}
 
       {activeTab === 'committees' && (
-        <Card className="!p-6">
-          <h2 className="text-2xl font-black text-surface-900 mb-2">Synced committee directory</h2>
-          <p className="text-sm text-surface-600 mb-5">Committee records are loaded from the official Parliament data sync. Officers request access to an existing record from Sign up; administrators review the request in User Accounts and approve the correct committee.</p>
-          {state.committees.length ? <div className="grid gap-3 md:grid-cols-2">
-            {state.committees.map(committee => <div key={committee.id} className="rounded-xl border border-surface-200 bg-white p-4">
-              <div className="font-bold text-surface-900">{committee.name}</div>
-              <div className="mt-1 text-xs font-semibold text-surface-500">{committee.institution}</div>
-            </div>)}
-          </div> : <p className="rounded-xl bg-surface-50 p-4 text-sm text-surface-600">No committee records are currently available. Run the Parliament synchronization before inviting officer access requests.</p>}
-        </Card>
+        <div className="space-y-6">
+          <Card className="!p-6"><h2 className="text-2xl font-black text-surface-900 mb-2">Create committee access</h2><p className="text-sm text-surface-600 mb-5">Administrators can create a committee record and its first officer account here.</p>
+            <form onSubmit={handleCreateCommittee} className="grid gap-3 md:grid-cols-2">
+              <input className="input-field" placeholder="Committee name" value={committeeForm.name} onChange={e => setCommitteeForm({ ...committeeForm, name: e.target.value })} required />
+              <select className="input-field" value={committeeForm.institution} onChange={e => setCommitteeForm({ ...committeeForm, institution: e.target.value })}><option>National Assembly</option><option>Nairobi County Assembly</option><option>Trans Nzoia County Assembly</option></select>
+              <input className="input-field" placeholder="Description" value={committeeForm.description} onChange={e => setCommitteeForm({ ...committeeForm, description: e.target.value })} />
+              <input className="input-field" type="email" placeholder="Committee contact email" value={committeeForm.contact_email} onChange={e => setCommitteeForm({ ...committeeForm, contact_email: e.target.value })} />
+              <input className="input-field" placeholder="Officer account name" value={committeeForm.account_name} onChange={e => setCommitteeForm({ ...committeeForm, account_name: e.target.value })} required />
+              <input className="input-field" type="email" placeholder="Officer login email" value={committeeForm.account_email} onChange={e => setCommitteeForm({ ...committeeForm, account_email: e.target.value })} required />
+              <input className="input-field" type="password" minLength={8} placeholder="Officer password (8+ characters)" value={committeeForm.account_password} onChange={e => setCommitteeForm({ ...committeeForm, account_password: e.target.value })} required />
+              <button className="btn-primary" type="submit">Create committee and account</button>
+            </form>{committeeMessage && <p role="status" className="mt-4 text-sm font-semibold text-primary-700">{committeeMessage}</p>}
+          </Card>
+          <Card className="!p-6"><h2 className="text-2xl font-black text-surface-900 mb-2">Committee directory</h2><div className="grid gap-3 md:grid-cols-2">{committeeDirectory.map(committee => <div key={committee.id} className="rounded-xl border border-surface-200 bg-white p-4"><div className="font-bold text-surface-900">{committee.name}</div><div className="mt-1 text-xs font-semibold text-surface-500">{committee.institution}</div>{committee.contact_email && <div className="mt-2 text-xs text-surface-600">{committee.contact_email}</div>}</div>)}</div></Card>
+        </div>
       )}
-
       {activeTab === 'export' && (
         <div className="space-y-6">
           <Card className="!p-7 md:!p-8 relative overflow-hidden">
@@ -439,109 +325,17 @@ export function AdminPage() {
             </div>
           </div>
 
-          <div className="space-y-5">
-            <motion.div
-              initial={{ opacity: 0, y: 16 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true }}
-              transition={{ duration: 0.45, delay: 0 }}
-            >
-              <Card className="!p-7 relative overflow-hidden border-0">
-                <div className="absolute inset-0 bg-gradient-to-br from-primary-50 via-white to-white" />
-                <div className="absolute -top-24 -right-16 w-56 h-56 rounded-full bg-primary-200/40 blur-3xl pointer-events-none" />
-                <div className="relative flex gap-5">
-                  <div className="shrink-0 w-12 h-12 rounded-2xl bg-gradient-to-br from-primary-500 to-primary-700 flex items-center justify-center text-white shadow-lg shadow-primary-500/30">
-                    <Upload className="h-6 w-6" />
-                  </div>
-                  <div className="flex-1">
-                    <h3 className="text-xl font-black text-surface-900 tracking-tight mb-1">Ingestion Settings</h3>
-                    <div className="space-y-2 mt-3">
-                      <div className="flex items-center justify-between p-3 rounded-xl bg-white border border-primary-100/60">
-                        <span className="text-sm font-semibold text-surface-700">OCR fallback threshold</span>
-                        <Badge variant="blue" className="!text-[11px]">text coverage below 10%</Badge>
-                      </div>
-                      <div className="flex items-center justify-between p-3 rounded-xl bg-white border border-primary-100/60">
-                        <span className="text-sm font-semibold text-surface-700">Max file size</span>
-                        <Badge variant="blue" className="!text-[11px]">50MB</Badge>
-                      </div>
-                      <div className="flex items-center justify-between p-3 rounded-xl bg-white border border-primary-100/60">
-                        <span className="text-sm font-semibold text-surface-700">Supported formats</span>
-                        <Badge variant="blue" className="!text-[11px]">PDF (native + scanned)</Badge>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </Card>
-            </motion.div>
-
-            <motion.div
-              initial={{ opacity: 0, y: 16 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true }}
-              transition={{ duration: 0.45, delay: 0.05 }}
-            >
-              <Card className="!p-7 relative overflow-hidden border-0">
-                <div className="absolute inset-0 bg-gradient-to-br from-warm-50 via-white to-white" />
-                <div className="absolute -bottom-24 -left-16 w-56 h-56 rounded-full bg-warm-200/40 blur-3xl pointer-events-none" />
-                <div className="relative flex gap-5">
-                  <div className="shrink-0 w-12 h-12 rounded-2xl bg-gradient-to-br from-warm-500 to-warm-700 flex items-center justify-center text-white shadow-lg shadow-warm-500/30">
-                    <Shield className="h-6 w-6" />
-                  </div>
-                  <div className="flex-1">
-                    <h3 className="text-xl font-black text-surface-900 tracking-tight mb-1">Moderation Settings</h3>
-                    <div className="space-y-2 mt-3">
-                      <div className="flex items-center justify-between p-3 rounded-xl bg-white border border-warm-100/60">
-                        <span className="text-sm font-semibold text-surface-700">Auto-quarantine</span>
-                        <Badge variant="warm" className="!text-[11px]">disabled · human review only</Badge>
-                      </div>
-                      <div className="flex items-center justify-between p-3 rounded-xl bg-white border border-warm-100/60">
-                        <span className="text-sm font-semibold text-surface-700">Appeal window</span>
-                        <Badge variant="warm" className="!text-[11px]">14 days</Badge>
-                      </div>
-                      <div className="flex items-center justify-between p-3 rounded-xl bg-white border border-warm-100/60">
-                        <span className="text-sm font-semibold text-surface-700">Rate limit</span>
-                        <Badge variant="warm" className="!text-[11px]">5 submissions / user / hour</Badge>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </Card>
-            </motion.div>
-
-            <motion.div
-              initial={{ opacity: 0, y: 16 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true }}
-              transition={{ duration: 0.45, delay: 0.1 }}
-            >
-              <Card className="!p-7 relative overflow-hidden border-0">
-                <div className="absolute inset-0 bg-gradient-to-br from-accent-50 via-white to-white" />
-                <div className="absolute -top-24 -right-24 w-56 h-56 rounded-full bg-accent-200/40 blur-3xl pointer-events-none" />
-                <div className="relative flex gap-5">
-                  <div className="shrink-0 w-12 h-12 rounded-2xl bg-gradient-to-br from-accent-500 to-accent-700 flex items-center justify-center text-white shadow-lg shadow-accent-500/30">
-                    <Gauge className="h-6 w-6" />
-                  </div>
-                  <div className="flex-1">
-                    <h3 className="text-xl font-black text-surface-900 tracking-tight mb-1">Matching Engine</h3>
-                    <div className="space-y-2 mt-3">
-                      <div className="flex items-center justify-between p-3 rounded-xl bg-white border border-accent-100/60">
-                        <span className="text-sm font-semibold text-surface-700">Primary method</span>
-                        <Badge variant="accent" className="!text-[11px]">Clause-reference matching (rule-based)</Badge>
-                      </div>
-                      <div className="flex items-center justify-between p-3 rounded-xl bg-white border border-accent-100/60">
-                        <span className="text-sm font-semibold text-surface-700">Fallback</span>
-                        <Badge variant="accent" className="!text-[11px]">Text similarity (rapidfuzz)</Badge>
-                      </div>
-                      <div className="flex items-center justify-between p-3 rounded-xl bg-white border border-accent-100/60">
-                        <span className="text-sm font-semibold text-surface-700">Min confidence for auto-queue</span>
-                        <Badge variant="accent" className="!text-[11px]">0.3</Badge>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </Card>
-            </motion.div>
-          </div>
+          <Card className="!p-7"><div className="grid gap-5 md:grid-cols-2">
+            <label className="text-sm font-bold">OCR fallback threshold (%)<input className="input-field mt-1" type="number" min="0" max="100" value={settings.ocrThreshold} onChange={e => setSettings({ ...settings, ocrThreshold: Number(e.target.value) })} /></label>
+            <label className="text-sm font-bold">Maximum file size (MB)<input className="input-field mt-1" type="number" min="1" value={settings.maxFileSizeMb} onChange={e => setSettings({ ...settings, maxFileSizeMb: Number(e.target.value) })} /></label>
+            <label className="text-sm font-bold">Supported formats<input className="input-field mt-1" value={settings.supportedFormats} onChange={e => setSettings({ ...settings, supportedFormats: e.target.value })} /></label>
+            <label className="text-sm font-bold">Appeal window (days)<input className="input-field mt-1" type="number" min="0" value={settings.appealWindowDays} onChange={e => setSettings({ ...settings, appealWindowDays: Number(e.target.value) })} /></label>
+            <label className="text-sm font-bold">Rate limit (submissions/user/hour)<input className="input-field mt-1" type="number" min="0" value={settings.rateLimit} onChange={e => setSettings({ ...settings, rateLimit: Number(e.target.value) })} /></label>
+            <label className="text-sm font-bold">Minimum confidence for auto-queue<input className="input-field mt-1" type="number" min="0" max="1" step="0.05" value={settings.minConfidence} onChange={e => setSettings({ ...settings, minConfidence: Number(e.target.value) })} /></label>
+            <label className="text-sm font-bold">Primary matching method<input className="input-field mt-1" value={settings.matchingMethod} onChange={e => setSettings({ ...settings, matchingMethod: e.target.value })} /></label>
+            <label className="text-sm font-bold">Fallback matching method<input className="input-field mt-1" value={settings.fallbackMethod} onChange={e => setSettings({ ...settings, fallbackMethod: e.target.value })} /></label>
+            <label className="md:col-span-2 inline-flex items-center gap-3 text-sm font-bold"><input type="checkbox" checked={settings.autoQuarantine} onChange={e => setSettings({ ...settings, autoQuarantine: e.target.checked })} /> Enable auto-quarantine</label>
+          </div><div className="mt-6 flex items-center gap-3"><button type="button" className="btn-primary" onClick={saveSettings}>Save settings</button>{settingsMessage && <span role="status" className="text-sm font-semibold text-primary-700">{settingsMessage}</span>}</div></Card>
         </div>
       )}
     </div>
