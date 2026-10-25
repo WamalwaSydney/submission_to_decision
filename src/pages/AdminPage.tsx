@@ -191,7 +191,7 @@ export function AdminPage() {
                         <th>Committee</th>
                         <th>Status</th>
                         <th>Created</th>
-                        <th>Action</th>
+                        <th className="role-management-actions role-management-actions-header">Action</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -210,7 +210,7 @@ export function AdminPage() {
                           ) : <span className="text-xs font-semibold text-surface-500">{committeeDirectory.find(committee => committee.id === u.committee_id)?.name || 'No committee'}</span>}</td>
                           <td><select aria-label={`Set ${u.name} status`} className="input-field !py-2 !text-xs role-management-select" value={(userEdits[u.id]?.status ?? u.status)} onChange={event => handleUserEdit(u, 'status', event.target.value)}><option value="active">Active</option><option value="suspended">Suspended</option><option value="pending_approval">Pending approval</option></select></td>
                           <td className="text-xs font-semibold text-surface-500 whitespace-nowrap">{new Date(u.created_date).toLocaleDateString()}</td>
-                          <td><div className="flex flex-col gap-2 items-start"><button type="button" onClick={() => handleSaveUser(u)} disabled={savingUserId !== null || !userEdits[u.id]} className="role-management-save btn-primary !px-3 !py-2 text-xs disabled:opacity-50"><Save className="h-3.5 w-3.5" />{savingUserId === u.id ? 'Saving…' : 'Save'}</button><button type="button" onClick={() => handleIssuePasswordReset(u)} disabled={issuingReset !== null || u.status !== 'active'} className="inline-flex items-center gap-1 rounded-lg border border-amber-300 bg-amber-50 px-2 py-1.5 text-xs font-bold text-amber-900 disabled:opacity-50" title="Verify identity first; code is shown once"><KeyRound className="h-3.5 w-3.5" />{issuingReset === u.id ? 'Creating…' : 'Recovery link'}</button></div></td>
+                          <td className="role-management-actions"><div className="flex flex-col gap-2 items-start"><button type="button" onClick={() => handleSaveUser(u)} disabled={savingUserId !== null || !userEdits[u.id]} aria-label={userEdits[u.id] ? `Save changes for ${u.name}` : `No unsaved changes for ${u.name}`} title={userEdits[u.id] ? 'Save changes for this account' : 'No unsaved changes'} className="role-management-save btn-primary !px-3 !py-2 text-xs disabled:opacity-70"><Save className="h-3.5 w-3.5" />{savingUserId === u.id ? 'Saving…' : userEdits[u.id] ? 'Save changes' : 'Saved'}</button><button type="button" onClick={() => handleIssuePasswordReset(u)} disabled={issuingReset !== null || u.status !== 'active'} className="inline-flex items-center gap-1 rounded-lg border border-amber-300 bg-amber-50 px-2 py-1.5 text-xs font-bold text-amber-900 disabled:opacity-50" title="Verify identity first; code is shown once"><KeyRound className="h-3.5 w-3.5" />{issuingReset === u.id ? 'Creating…' : 'Recovery link'}</button></div></td>
                         </motion.tr>
                       ))}
                     </tbody>

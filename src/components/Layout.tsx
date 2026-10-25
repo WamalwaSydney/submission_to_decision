@@ -71,29 +71,24 @@ const publicLinksByRole: Record<string, typeof publicLinks> = {
 
 const authenticatedLinksMap: Record<string, { to: string; label: string; icon: any }[]> = {
   citizen: [
-    { to: '/account-security', label: 'Account Security', icon: Shield },
     { to: '/submit', label: 'Submit View', icon: MessageSquarePlus },
     { to: '/my-receipts', label: 'My Receipts', icon: Receipt },
     { to: '/messages', label: 'Automated Updates', icon: MessageSquarePlus },
   ],
   reviewer: [
-    { to: '/account-security', label: 'Account Security', icon: Shield },
     { to: '/reviewer/queue', label: 'Match Review', icon: ClipboardList },
     { to: '/reviewer/reports', label: 'Reported Content', icon: Flag },
   ],
   moderator: [
-    { to: '/account-security', label: 'Account Security', icon: Shield },
     { to: '/reviewer/queue', label: 'Match Review', icon: ClipboardList },
     { to: '/reviewer/reports', label: 'Reported Content', icon: Flag },
   ],
   committee_officer: [
-    { to: '/account-security', label: 'Account Security', icon: Shield },
     { to: '/committee', label: 'Committee Dashboard', icon: Database },
     { to: '/committee/ingestion', label: 'Report Ingestion', icon: FileUp },
     { to: '/committee/notices', label: 'Notice Records', icon: FolderOpen },
   ],
   administrator: [
-    { to: '/account-security', label: 'Account Security', icon: Shield },
     { to: '/admin', label: 'Administration', icon: Settings2 },
   ],
 };

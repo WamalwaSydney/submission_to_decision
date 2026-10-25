@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect } from 'react';
-import { HashRouter, Routes, Route } from 'react-router-dom';
+import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AppProvider, useApp } from './context/AppContext';
 import { Layout } from './components/Layout';
 import { HomePage } from './pages/HomePage';
@@ -8,7 +8,6 @@ import { ReceiptLookupPage, ReceiptVerifyPage } from './pages/ReceiptPages';
 import { SubmitViewPage } from './pages/SubmitViewPage';
 import { LoginPage } from './pages/LoginPage';
 import { ResetPasswordPage } from './pages/ResetPasswordPage';
-import { AccountSecurityPage } from './pages/AccountSecurityPage';
 import { NoticesPage } from './pages/NoticesPage';
 import { SignupPage } from './pages/SignupPage';
 import { ReviewerQueuePage, ReportedContentPage } from './pages/ModeratorPages';
@@ -83,7 +82,7 @@ function AppRoutes() {
         <Route path="/signin" element={<LoginPage />} />
         <Route path="/signup" element={<SignupPage />} />
         <Route path="/reset-password" element={<ResetPasswordPage />} />
-        <Route path="/account-security" element={<AccountSecurityPage />} />
+        <Route path="/account-security" element={<Navigate to="/" replace />} />
         <Route path="/notices" element={<NoticesPage />} />
         <Route path="/my-receipts" element={<MyReceiptsPage />} />
         

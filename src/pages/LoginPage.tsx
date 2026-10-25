@@ -25,7 +25,7 @@ export function LoginPage() {
       localStorage.setItem('access_token', response.access_token);
       localStorage.setItem('current_user', JSON.stringify(response.user));
       dispatch({ type: 'SET_USER', payload: response.user });
-      navigate(response.user.recovery_codes_configured ? '/' : '/account-security');
+      navigate('/');
     } catch (error) {
       setError(error instanceof Error ? error.message : 'Unable to sign in.');
     }
