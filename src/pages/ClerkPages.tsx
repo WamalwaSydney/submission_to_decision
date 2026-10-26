@@ -460,6 +460,9 @@ export function CommitteeOfficerIngestionPage() {
 export function CommitteeOfficerNoticesPage() {
   const { state, dispatch } = useApp();
   const [showForm, setShowForm] = useState(false);
+  const [availableBills, setAvailableBills] = useState<typeof state.bills>([]);
+  const [billsLoading, setBillsLoading] = useState(true);
+  const [billsError, setBillsError] = useState<string | null>(null);
   const [noticePage, setNoticePage] = useState(1);
   const [formData, setFormData] = useState({
     bill_ref: '', institution: '' as string, notice_date: '', window_start: '', window_end: '', mode: '', bill_text_accessible: false
@@ -469,6 +472,26 @@ export function CommitteeOfficerNoticesPage() {
   const visibleNotices = state.notices.slice((noticePage - 1) * noticesPerPage, noticePage * noticesPerPage);
   const noticeRangeStart = state.notices.length === 0 ? 0 : (noticePage - 1) * noticesPerPage + 1;
   const noticeRangeEnd = Math.min(noticePage * noticesPerPage, state.notices.length);
+
+  useEffect(() => {
+    let cancelled = false;
+    setBillsLoading(true);
+    setBillsError(null);
+    api.committeeBills()
+      .then(({ bills }) => {
+        if (cancelled) return;
+        const validBills = bills.filter(bill => Boolean(bill?.id && bill?.title));
+        setAvailableBills(validBills);
+        dispatch({ type: 'HYDRATE', payload: { bills: validBills } });
+      })
+      .catch(error => {
+        if (!cancelled) setBillsError(error instanceof Error ? error.message : 'Unable to load bills.');
+      })
+      .finally(() => { if (!cancelled) setBillsLoading(false); });
+    return () => { cancelled = true; };
+  }, [dispatch]);
+
+  const noticeInstitutions = Array.from(new Set(availableBills.map(bill => bill.institution).filter(Boolean)));
 
   const handleAdd = async () => {
     if (!formData.bill_ref || !formData.notice_date) return;
@@ -532,11 +555,15 @@ export function CommitteeOfficerNoticesPage() {
                 <Label className="!text-xs !font-black !uppercase !tracking-[0.15em] !text-surface-600 !mb-2">Bill</Label>
                 <SelectField
                   value={formData.bill_ref}
-                  onChange={e => setFormData({...formData, bill_ref: e.target.value})}
+                  onChange={e => {
+                    const bill = availableBills.find(item => item.id === e.target.value);
+                    setFormData({...formData, bill_ref: e.target.value, institution: bill?.institution || formData.institution});
+                  }}
                 >
                   <option value="">Select...</option>
-                  {state.bills.map(b => <option key={b.id} value={b.id}>{b.title}</option>)}
+                  {availableBills.map(b => <option key={b.id} value={b.id}>{b.title} ({b.institution})</option>)}
                 </SelectField>
+                {!billsLoading && !availableBills.length && <p className="text-xs font-semibold text-red-600 mt-2">{billsError || 'No live bills are available. Sync or ingest a bill before creating a notice.'}</p>}
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
@@ -554,9 +581,7 @@ export function CommitteeOfficerNoticesPage() {
                     onChange={e => setFormData({...formData, institution: e.target.value})}
                   >
                     <option value="">Select...</option>
-                    <option>National Assembly</option>
-                    <option>Nairobi County Assembly</option>
-                    <option>Trans Nzoia County Assembly</option>
+                    {noticeInstitutions.map(institution => <option key={institution} value={institution}>{institution}</option>)}
                   </SelectField>
                 </div>
               </div>

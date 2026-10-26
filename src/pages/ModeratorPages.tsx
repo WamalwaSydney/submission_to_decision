@@ -109,7 +109,16 @@ export function ReviewerQueuePage() {
     setDecisionMatchId(matchId);
     setDecisionError('');
     try {
-      const result = await api.decideMatch(matchId, decision === 'confirmed' ? 'confirm' : 'reject');
+      let reason: string | undefined;
+      if (decision === 'rejected') {
+        reason = window.prompt('Reason for rejecting this submission match (required):')?.trim();
+        if (!reason) {
+          setDecisionError('A reason is required when rejecting a submission match.');
+          setDecisionMatchId(null);
+          return;
+        }
+      }
+      const result = await api.decideMatch(matchId, decision === 'confirmed' ? 'confirm' : 'reject', reason);
       const persistedMatch = result?.match;
       if (persistedMatch) {
         dispatch({ type: 'UPSERT_MATCH', payload: persistedMatch });
@@ -324,7 +333,7 @@ export function ReviewerQueuePage() {
                               </p>
                             )}
                             <p className="text-xs text-surface-600 mt-1">Committee outcome: <span className="font-semibold">{entry?.treatment || 'not classified'}</span></p>
-                            <p className="text-xs text-surface-500 mt-1">Your decision confirms or rejects this match only; it does not determine whether the committee adopted the submission.</p>
+                            <p className="text-xs text-surface-500 mt-1">Confirm = adopted. Reject with a reason = rejected with reasons. Use the treatment editor for an explicit amendment or not-addressed outcome.</p>
                           </div>
                         </div>
 
@@ -355,7 +364,7 @@ export function ReviewerQueuePage() {
                             disabled={!state.currentUser || decisionMatchId !== null}
                             className="btn-danger inline-flex min-h-11 items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-60"
                           >
-                            <XCircle className="h-4 w-4" /> Reject Match
+                            <XCircle className="h-4 w-4" /> Reject with reason
                           </button>
                         </div>
                       </div>
@@ -496,9 +505,10 @@ export function ReviewerQueuePage() {
                       </p>
                       <p className="text-xs text-surface-600 font-semibold mt-2">
                         {isConfirmed
-                          ? `Committee outcome: ${entry?.treatment && !['unclassified', 'awaiting committee report'].includes(entry.treatment) ? entry.treatment : 'adopted by confirmed match'}`
-                          : 'No confirmed report match; this rejected proposal does not establish a committee outcome.'}
+                          ? `Submission outcome: ${entry?.treatment && !['unclassified', 'awaiting committee report'].includes(entry.treatment) ? entry.treatment : 'adopted'}`
+                          : 'Submission outcome: rejected with reasons'}
                       </p>
+                      {!isConfirmed && match.reviewer_reason && <p className="text-xs text-surface-600 font-semibold mt-2">Reviewer reason: {match.reviewer_reason}</p>}
                       {canModerate && isConfirmed && entry && <ReportTreatmentEditor entry={entry} />}
                     </div>
                   </Card>

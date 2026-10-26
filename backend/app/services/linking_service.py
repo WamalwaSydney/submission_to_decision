@@ -186,7 +186,7 @@ async def _notify_decision(db: AsyncSession, match: SubmissionMatch, decision: s
         key = f"match:{match.id}:confirmed:{treatment}"
         event = "match_confirmed"
     else:
-        facts = {}
+        facts = {"reason": match.reviewer_reason or ""}
         key = f"match:{match.id}:rejected"
         event = "match_rejected"
     await notification_service.notify_receipt_event(db, receipt, key, event, facts)
@@ -208,14 +208,15 @@ async def confirm_match(db: AsyncSession, match_id: str, reviewer_id: str) -> Su
     await db.refresh(match)
     return match
 
-async def reject_match(db: AsyncSession, match_id: str, reviewer_id: str) -> SubmissionMatch:
+async def reject_match(db: AsyncSession, match_id: str, reviewer_id: str, reason: str) -> SubmissionMatch:
     result = await db.execute(select(SubmissionMatch).where(SubmissionMatch.id == match_id))
     match = result.scalar_one_or_none()
     if not match:
         raise ValueError("Match not found")
     match.reviewer_decision = "rejected"
+    match.reviewer_reason = reason
     match.reviewer_id = reviewer_id
-    await record_audit(db, entity_type="submission_match", entity_id=match.id, action="rejected", actor_id=reviewer_id, details={"decision": "rejected"})
+    await record_audit(db, entity_type="submission_match", entity_id=match.id, action="rejected", actor_id=reviewer_id, details={"decision": "rejected", "reason": reason})
     await db.commit()
     await _notify_decision(db, match, "rejected")
     await db.refresh(match)

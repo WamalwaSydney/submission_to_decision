@@ -78,8 +78,13 @@ export function BillsListPage() {
   }, [dispatch]);
 
   const getOutcome = (billId: string) => {
-    const match = state.matches.find(m => m.reviewer_decision === 'confirmed' && state.receipts.some(r => r.id === m.receipt_ref && r.legislative_item_id === billId));
-    return match ? (state.reportEntries.find(e => e.id === match.report_entry_ref)?.treatment || 'awaiting committee report') : 'awaiting committee report';
+    const billMatch = (decision: string) => state.matches.find(m => m.reviewer_decision === decision && state.receipts.some(r => r.id === m.receipt_ref && r.legislative_item_id === billId));
+    const confirmed = billMatch('confirmed');
+    if (confirmed) {
+      const treatment = state.reportEntries.find(e => e.id === confirmed.report_entry_ref)?.treatment;
+      return treatment && !['unclassified', 'awaiting committee report'].includes(treatment) ? treatment : 'adopted';
+    }
+    return billMatch('rejected') ? 'rejected with reasons' : 'awaiting committee report';
   };
   const committeeName = (bill: typeof state.bills[number]) => state.committees.find(c => c.id === bill.committee_id)?.name || `Unassigned — ${bill.institution}`;
   const reset = () => { setQuery(''); setCommittee('all'); setInstitution('all'); setStage('all'); setOutcome('all'); setParticipation('all'); setSortBy('recent'); };
@@ -353,7 +358,8 @@ export function BillPage() {
             {billReceipts.map((receipt, i) => {
               const status = getSubmissionStatus(receipt.id);
               const reviewDecision = getSubmissionReviewDecision(receipt.id);
-              const match = state.matches.find(m => m.receipt_ref === receipt.id && m.reviewer_decision === 'confirmed');
+              const match = state.matches.find(m => m.receipt_ref === receipt.id && m.reviewer_decision === 'confirmed')
+                || state.matches.find(m => m.receipt_ref === receipt.id && m.reviewer_decision === 'rejected');
               const entry = match ? state.reportEntries.find(e => e.id === match.report_entry_ref) : null;
 
               return (
@@ -400,9 +406,9 @@ export function BillPage() {
                       </span>
                     )}
                   </div>
-                  {entry?.stated_reason && (
+                  {(entry?.stated_reason || match?.reviewer_reason) && (
                     <div className="mt-4 text-xs bg-warm-50 p-4 rounded-xl border border-warm-200 text-warm-800 leading-relaxed">
-                      <strong className="font-black">Committee reason:</strong> {entry.stated_reason}
+                      <strong className="font-black">Reason:</strong> {entry?.stated_reason || match?.reviewer_reason}
                     </div>
                   )}
                 </motion.div>

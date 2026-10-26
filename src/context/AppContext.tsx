@@ -202,7 +202,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const confirmedMatch = state.matches.find(
       m => m.receipt_ref === receiptId && m.reviewer_decision === 'confirmed'
     );
-    if (!confirmedMatch) return 'awaiting committee report';
+    if (!confirmedMatch) {
+      const rejectedMatch = state.matches.find(m => m.receipt_ref === receiptId && m.reviewer_decision === 'rejected');
+      return rejectedMatch ? 'rejected with reasons' : 'awaiting committee report';
+    }
     const entry = state.reportEntries.find(e => e.id === confirmedMatch.report_entry_ref);
     // In this workflow, accepting a match means the submission was adopted.
     // An explicit committee treatment still takes precedence when available.

@@ -143,6 +143,7 @@ class SubmissionMatch(Base):
     confidence_score = Column(Float, nullable=False)
     explanation = Column(Text, nullable=False)
     reviewer_decision = Column(String(20), default="pending")
+    reviewer_reason = Column(Text)
     reviewer_id = Column(UUID(as_uuid=True), ForeignKey("users.id"))
     timestamp = Column(DateTime(timezone=True), server_default=func.now())
 

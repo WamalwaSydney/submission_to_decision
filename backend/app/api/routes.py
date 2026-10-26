@@ -120,6 +120,10 @@ class ReportEntryUpdate(BaseModel):
     stated_reason: Optional[str] = None
 
 
+class MatchDecisionUpdate(BaseModel):
+    reason: Optional[str] = Field(default=None, max_length=2000)
+
+
 def public_user(user: User) -> dict:
     return {
         "id": str(user.id),
@@ -575,26 +579,28 @@ async def get_bill(bill_id: UUID, db: AsyncSession = Depends(get_db)):
     }
 
     for receipt in receipts:
-        match_result = await db.execute(
-            select(SubmissionMatch).where(
-                SubmissionMatch.receipt_ref == receipt.id,
-                SubmissionMatch.reviewer_decision == "confirmed",
-            )
+        match_result = await db.execute(select(SubmissionMatch).where(SubmissionMatch.receipt_ref == receipt.id))
+        receipt_matches = list(match_result.scalars().all())
+        match = (
+            next((item for item in receipt_matches if item.reviewer_decision == "confirmed"), None)
+            or next((item for item in receipt_matches if item.reviewer_decision == "rejected"), None)
+            or next((item for item in receipt_matches if item.reviewer_decision == "pending"), None)
         )
-        match = match_result.scalars().first()
 
         entry = None
-        if match:
+        if match and match.reviewer_decision == "confirmed":
             entry_result = await db.execute(
                 select(ReportEntry).where(ReportEntry.id == match.report_entry_ref)
             )
             entry = entry_result.scalar_one_or_none()
 
-        if match:
+        if match and match.reviewer_decision == "confirmed":
             # In this workflow, accepting a match means adoption unless the
             # official report explicitly records another treatment.
             treatment = entry.treatment if entry and entry.treatment not in {"unclassified", "awaiting committee report"} else "adopted"
             outcome_counts[treatment] = outcome_counts.get(treatment, 0) + 1
+        elif match and match.reviewer_decision == "rejected":
+            outcome_counts["rejected with reasons"] += 1
         else:
             outcome_counts["awaiting committee report"] += 1
 
@@ -683,7 +689,13 @@ async def bill_flow(
         )
         confirmed_match = match if match and match.reviewer_decision == "confirmed" else None
         entry = next((e for e in entries if confirmed_match and e.id == confirmed_match.report_entry_ref), None)
-        submissions.append({"public_id": receipt.public_id, "timestamp": receipt.timestamp, "clause_ref": receipt.clause_ref, "status": (entry.treatment if entry and entry.treatment not in {"unclassified", "awaiting committee report"} else "adopted") if confirmed_match else "awaiting committee report", "match_percentage": round(match.confidence_score * 100, 1) if match else None, "match_decision": match.reviewer_decision if match else None, "reason": entry.stated_reason if entry and confirmed_match else None})
+        status = (
+            (entry.treatment if entry and entry.treatment not in {"unclassified", "awaiting committee report"} else "adopted")
+            if confirmed_match
+            else "rejected with reasons" if match and match.reviewer_decision == "rejected"
+            else "awaiting committee report"
+        )
+        submissions.append({"public_id": receipt.public_id, "timestamp": receipt.timestamp, "clause_ref": receipt.clause_ref, "status": status, "match_percentage": round(match.confidence_score * 100, 1) if match else None, "match_decision": match.reviewer_decision if match else None, "reason": entry.stated_reason if entry and confirmed_match else (match.reviewer_reason if match and match.reviewer_decision == "rejected" else None)})
     return {"bill": to_dict(bill), "flow": [{"stage": h.get("stage"), "date": h.get("date"), "note": h.get("note")} for h in (bill.status_history or [])], "reports": [report_to_dict(r) for r in reports], "report_entries": [to_dict(e) for e in entries], "submissions": submissions}
 
 # ============ Messages ============
@@ -896,18 +908,18 @@ async def get_receipt(public_id: str, db: AsyncSession = Depends(get_db)):
     match_decision = match.reviewer_decision if match else None
 
     match_data = None
-    if match and match.reviewer_decision == "confirmed":
+    if match and match.reviewer_decision in {"confirmed", "rejected"}:
         entry_result = await db.execute(
             select(ReportEntry).where(ReportEntry.id == match.report_entry_ref)
         )
         entry = entry_result.scalar_one_or_none()
-        if entry:
+        if entry or match.reviewer_decision == "rejected":
             match_data = {
                 "method": match.match_method,
                 "confidence": match.confidence_score,
                 "explanation": match.explanation,
-                "treatment": entry.treatment if entry.treatment not in {"unclassified", "awaiting committee report"} else "adopted",
-                "stated_reason": entry.stated_reason,
+                "treatment": (entry.treatment if entry and entry.treatment not in {"unclassified", "awaiting committee report"} else "adopted") if match.reviewer_decision == "confirmed" else "rejected with reasons",
+                "stated_reason": entry.stated_reason if entry and match.reviewer_decision == "confirmed" else match.reviewer_reason,
             }
 
     return {
@@ -917,7 +929,7 @@ async def get_receipt(public_id: str, db: AsyncSession = Depends(get_db)):
         "clause_ref": receipt.clause_ref,
         "submission_text": receipt.submission_text,
         "timestamp": receipt.timestamp,
-        "status": match_data["treatment"] if match_data else ("adopted" if match_decision == "confirmed" else "awaiting committee report"),
+        "status": match_data["treatment"] if match_data else "awaiting committee report",
         "match_decision": match_decision,
         "lodging_status": receipt.lodging_status,
         "hash": receipt.hash,
@@ -970,11 +982,14 @@ async def confirm_match(
 @router.post("/matches/{match_id}/reject")
 async def reject_match(
     match_id: UUID,
+    payload: MatchDecisionUpdate,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_role("reviewer")),
 ):
+    if not payload.reason or not payload.reason.strip():
+        raise HTTPException(status_code=422, detail="A reason is required when rejecting a submission match")
     try:
-        match = await linking_service.reject_match(db, match_id, current_user.id)
+        match = await linking_service.reject_match(db, match_id, current_user.id, payload.reason.strip())
     except ValueError:
         raise HTTPException(status_code=404, detail="Match not found")
     return {"match": match}

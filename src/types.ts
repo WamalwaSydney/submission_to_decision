@@ -164,6 +164,7 @@ export interface SubmissionMatch {
   confidence_score: number;
   explanation: string;
   reviewer_decision: ReviewerDecision;
+  reviewer_reason?: string;
   reviewer_id?: string;
   timestamp: string;
 }
