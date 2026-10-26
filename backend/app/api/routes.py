@@ -639,6 +639,10 @@ async def bootstrap(db: AsyncSession = Depends(get_db)):
     report_entries = [entry for entry in await all_rows(ReportEntry) if entry.get("report_ref") in live_report_ids]
     report_entry_ids = {entry["id"] for entry in report_entries}
     matches = [match for match in await all_rows(SubmissionMatch) if match.get("report_entry_ref") in report_entry_ids]
+    confirmed_receipt_ids = {match["receipt_ref"] for match in matches if match.get("reviewer_decision") == "confirmed"}
+    for receipt in receipts:
+        if receipt.get("id") in confirmed_receipt_ids:
+            receipt["lodging_status"] = "acknowledged"
 
     return {
         "committees": await all_rows(Committee),
@@ -861,7 +865,17 @@ async def my_receipts(
     result = await db.execute(
         select(ParticipationReceipt).where(ParticipationReceipt.author_id == current_user.id)
     )
-    return {"receipts": [to_dict(receipt) for receipt in result.scalars().all()]}
+    receipts = list(result.scalars().all())
+    receipt_ids = [receipt.id for receipt in receipts]
+    confirmed_result = await db.execute(select(SubmissionMatch.receipt_ref).where(
+        SubmissionMatch.receipt_ref.in_(receipt_ids), SubmissionMatch.reviewer_decision == "confirmed"
+    )) if receipt_ids else None
+    confirmed_ids = set(confirmed_result.scalars().all()) if confirmed_result is not None else set()
+    payload = [to_dict(receipt) for receipt in receipts]
+    for item in payload:
+        if item["id"] in confirmed_ids:
+            item["lodging_status"] = "acknowledged"
+    return {"receipts": payload}
 
 
 @router.get("/receipts/review-queue")
@@ -931,7 +945,7 @@ async def get_receipt(public_id: str, db: AsyncSession = Depends(get_db)):
         "timestamp": receipt.timestamp,
         "status": match_data["treatment"] if match_data else "awaiting committee report",
         "match_decision": match_decision,
-        "lodging_status": receipt.lodging_status,
+        "lodging_status": "acknowledged" if match and match.reviewer_decision == "confirmed" else receipt.lodging_status,
         "hash": receipt.hash,
         "match": match_data,
     }
@@ -1440,11 +1454,18 @@ async def report_content(
         raise HTTPException(status_code=403, detail="Only citizen accounts can report citizen submissions")
     if content_type != "receipt":
         raise HTTPException(status_code=422, detail="Only citizen submissions can be reported here")
+    # Public receipt lookup returns the human-readable public_id, while other
+    # app screens may send the internal UUID. Resolve either identifier.
     try:
         receipt_uuid = UUID(content_id)
-    except ValueError:
-        raise HTTPException(status_code=422, detail="Invalid submission identifier")
-    receipt_result = await db.execute(select(ParticipationReceipt).where(ParticipationReceipt.id == receipt_uuid))
+    except (ValueError, TypeError):
+        receipt_uuid = None
+    receipt_query = select(ParticipationReceipt).where(
+        ParticipationReceipt.id == receipt_uuid
+        if receipt_uuid is not None
+        else ParticipationReceipt.public_id == content_id.strip().upper()
+    )
+    receipt_result = await db.execute(receipt_query)
     receipt = receipt_result.scalar_one_or_none()
     if receipt is None:
         raise HTTPException(status_code=404, detail="Submission not found")
@@ -1486,6 +1507,33 @@ async def list_moderation_cases(
     result = await db.execute(select(ModerationAction))
     actions = result.scalars().all()
     return {"cases": [to_dict(a) for a in actions]}
+
+
+@router.put("/moderation/cases/{case_id}")
+async def decide_moderation_case(
+    case_id: UUID,
+    decision: str = Form(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_role("reviewer")),
+):
+    if decision not in {"upheld", "dismissed"}:
+        raise HTTPException(status_code=422, detail="Decision must be upheld or dismissed")
+    result = await db.execute(select(ModerationAction).where(ModerationAction.id == case_id))
+    action = result.scalar_one_or_none()
+    if action is None:
+        raise HTTPException(status_code=404, detail="Moderation case not found")
+    if action.decision != "pending":
+        raise HTTPException(status_code=409, detail="This moderation case has already been decided")
+    action.decision = decision
+    action.reviewer_id = current_user.id
+    await record_audit(
+        db, entity_type="moderation_action", entity_id=action.id,
+        action=decision, actor_id=current_user.id,
+        details={"decision": decision, "content_type": action.content_type},
+    )
+    await db.commit()
+    await db.refresh(action)
+    return {"action": to_dict(action)}
 
 
 # ============ Exports ============

@@ -212,6 +212,8 @@ async def confirm_match(db: AsyncSession, match_id: str, reviewer_id: str) -> Su
         raise ValueError("Match not found")
     match.reviewer_decision = "confirmed"
     match.reviewer_id = reviewer_id
+    # Receipt records are append-only. The API/UI derive acknowledged lodging
+    # from this confirmed relation without writing to the receipt row.
     await record_audit(db, entity_type="submission_match", entity_id=match.id, action="confirmed", actor_id=reviewer_id, details={"decision": "confirmed"})
     await db.commit()
     await _notify_decision(db, match, "confirmed")

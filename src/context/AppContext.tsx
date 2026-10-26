@@ -95,6 +95,14 @@ function reducer(state: AppState, action: Action): AppState {
     case 'UPDATE_MATCH_DECISION':
       return {
         ...state,
+        receipts: action.payload.decision === 'confirmed'
+          ? state.receipts.map(receipt => {
+              const confirmedMatch = state.matches.find(match => match.id === action.payload.matchId);
+              return confirmedMatch && receipt.id === confirmedMatch.receipt_ref
+                ? { ...receipt, lodging_status: 'acknowledged' }
+                : receipt;
+            })
+          : state.receipts,
         matches: state.matches.map(m =>
           m.id === action.payload.matchId
             ? { ...m, reviewer_decision: action.payload.decision, reviewer_id: action.payload.reviewerId, timestamp: new Date().toISOString() }
