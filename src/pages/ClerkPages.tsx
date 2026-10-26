@@ -461,7 +461,7 @@ export function CommitteeOfficerNoticesPage() {
   const { state, dispatch } = useApp();
   const [showForm, setShowForm] = useState(false);
   const [editingNotice, setEditingNotice] = useState<typeof state.notices[number] | null>(null);
-  const [availableBills, setAvailableBills] = useState<typeof state.bills>([]);
+  const [availableBills, setAvailableBills] = useState<typeof state.bills>(() => state.bills.filter(bill => Boolean(bill?.id && bill?.title)));
   const [billSearch, setBillSearch] = useState('');
   const [billsLoading, setBillsLoading] = useState(true);
   const [billsError, setBillsError] = useState<string | null>(null);
@@ -479,29 +479,37 @@ export function CommitteeOfficerNoticesPage() {
     let cancelled = false;
     setBillsLoading(true);
     setBillsError(null);
-    Promise.all([api.bills(), api.committees()])
-      .then(([{ bills }, { committees }]) => {
+    Promise.allSettled([api.bills(), api.committees()])
+      .then(([billsResult, committeesResult]) => {
         if (cancelled) return;
-        const validBills = bills.filter(bill => Boolean(bill?.id && bill?.title));
-        setAvailableBills(validBills);
-        dispatch({ type: 'HYDRATE', payload: { bills: validBills, committees } });
-      })
-      .catch(error => {
-        if (!cancelled) setBillsError(error instanceof Error ? error.message : 'Unable to load bills.');
+        if (billsResult.status === 'fulfilled') {
+          const validBills = billsResult.value.bills.filter(bill => Boolean(bill?.id && bill?.title));
+          setAvailableBills(validBills);
+          dispatch({ type: 'HYDRATE', payload: { bills: validBills } });
+          setBillsError(null);
+        } else if (!availableBills.length) {
+          setBillsError(billsResult.reason instanceof Error ? billsResult.reason.message : 'Unable to load bills.');
+        }
+        if (committeesResult.status === 'fulfilled') {
+          dispatch({ type: 'HYDRATE', payload: { committees: committeesResult.value.committees } });
+        }
       })
       .finally(() => { if (!cancelled) setBillsLoading(false); });
     return () => { cancelled = true; };
   }, [dispatch]);
 
+  const selectedBill = availableBills.find(bill => bill.id === formData.bill_ref);
+
   const noticeInstitutions = Array.from(new Set([
     ...state.committees.map(committee => committee.institution),
+    ...state.bills.map(bill => bill.institution),
     ...availableBills.map(bill => bill.institution),
+    selectedBill?.institution,
+    formData.institution,
   ].filter(Boolean))).sort();
 
   const billOptionLabel = (bill: typeof state.bills[number]) =>
     `${bill.title}${bill.identifier ? ` — ${bill.identifier}` : ''}`;
-
-  const selectedBill = availableBills.find(bill => bill.id === formData.bill_ref);
 
   const handleAdd = async () => {
     if (!formData.bill_ref || !formData.institution || !formData.notice_date) return;
