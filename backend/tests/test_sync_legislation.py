@@ -195,7 +195,10 @@ def test_bill_stage_merge_preserves_proposal_metadata_and_adds_official_source_d
     assert merged[0].committee_name == "Agriculture, Livestock and Fisheries"
     assert merged[0].stage == "Committee of the Whole"
     assert merged[0].stage_as_at == date(2026, 10, 16)
-    assert len(merged) == 1
+    assert len(merged) == 2
+    added = next(row for row in merged if row.identifier == "SENATE/2026/Bill-099")
+    assert added.title == "A tracker-only bill"
+    assert added.stage == "Second Reading"
     assert len(documents) == 2
     assert any("Official Bills Tracker" in document["name"] for document in documents)
 
@@ -237,6 +240,36 @@ def test_bill_stage_merge_uses_only_unique_exact_title_and_year_fallback():
     )
     ambiguous = merge_bill_stage_rows([proposal, duplicate], [official])
     assert all(row.stage == "Published" for row in ambiguous)
+    assert len(ambiguous) == 2
+
+
+def test_latest_tracker_parses_explicit_committee_sponsor():
+    def line_with(pieces):
+        line = [" "] * 220
+        for position, value in pieces:
+            line[position:position + len(value)] = value
+        return "".join(line)
+
+    header = line_with([
+        (0, "S/No/ BILL"), (24, "SPONSOR"), (110, "NA/Sen."),
+        (140, "1ST READ"), (160, "2ND READ"), (180, "3RD READ"),
+        (200, "REMARKS"), (220, "ASSENT"),
+    ])
+    row = line_with([
+        (0, "  1. The Anti-Doping (Amendment) Bill, 2026"),
+        (24, "Chairperson, Departmental Committee on Sports and Culture"),
+        (140, "13/10/2026"),
+    ])
+    parsed = parse_bill_stage_tracker(
+        "1. The Anti-Doping (Amendment) Bill, 2026 Chairperson, Departmental Committee on Sports and Culture NA Bill No. 66 of 2026",
+        "https://parliament.go.ke/latest-bills-tracker.pdf",
+        date(2026, 10, 15),
+        "\n".join([header, row]),
+        ["Sports and Culture", "Education"],
+    )
+    bill = next(item for item in parsed if item.identifier == "NA/2026/Bill-066")
+    assert bill.title == "The Anti-Doping (Amendment) Bill, 2026"
+    assert bill.committee_name == "Sports and Culture"
 
 
 def test_committee_alias_merge_does_not_update_profile_foreign_key():

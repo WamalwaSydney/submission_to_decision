@@ -180,7 +180,7 @@ def extract_current_bill_stage(row_text: str) -> str | None:
 def parse_bill_tracker_columns(layout_text: str) -> dict[int, dict[str, str]]:
     """Read National Assembly tracker cells from pdftotext's fixed-width layout."""
     rows: dict[int, dict[str, str]] = {}
-    offsets: tuple[int, int, int, int, int, int, int] | None = None
+    offsets: tuple[int, int, int, int, int, int, int, int] | None = None
     serial: int | None = None
     columns: dict[str, list[str]] = {}
 
@@ -191,8 +191,9 @@ def parse_bill_tracker_columns(layout_text: str) -> dict[int, dict[str, str]]:
     def append_cells(line: str) -> None:
         if offsets is None or serial is None:
             return
-        bill, sponsor, first, second, third, remarks, assent = offsets
+        bill, sponsor, na_sen, first, second, third, remarks, assent = offsets
         columns["title"].append(line[bill:sponsor])
+        columns["sponsor"].append(line[sponsor:na_sen])
         columns["first_read"].append(line[first:second])
         columns["second_read"].append(line[second:third])
         columns["third_read"].append(line[third:remarks])
@@ -203,13 +204,14 @@ def parse_bill_tracker_columns(layout_text: str) -> dict[int, dict[str, str]]:
         if "REMARKS" in line and "ASSENT" in line:
             bill = line.find("BILL")
             sponsor = line.find("SPONSOR", bill + len("BILL"))
+            na_sen = line.find("NA/Sen.", sponsor + len("SPONSOR"))
             first = line.find("1ST READ") - 1
             second = line.find("2ND READ") - 1
             third = line.find("3RD READ") - 1
             remarks = line.find("REMARKS") - 1
             assent = line.find("ASSENT", remarks + len("REMARKS")) - 1
-            if min(bill, sponsor, first, second, third, remarks, assent) >= 0:
-                offsets = (bill, sponsor, first, second, third, remarks, assent)
+            if min(bill, sponsor, na_sen, first, second, third, remarks, assent) >= 0:
+                offsets = (bill, sponsor, na_sen, first, second, third, remarks, assent)
             continue
         if any(label in line for label in ("Status as at", "THE NATIONAL ASSEMBLY", "BILLS TRACKER", "S/No/ BILL")):
             continue
@@ -217,7 +219,7 @@ def parse_bill_tracker_columns(layout_text: str) -> dict[int, dict[str, str]]:
         if match:
             save_row()
             serial = int(match.group(1))
-            columns = {name: [] for name in ("title", "first_read", "second_read", "third_read", "remarks", "assent")}
+            columns = {name: [] for name in ("title", "sponsor", "first_read", "second_read", "third_read", "remarks", "assent")}
             append_cells(line)
         elif serial is not None and line.strip():
             append_cells(line)
@@ -434,8 +436,14 @@ def parse_tracker(text_value: str, source_url: str, as_at: date, committee_names
     return list(unique.values())
 
 
-def parse_bill_stage_tracker(text_value: str, source_url: str, as_at: date, layout_text: str = "") -> list[BillRow]:
-    """Parse bill stages from the National Assembly tracker and its milestone columns."""
+def parse_bill_stage_tracker(
+    text_value: str,
+    source_url: str,
+    as_at: date,
+    layout_text: str = "",
+    committee_names: Iterable[str] = (),
+) -> list[BillRow]:
+    """Parse bill identities/stages and explicit committee sponsors from the official tracker."""
     rows: dict[str, BillRow] = {}
     ambiguous: set[str] = set()
     column_rows = parse_bill_tracker_columns(layout_text)
@@ -466,7 +474,35 @@ def parse_bill_stage_tracker(text_value: str, source_url: str, as_at: date, layo
                 stage = "First Reading"
         if not stage:
             continue
-        title = row_columns.get("title", "") or re.sub(r"^\s*\d+\.\s*", "", joined[:reference.start()])
+        # In raw PDF order, the official title appears before the sponsor and
+        # bill reference. Use its terminal "Bill, YYYY" marker to avoid title
+        # cells bleeding into adjacent sponsor columns in wide tracker rows.
+        title_prefix = re.sub(r"^\s*\d+\.\s*", "", joined[:reference.start()])
+        title_match = re.search(r"^.*?\bbill\s*,?\s*20\d{2}\b", title_prefix, re.I)
+        if not title_match:
+            title_match = re.search(r"^.*?\bbill\b", title_prefix, re.I)
+        if title_match:
+            title = title_match.group(0)
+        else:
+            # Some tracker rows split at a PDF page boundary: the bill number
+            # and dates precede a final title fragment such as "(Amendment)
+            # Bill, 2026" on the next page. Rejoin only a clear terminal
+            # title marker, after removing the sponsor cell from the prefix.
+            continuation = re.search(
+                r"(\([^)]*\)\s*)?Bill\s*,?\s*20\d{2}\b",
+                joined[reference.end():],
+                re.I,
+            )
+            if continuation:
+                title_head = re.split(
+                    r"\b(?:Hon\.|Chairperson\b|Leader of the Majority Party\b|Leader of the Minority Party\b)",
+                    title_prefix,
+                    maxsplit=1,
+                    flags=re.I,
+                )[0]
+                title = f"{title_head} {continuation.group(0)}"
+            else:
+                title = row_columns.get("title", "")
         title = clean(title).rstrip(" (")
         if not title or not re.search(r"\bbill\b", title, re.I):
             continue
@@ -474,6 +510,8 @@ def parse_bill_stage_tracker(text_value: str, source_url: str, as_at: date, layo
         number = int(reference.group("number"))
         year = int(reference.group("year"))
         identifier = f"{house.upper()}/{year}/Bill-{number:03d}"
+        sponsor = clean(title_prefix[title_match.end():]) if title_match else row_columns.get("sponsor", "")
+        committee_name = extract_committee_assignment(sponsor, committee_names)
         row = BillRow(
             title=title[:BILL_LIMITS["title"]],
             identifier=identifier,
@@ -483,6 +521,7 @@ def parse_bill_stage_tracker(text_value: str, source_url: str, as_at: date, layo
             stage=stage,
             source_url=source_url,
             source_file_ref=None,
+            committee_name=committee_name,
             stage_source_url=source_url,
             stage_as_at=as_at,
         )
@@ -499,7 +538,7 @@ def parse_bill_stage_tracker(text_value: str, source_url: str, as_at: date, layo
 
 
 def merge_bill_stage_rows(bills: list[BillRow], stage_rows: list[BillRow]) -> list[BillRow]:
-    """Apply official stages by exact references or unique normalized title/year, without adding records."""
+    """Merge exact/unique bill matches and add official tracker-only bill records."""
     merged = list(bills)
     positions = {row.identifier: index for index, row in enumerate(merged)}
     title_positions: dict[tuple[str, int], list[int]] = {}
@@ -514,13 +553,25 @@ def merge_bill_stage_rows(bills: list[BillRow], stage_rows: list[BillRow]) -> li
         if index is None:
             key = (canonical_title(stage_row.title), stage_row.year)
             candidates = title_positions.get(key, [])
-            if stage_title_counts.get(key) != 1 or len(candidates) != 1:
+            if candidates:
+                # Only reconcile a proposal row when the title/year is unique
+                # on both sides. Ambiguous matches are left untouched.
+                if stage_title_counts.get(key) != 1 or len(candidates) != 1:
+                    continue
+                index = candidates[0]
+            else:
+                # The latest official Bills Tracker is also a source of new
+                # bill identities, not just a stage update for older proposal
+                # tracker records.
+                positions[stage_row.identifier] = len(merged)
+                title_positions.setdefault(key, []).append(len(merged))
+                merged.append(stage_row)
                 continue
-            index = candidates[0]
         current = merged[index]
         merged[index] = replace(
             current,
             stage=stage_row.stage,
+            committee_name=current.committee_name or stage_row.committee_name,
             stage_source_url=stage_row.stage_source_url,
             stage_as_at=stage_row.stage_as_at,
         )
@@ -969,7 +1020,13 @@ async def fetch_all() -> tuple[list[BillRow], list[NoticeRow], list[dict], int, 
         bill_tracker_pdf = (await get(client, bill_tracker_url)).content
         bill_tracker_text = extract_pdf(bill_tracker_pdf, layout=False)
         bill_tracker_layout = extract_pdf(bill_tracker_pdf, layout=True)
-        stage_rows = parse_bill_stage_tracker(bill_tracker_text, bill_tracker_url, bill_tracker_date, bill_tracker_layout)
+        stage_rows = parse_bill_stage_tracker(
+            bill_tracker_text,
+            bill_tracker_url,
+            bill_tracker_date,
+            bill_tracker_layout,
+            [committee.name for committee in committees],
+        )
         if len(stage_rows) < 10:
             raise RuntimeError(f"Only {len(stage_rows)} explicit bill stages parsed from the official Bills Tracker; refusing a partial stage sync")
         bills = merge_bill_stage_rows(bills, stage_rows)
