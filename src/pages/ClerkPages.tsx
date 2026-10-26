@@ -637,14 +637,21 @@ export function CommitteeOfficerNoticesPage() {
                 </div>
                 <div>
                   <Label className="!text-xs !font-black !uppercase !tracking-[0.15em] !text-surface-600 !mb-2">Institution</Label>
-                  <SelectField
+                  <select
+                    className="w-full rounded-xl border border-surface-300 bg-white px-4 py-3 text-sm font-semibold text-surface-800 shadow-sm outline-none transition focus:border-primary-600 focus:ring-2 focus:ring-primary-100 disabled:bg-surface-50"
                     value={formData.institution}
                     onChange={e => setFormData({...formData, institution: e.target.value})}
                     required
+                    aria-label="Institution"
                   >
                     <option value="">Select...</option>
                     {noticeInstitutions.map(institution => <option key={institution} value={institution}>{institution}</option>)}
-                  </SelectField>
+                  </select>
+                  {!noticeInstitutions.length && (
+                    <p className="mt-2 text-xs font-semibold text-red-600">
+                      No platform institutions loaded. Select a live bill and refresh the page.
+                    </p>
+                  )}
                 </div>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
