@@ -1296,6 +1296,28 @@ async def list_notices(db: AsyncSession = Depends(get_db)):
     return {"notices": [to_dict(n) for n in notices]}
 
 
+@router.get("/bills/{bill_id}/documents/{document_index}")
+async def open_bill_document(bill_id: UUID, document_index: int, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(LegislativeItem).where(LegislativeItem.id == bill_id, LegislativeItem.is_simulated.is_(False)))
+    bill = result.scalar_one_or_none()
+    if not bill:
+        raise HTTPException(status_code=404, detail="Bill not found")
+    documents = bill.documents if isinstance(bill.documents, list) else []
+    if document_index < 0 or document_index >= len(documents) or not isinstance(documents[document_index], dict):
+        raise HTTPException(status_code=404, detail="Bill document not found")
+    document = documents[document_index]
+    if document.get("url"):
+        parsed = urlparse(document["url"])
+        if parsed.scheme in {"http", "https"} and parsed.netloc:
+            return RedirectResponse(document["url"])
+    storage_ref = document.get("storage_ref")
+    filename = Path(storage_ref or "").name
+    document_path = storage_service.STORAGE_DIR / filename
+    if not filename or not document_path.is_file():
+        raise HTTPException(status_code=404, detail="Bill document is unavailable")
+    return FileResponse(document_path, media_type=document.get("mime_type") or "application/pdf", filename=document.get("name") or filename)
+
+
 @router.post("/notices")
 async def create_notice(
     bill_ref: str = Form(...),
@@ -1354,6 +1376,51 @@ async def create_notice(
             {"window_start": notice.window_start.isoformat(), "window_end": notice.window_end.isoformat()},
         )
 
+    return {"notice": to_dict(notice)}
+
+
+@router.put("/notices/{notice_id}")
+async def update_notice(
+    notice_id: UUID,
+    bill_ref: str = Form(...),
+    institution: str = Form(...),
+    notice_date: date = Form(...),
+    window_start: date = Form(...),
+    window_end: date = Form(...),
+    mode: str = Form(...),
+    bill_text_accessible: bool = Form(False),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_role("committee_officer", "administrator")),
+):
+    notice_result = await db.execute(select(NoticeRecord).where(NoticeRecord.id == notice_id))
+    notice = notice_result.scalar_one_or_none()
+    if not notice:
+        raise HTTPException(status_code=404, detail="Notice record not found")
+    try:
+        bill_id = UUID(bill_ref)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Select a live bill from the platform")
+    bill_result = await db.execute(select(LegislativeItem).where(LegislativeItem.id == bill_id, LegislativeItem.is_simulated.is_(False)))
+    bill = bill_result.scalar_one_or_none()
+    if not bill:
+        raise HTTPException(status_code=422, detail="Select a live bill from the platform")
+    institution_name = institution.strip()
+    institution_result = await db.execute(select(Committee.institution).where(Committee.status == "active").distinct())
+    platform_institutions = {row[0].strip() for row in institution_result.all() if row[0]}
+    platform_institutions.add((bill.institution or "").strip())
+    if institution_name not in platform_institutions:
+        raise HTTPException(status_code=422, detail="Select an institution listed on the platform")
+    if window_end < window_start:
+        raise HTTPException(status_code=422, detail="window_end must not be before window_start")
+    notice.bill_ref = bill_id
+    notice.institution = institution_name
+    notice.notice_date = notice_date
+    notice.window_start = window_start
+    notice.window_end = window_end
+    notice.mode = mode
+    notice.bill_text_accessible = bill_text_accessible
+    await db.commit()
+    await db.refresh(notice)
     return {"notice": to_dict(notice)}
 
 

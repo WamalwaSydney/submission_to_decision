@@ -74,6 +74,9 @@ This document records every choice made where the specification was silent on im
 | Research export | JSON + CSV | JSON for programmatic use, CSV for spreadsheet analysis |
 | Anonymization | Strip author_id, reviewer_id, auth_data | Spec requirement (FR12) |
 | Public export | Outcome trail + notice data | Available to all public users |
+| Notice bill picker | All live bills, typeable search | Notice records may refer to synchronized or locally ingested bills; committee-only ingestion scope must not hide valid notice targets |
+| Notice institutions | Active platform institutions | Populate choices from active committees and live bill institutions, then validate server-side |
+| Bill text accessibility | Actionable document link | A true accessibility flag links users to the bill Documents section; stored uploads are served through a safe API route |
 
 ## Open Questions
 

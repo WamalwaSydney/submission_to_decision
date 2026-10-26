@@ -36,6 +36,7 @@ type Action =
   | { type: 'UPSERT_MATCH'; payload: SubmissionMatch }
   | { type: 'UPDATE_MATCH_DECISION'; payload: { matchId: string; decision: ReviewerDecision; reviewerId: string } }
   | { type: 'ADD_NOTICE'; payload: NoticeRecord }
+  | { type: 'UPDATE_NOTICE'; payload: NoticeRecord }
   | { type: 'UPDATE_REPORT_STATUS'; payload: { reportId: string; status: CommitteeReport['extraction_status'] } }
   | { type: 'CLAIM_PROFILE'; payload: { profileId: string; userId: string } }
   | { type: 'VERIFY_PROFILE'; payload: { profileId: string; verifierId: string; status: RepresentativeStatus } }
@@ -102,6 +103,8 @@ function reducer(state: AppState, action: Action): AppState {
       };
     case 'ADD_NOTICE':
       return { ...state, notices: [...state.notices, action.payload] };
+    case 'UPDATE_NOTICE':
+      return { ...state, notices: state.notices.map(notice => notice.id === action.payload.id ? action.payload : notice) };
     case 'UPDATE_REPORT_STATUS':
       return {
         ...state,

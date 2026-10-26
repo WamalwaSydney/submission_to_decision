@@ -84,6 +84,7 @@ export const api = {
   claimProfile: (profileId: string) => apiFetch<any>(`/profiles/${profileId}/claim`, { method: 'POST' }),
   verifyProfile: (profileId: string, status: string) => { const form = new FormData(); form.append('status', status); return apiFetch<any>(`/profiles/${profileId}/verify`, { method: 'POST', body: form }); },
   createNotice: (data: Record<string, string | boolean>) => { const form = new FormData(); Object.entries(data).forEach(([k, v]) => form.append(k, String(v))); return apiFetch<any>('/notices', { method: 'POST', body: form }); },
+  updateNotice: (noticeId: string, data: Record<string, string | boolean>) => { const form = new FormData(); Object.entries(data).forEach(([k, v]) => form.append(k, String(v))); return apiFetch<any>(`/notices/${encodeURIComponent(noticeId)}`, { method: 'PUT', body: form }); },
   reportContent: (contentType: string, contentId: string, reason: string) => { const form = new FormData(); form.append('content_type', contentType); form.append('content_id', contentId); form.append('reason', reason); return apiFetch<any>('/reports/content', { method: 'POST', body: form }); },
   moderationCases: () => apiFetch<{ cases: any[] }>('/moderation/cases'),
   exportAnonymized: () => apiFetch<any>('/export/anonymized'),

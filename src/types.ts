@@ -104,7 +104,7 @@ export interface LegislativeItem {
   identifier: string;
   institution: Institution;
   stage: string;
-  documents: { name: string; url?: string }[];
+  documents: { name: string; url?: string; storage_ref?: string; mime_type?: string }[];
   source_updated_at?: string;
   stage_as_at?: string;
   bill_house?: string;

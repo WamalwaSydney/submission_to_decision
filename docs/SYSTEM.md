@@ -44,6 +44,14 @@ The platform follows a four-layer architecture (§3.5):
 - User → ParticipationReceipt (submits)
 - User → ModerationAction (reports)
 
+## Notice record flow
+
+The Clerk’s Office notice screen loads `GET /bills` and `GET /committees` in parallel. The bill picker therefore includes all live non-simulated bills, whether synchronized from an external source or ingested locally. Institution choices are the distinct institutions from active committees plus institutions represented by those live bills.
+
+Creating and editing notices use multipart form requests to `POST /notices` and `PUT /notices/{id}`. The API validates the bill UUID, rejects simulated or missing bills, validates the institution against the active platform set, and enforces that the notice window end is not before its start. The edit form hydrates all persisted fields, including the institution and `bill_text_accessible` flag.
+
+When a notice marks bill text as accessible, the UI links to the bill Documents section. External document URLs redirect to their HTTPS source, while uploaded bill documents are served through `GET /bills/{id}/documents/{document_index}` from configured storage. Filesystem storage references are never sent to the browser as direct paths.
+
 ## Deployment
 
 ```

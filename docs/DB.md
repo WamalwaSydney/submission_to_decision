@@ -45,9 +45,17 @@ CREATE TABLE legislative_items (
     identifier VARCHAR(100) UNIQUE NOT NULL,
     institution VARCHAR(100) NOT NULL,
     stage VARCHAR(100) NOT NULL,
-    documents JSONB DEFAULT '[]',
+    documents JSONB DEFAULT '[]', -- source URL or stored document metadata
     status_history JSONB DEFAULT '[]',
     is_simulated BOOLEAN DEFAULT false,
+    bill_house VARCHAR(20),
+    bill_number INTEGER,
+    bill_year INTEGER,
+    source_url VARCHAR(1000),
+    source_file_ref VARCHAR(255),
+    source_updated_at DATE,
+    source_status VARCHAR(100),
+    committee_id UUID REFERENCES committees(id),
     search_vector tsvector GENERATED ALWAYS AS (
         to_tsvector('english', coalesce(title, '') || ' ' || coalesce(identifier, ''))
     ) STORED
@@ -150,9 +158,16 @@ CREATE TABLE notice_records (
     window_end DATE NOT NULL,
     mode VARCHAR(255) NOT NULL,
     bill_text_accessible BOOLEAN DEFAULT false,
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    source_url VARCHAR(1000),
+    source_title VARCHAR(500),
+    committee_name VARCHAR(255),
+    published_date DATE
 );
 ```
+
+`bill_text_accessible` records whether the bill text was available alongside the published notice. When true, the UI links to the bill's Documents section. A document entry may contain a validated external `url`, or uploaded-file metadata such as `storage_ref`, `mime_type`, `sha256`, and `size_bytes`; stored files are served through `GET /api/v1/bills/{bill_id}/documents/{document_index}` rather than exposing filesystem paths.
+
+Notice edits update the existing row through `PUT /api/v1/notices/{notice_id}`; they do not create a duplicate notice record. The API validates that the bill is a live non-simulated legislative item and that the institution belongs to the active platform institution set.
 
 ### moderation_actions
 ```sql

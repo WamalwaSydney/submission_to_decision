@@ -94,6 +94,9 @@ All endpoints require authentication except those marked **Public**.
 }
 ```
 
+### GET /bills/{id}/documents/{document_index}
+**Public** — Open or download a stored bill document. URL-backed documents redirect to their validated HTTPS source; uploaded documents are served from configured report storage. The index is the zero-based position in the bill's `documents` array.
+
 ---
 
 ## Receipts (Participation)
@@ -259,7 +262,9 @@ After extraction, idempotent match proposals are generated for the selected bill
 ### POST /notices
 **Clerk, Admin** — Create notice record.
 
-**Request:**
+The Clerk’s Office notice form sources bills from `GET /bills`, so it includes every live non-simulated bill, including synchronized bills and bills ingested locally. Institution choices are derived from active platform committees and live bill institutions. The API validates both selections before saving.
+
+**Request:** `multipart/form-data`
 ```json
 {
   "bill_ref": "uuid",
@@ -271,6 +276,13 @@ After extraction, idempotent match proposals are generated for the selected bill
   "bill_text_accessible": true
 }
 ```
+
+When `bill_text_accessible` is `true`, the frontend exposes an **Open bill text** link to the bill’s Documents section. Any stored uploaded document can be opened through `GET /bills/{id}/documents/{document_index}`.
+
+### PUT /notices/{id}
+**Clerk, Admin** — Update an existing notice record.
+
+The request fields and validation rules are the same as `POST /notices`. The Clerk’s Office edit form hydrates every saved field, including institution and the bill-text checkbox. If a legacy record has a blank institution, the selected bill’s institution is used as a fallback for the edit form.
 
 ---
 

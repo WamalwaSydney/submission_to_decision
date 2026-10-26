@@ -31,3 +31,19 @@ No real participant study, real committee-report ground-truth dataset, or produc
 ## Automated alerts and confidence display
 
 Matching now queues system-origin messages automatically. Citizens receive a matching alert after the comparison run and a separate final outcome alert once a moderator-confirmed report treatment is available. Duplicate alerts are suppressed per receipt and phase. Confidence is rendered as red/low below 50%, amber/moderate from 50% to 74.9%, and green/high at 75% or above across bill flow, receipt, and moderator views.
+
+
+## Notice records and bill-text availability — 2026-10-26
+
+- Updated the Clerk’s Office notice form to load all live bills from `GET /bills`, rather than the committee-scoped ingestion list. This includes synchronized bills and locally ingested bills.
+- Added a typeable bill picker with bill title and identifier suggestions.
+- Added institution options from active platform committees and live bill institutions, with server-side validation.
+- Added `PUT /notices/{id}` and an Edit action that hydrates the saved bill, institution, dates, mode, and bill-text checkbox.
+- Added `GET /bills/{id}/documents/{document_index}` for safe access to URL-backed or stored bill documents.
+- A notice marked `bill_text_accessible=true` now exposes an **Open bill text** link to the bill Documents section. Uploaded bill PDFs with storage metadata can be opened through the API route without exposing local filesystem paths.
+
+## Validation for this change
+
+- `npm run typecheck` — passed.
+- `npm run build` — passed; Vite reports the existing large-main-chunk warning.
+- `python3 -m py_compile backend/app/api/routes.py` — passed.

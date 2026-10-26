@@ -15,6 +15,7 @@ import {
 } from '../components/UI';
 import { confidenceClasses, confidenceLabel } from '../utils/confidence';
 import { api } from '../api/endpoints';
+import { getApiUrl } from '../api/client';
 import { reportDocumentHref } from '../utils/reportLinks';
 
 function SubmissionStatusBadge({ status }: { status: SubmissionStatus }) {
@@ -459,6 +460,7 @@ export function BillPage() {
       </Card>
 
       {/* Documents */}
+      <div id="documents">
       <Card className="!p-7 md:!p-8">
         <div className="mb-6">
           <div className="inline-flex items-center gap-2 mb-2">
@@ -470,7 +472,11 @@ export function BillPage() {
         </div>
         <div className="space-y-3">
           {(bill.documents || []).map((doc, i) => {
-            const documentUrl = doc.url && doc.url !== '#' ? doc.url : undefined;
+            const documentUrl = doc.url && doc.url !== '#'
+              ? doc.url
+              : doc.storage_ref
+                ? `${getApiUrl()}/bills/${encodeURIComponent(bill.id)}/documents/${i}`
+                : undefined;
             const isBillText = /bill\s*(text|document)|official bill/i.test(doc.name);
             const content = (
               <>
@@ -496,6 +502,7 @@ export function BillPage() {
           })}
         </div>
       </Card>
+      </div>
 
       {/* Notices */}
       {billNotices.length > 0 && (

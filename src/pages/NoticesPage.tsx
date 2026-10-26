@@ -147,7 +147,7 @@ export function NoticesPage() {
                       <td className="text-xs">
                         <Badge variant="blue" className="!text-[10px]">{notice.mode}</Badge>
                       </td>
-                      <td>{notice.bill_text_accessible ? <Badge variant="green" showIcon className="!text-[10px]">Yes</Badge> : <Badge variant="yellow" showIcon className="!text-[10px]">No</Badge>}</td>
+                      <td>{notice.bill_text_accessible ? <Link to={`/bills/${notice.bill_ref}#documents`} className="inline-flex"><Badge variant="green" showIcon className="!text-[10px]">Open bill text</Badge></Link> : <Badge variant="yellow" showIcon className="!text-[10px]">No</Badge>}</td>
                     </motion.tr>
                   );
                 })}

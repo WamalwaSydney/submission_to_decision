@@ -133,6 +133,14 @@ React Router routes such as `/login` or `/receipts/<id>` need a fallback rule, o
 6. A moderator confirms or rejects each match and records the decision.
 7. Public receipt and bill pages display the trace, confirmed status, and stated committee reason.
 
+### Clerk’s Office notice records
+
+From **Notice Records → Add Notice Record**, a Clerk’s Office user can type to search the complete live bill catalogue. The picker includes both synchronized bills and bills ingested locally; it is intentionally broader than the committee-only ingestion list. Institution choices are populated from active platform committees and live bill institutions, and selecting a bill pre-fills its institution.
+
+Notice records can be edited from the registry. The edit form hydrates the saved bill, institution, dates, mode, and bill-text accessibility value, so an institution is not lost or shown as blank. The backend validates the selected live bill and platform institution on both create and update.
+
+If **Bill text was accessible alongside the notice** is selected, the saved notice provides an **Open bill text** link to the bill’s Documents section. External documents open at their validated source URL; uploaded bill PDFs are served through the protected storage-backed bill-document route without exposing filesystem paths.
+
 ### Automated in-app notifications
 
 Citizen notifications are generated for meaningful workflow events: submission receipt, a public notice or committee report becoming available, a proposed match awaiting human review, a human-confirmed or rejected match, and a later correction to a confirmed outcome. Proposed matches remain provisional until a human reviewer decides; AI does not determine the match or outcome. Citizens choose English or Kiswahili at signup and can change the preference on the Automated Updates page.
@@ -355,7 +363,7 @@ The project now distinguishes four evidence states:
 
 ## Committee and public-flow features
 
-The current implementation includes first-class `committees`. An administrator can create a committee and its committee account through `POST /api/v1/committees`. A committee account can ingest bills through `POST /api/v1/committees/me/bills` and can see only bills assigned to that committee through `GET /api/v1/committees/me/bills`.
+The current implementation includes first-class `committees`. An administrator can create a committee and its committee account through `POST /api/v1/committees`. A committee account can ingest bills through `POST /api/v1/committees/me/bills` and can see only bills assigned to that committee through `GET /api/v1/committees/me/bills`. Notice management is broader by design: its bill picker uses the public live-bill catalogue so a Clerk’s Office can record a notice against any synchronized or locally ingested live bill.
 
 Citizens can submit views against public bills. The receipt remains hash-chained and append-only. `GET /api/v1/bills/{bill_id}/flow` exposes the public bill timeline, committee reports, confirmed outcome status, and match percentage without exposing citizen account IDs. Citizens can contact the responsible committee through the messages interface when an outcome requires clarification. Committee accounts can read and reply through the same message system; message sends and reads are audited.
 

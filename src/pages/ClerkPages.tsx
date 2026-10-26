@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { api } from '../api/endpoints';
-import { Upload, FileUp, FileText, CheckCircle2, AlertTriangle, ChevronDown, Plus, Database, FileCheck2, X } from 'lucide-react';
+import { Upload, FileUp, FileText, CheckCircle2, AlertTriangle, ChevronDown, Plus, Database, FileCheck2, X, Pencil } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { Card, InfoBox, Badge, Label, InputField, SelectField } from '../components/UI';
 
@@ -460,6 +460,7 @@ export function CommitteeOfficerIngestionPage() {
 export function CommitteeOfficerNoticesPage() {
   const { state, dispatch } = useApp();
   const [showForm, setShowForm] = useState(false);
+  const [editingNotice, setEditingNotice] = useState<typeof state.notices[number] | null>(null);
   const [availableBills, setAvailableBills] = useState<typeof state.bills>([]);
   const [billSearch, setBillSearch] = useState('');
   const [billsLoading, setBillsLoading] = useState(true);
@@ -503,21 +504,48 @@ export function CommitteeOfficerNoticesPage() {
   const selectedBill = availableBills.find(bill => bill.id === formData.bill_ref);
 
   const handleAdd = async () => {
-    if (!formData.bill_ref || !formData.notice_date) return;
+    if (!formData.bill_ref || !formData.institution || !formData.notice_date) return;
     try {
-      const result = await api.createNotice({
+      const payload = {
         ...formData,
         window_start: formData.window_start || formData.notice_date,
         window_end: formData.window_end || formData.notice_date,
-      });
-      dispatch({ type: 'ADD_NOTICE', payload: result.notice });
-      setNoticePage(Math.max(1, Math.ceil((state.notices.length + 1) / noticesPerPage)));
+      };
+      const result = editingNotice
+        ? await api.updateNotice(editingNotice.id, payload)
+        : await api.createNotice(payload);
+      dispatch({ type: editingNotice ? 'UPDATE_NOTICE' : 'ADD_NOTICE', payload: result.notice });
+      if (!editingNotice) setNoticePage(Math.max(1, Math.ceil((state.notices.length + 1) / noticesPerPage)));
       setShowForm(false);
+      setEditingNotice(null);
       setBillSearch('');
       setFormData({ bill_ref: '', institution: '', notice_date: '', window_start: '', window_end: '', mode: '', bill_text_accessible: false });
     } catch (error) {
       alert(error instanceof Error ? error.message : 'Unable to create the notice.');
     }
+  };
+
+  const startEditing = (notice: typeof state.notices[number]) => {
+    const bill = availableBills.find(item => item.id === notice.bill_ref);
+    setEditingNotice(notice);
+    setBillSearch(bill ? billOptionLabel(bill) : '');
+    setFormData({
+      bill_ref: notice.bill_ref,
+      institution: notice.institution || bill?.institution || '',
+      notice_date: notice.notice_date || '',
+      window_start: notice.window_start || '',
+      window_end: notice.window_end || '',
+      mode: notice.mode || '',
+      bill_text_accessible: Boolean(notice.bill_text_accessible),
+    });
+    setShowForm(true);
+  };
+
+  const cancelEditing = () => {
+    setEditingNotice(null);
+    setBillSearch('');
+    setFormData({ bill_ref: '', institution: '', notice_date: '', window_start: '', window_end: '', mode: '', bill_text_accessible: false });
+    setShowForm(false);
   };
 
   return (
@@ -557,7 +585,7 @@ export function CommitteeOfficerNoticesPage() {
                 </div>
                 <div>
                   <div className="text-xs font-black uppercase tracking-[0.18em] text-warm-600">New Entry</div>
-                  <h2 className="text-xl font-black text-surface-900 tracking-tight">Add Notice Record</h2>
+                  <h2 className="text-xl font-black text-surface-900 tracking-tight">{editingNotice ? 'Edit Notice Record' : 'Add Notice Record'}</h2>
                 </div>
               </div>
 
@@ -655,8 +683,9 @@ export function CommitteeOfficerNoticesPage() {
                 onClick={handleAdd}
                 className="btn-primary inline-flex items-center gap-2"
               >
-                <CheckCircle2 className="h-4 w-4" /> Save Notice Record
+                <CheckCircle2 className="h-4 w-4" /> {editingNotice ? 'Update Notice Record' : 'Save Notice Record'}
               </button>
+              {editingNotice && <button type="button" onClick={cancelEditing} className="btn-secondary inline-flex items-center gap-2 ml-2">Cancel</button>}
             </div>
           </Card>
         </motion.div>
@@ -691,12 +720,13 @@ export function CommitteeOfficerNoticesPage() {
                 <th>Window</th>
                 <th>Mode</th>
                 <th>Bill Text</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
               {state.notices.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="committee-notice-empty">
+                  <td colSpan={7} className="committee-notice-empty">
                     <FileText size={25} strokeWidth={1.8} aria-hidden="true" />
                     <strong>No notice records yet</strong>
                     <span>Add a notice record to see it listed here.</span>
@@ -719,10 +749,17 @@ export function CommitteeOfficerNoticesPage() {
                     <td className="committee-notice-mode">{n.mode || '—'}</td>
                     <td>
                       {n.bill_text_accessible ? (
-                        <Badge variant="green" showIcon className="!text-[10px]">Yes</Badge>
+                        <a href={`/bills/${n.bill_ref}#documents`} className="inline-flex items-center gap-1.5" title="Open the bill documents">
+                          <Badge variant="green" showIcon className="!text-[10px]">Open bill text</Badge>
+                        </a>
                       ) : (
                         <Badge variant="gray" className="!text-[10px]">No</Badge>
                       )}
+                    </td>
+                    <td>
+                      <button type="button" onClick={() => startEditing(n)} className="inline-flex items-center gap-1.5 text-xs font-bold text-primary-700 hover:text-primary-900" aria-label={`Edit notice for ${bill?.title || n.bill_ref}`}>
+                        <Pencil className="h-3.5 w-3.5" /> Edit
+                      </button>
                     </td>
                   </tr>
                 );
