@@ -1308,12 +1308,36 @@ async def create_notice(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_role("committee_officer", "administrator")),
 ):
+    try:
+        bill_id = UUID(bill_ref)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Select a live bill from the platform")
+    bill_result = await db.execute(
+        select(LegislativeItem).where(
+            LegislativeItem.id == bill_id,
+            LegislativeItem.is_simulated.is_(False),
+        )
+    )
+    bill = bill_result.scalar_one_or_none()
+    if not bill:
+        raise HTTPException(status_code=422, detail="Select a live bill from the platform")
+
+    institution_name = institution.strip()
+    institution_result = await db.execute(
+        select(Committee.institution)
+        .where(Committee.status == "active")
+        .distinct()
+    )
+    platform_institutions = {row[0].strip() for row in institution_result.all() if row[0]}
+    platform_institutions.add((bill.institution or "").strip())
+    if institution_name not in platform_institutions:
+        raise HTTPException(status_code=422, detail="Select an institution listed on the platform")
     if window_end < window_start:
         raise HTTPException(status_code=422, detail="window_end must not be before window_start")
 
     notice = NoticeRecord(
         bill_ref=bill_ref,
-        institution=institution,
+        institution=institution_name,
         notice_date=notice_date,
         window_start=window_start,
         window_end=window_end,

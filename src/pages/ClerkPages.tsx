@@ -461,6 +461,7 @@ export function CommitteeOfficerNoticesPage() {
   const { state, dispatch } = useApp();
   const [showForm, setShowForm] = useState(false);
   const [availableBills, setAvailableBills] = useState<typeof state.bills>([]);
+  const [billSearch, setBillSearch] = useState('');
   const [billsLoading, setBillsLoading] = useState(true);
   const [billsError, setBillsError] = useState<string | null>(null);
   const [noticePage, setNoticePage] = useState(1);
@@ -477,12 +478,12 @@ export function CommitteeOfficerNoticesPage() {
     let cancelled = false;
     setBillsLoading(true);
     setBillsError(null);
-    api.committeeBills()
-      .then(({ bills }) => {
+    Promise.all([api.bills(), api.committees()])
+      .then(([{ bills }, { committees }]) => {
         if (cancelled) return;
         const validBills = bills.filter(bill => Boolean(bill?.id && bill?.title));
         setAvailableBills(validBills);
-        dispatch({ type: 'HYDRATE', payload: { bills: validBills } });
+        dispatch({ type: 'HYDRATE', payload: { bills: validBills, committees } });
       })
       .catch(error => {
         if (!cancelled) setBillsError(error instanceof Error ? error.message : 'Unable to load bills.');
@@ -491,7 +492,15 @@ export function CommitteeOfficerNoticesPage() {
     return () => { cancelled = true; };
   }, [dispatch]);
 
-  const noticeInstitutions = Array.from(new Set(availableBills.map(bill => bill.institution).filter(Boolean)));
+  const noticeInstitutions = Array.from(new Set([
+    ...state.committees.map(committee => committee.institution),
+    ...availableBills.map(bill => bill.institution),
+  ].filter(Boolean))).sort();
+
+  const billOptionLabel = (bill: typeof state.bills[number]) =>
+    `${bill.title}${bill.identifier ? ` — ${bill.identifier}` : ''}`;
+
+  const selectedBill = availableBills.find(bill => bill.id === formData.bill_ref);
 
   const handleAdd = async () => {
     if (!formData.bill_ref || !formData.notice_date) return;
@@ -504,6 +513,7 @@ export function CommitteeOfficerNoticesPage() {
       dispatch({ type: 'ADD_NOTICE', payload: result.notice });
       setNoticePage(Math.max(1, Math.ceil((state.notices.length + 1) / noticesPerPage)));
       setShowForm(false);
+      setBillSearch('');
       setFormData({ bill_ref: '', institution: '', notice_date: '', window_start: '', window_end: '', mode: '', bill_text_accessible: false });
     } catch (error) {
       alert(error instanceof Error ? error.message : 'Unable to create the notice.');
@@ -553,16 +563,31 @@ export function CommitteeOfficerNoticesPage() {
 
               <div>
                 <Label className="!text-xs !font-black !uppercase !tracking-[0.15em] !text-surface-600 !mb-2">Bill</Label>
-                <SelectField
-                  value={formData.bill_ref}
+                <input
+                  type="search"
+                  list="notice-bill-options"
+                  value={billSearch}
                   onChange={e => {
-                    const bill = availableBills.find(item => item.id === e.target.value);
-                    setFormData({...formData, bill_ref: e.target.value, institution: bill?.institution || formData.institution});
+                    const value = e.target.value;
+                    const bill = availableBills.find(item => billOptionLabel(item) === value);
+                    setBillSearch(value);
+                    setFormData({
+                      ...formData,
+                      bill_ref: bill?.id || '',
+                      institution: bill?.institution || formData.institution,
+                    });
                   }}
-                >
-                  <option value="">Select...</option>
-                  {availableBills.map(b => <option key={b.id} value={b.id}>{b.title} ({b.institution})</option>)}
-                </SelectField>
+                  placeholder={billsLoading ? 'Loading bills...' : 'Type to search bills...'}
+                  disabled={billsLoading || Boolean(billsError)}
+                  className="input-field"
+                  aria-label="Search and select a bill"
+                  required
+                />
+                <datalist id="notice-bill-options">
+                  {availableBills.map(b => <option key={b.id} value={billOptionLabel(b)}>{b.institution}</option>)}
+                </datalist>
+                {selectedBill && <p className="text-xs text-surface-500 mt-2">Selected: {selectedBill.title} ({selectedBill.institution})</p>}
+                {billSearch && !selectedBill && <p className="text-xs text-warm-700 mt-2">Choose a bill from the suggestions to continue.</p>}
                 {!billsLoading && !availableBills.length && <p className="text-xs font-semibold text-red-600 mt-2">{billsError || 'No live bills are available. Sync or ingest a bill before creating a notice.'}</p>}
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -579,6 +604,7 @@ export function CommitteeOfficerNoticesPage() {
                   <SelectField
                     value={formData.institution}
                     onChange={e => setFormData({...formData, institution: e.target.value})}
+                    required
                   >
                     <option value="">Select...</option>
                     {noticeInstitutions.map(institution => <option key={institution} value={institution}>{institution}</option>)}
