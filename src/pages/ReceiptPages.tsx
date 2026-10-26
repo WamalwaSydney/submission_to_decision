@@ -21,7 +21,7 @@ function SubmissionStatusBadge({ status }: { status: SubmissionStatus }) {
 export function ReceiptLookupPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [query, setQuery] = useState(searchParams.get('id') || '');
-  const { state, getSubmissionStatus } = useApp();
+  const { state, getSubmissionStatus, getSubmissionReviewDecision } = useApp();
   const [remoteReceipt, setRemoteReceipt] = useState<any>(null);
   const [lookupError, setLookupError] = useState('');
   const [copiedHash, setCopiedHash] = useState(false);
@@ -38,6 +38,7 @@ export function ReceiptLookupPage() {
   const receipt = remoteReceipt || (query ? state.receipts.find(r => r.public_id === query.toUpperCase()) : null);
   const bill = receipt ? state.bills.find(b => b.id === receipt.legislative_item_id) : null;
   const status = remoteReceipt ? remoteReceipt.status as SubmissionStatus : (receipt ? getSubmissionStatus(receipt.id) : null);
+  const reviewDecision = receipt ? (remoteReceipt?.match_decision || getSubmissionReviewDecision(receipt.id)) : null;
   const match = receipt ? state.matches.find(m => m.receipt_ref === receipt.id && m.reviewer_decision === 'confirmed') : null;
   const entry = remoteReceipt?.match ? { treatment: remoteReceipt.match.treatment, stated_reason: remoteReceipt.match.stated_reason } : (match ? state.reportEntries.find(e => e.id === match.report_entry_ref) : null);
 
@@ -161,7 +162,10 @@ export function ReceiptLookupPage() {
                       Issued: {new Date(receipt.timestamp).toLocaleString()}
                     </p>
                   </div>
-                  <SubmissionStatusBadge status={status as SubmissionStatus} />
+                  <div className="flex flex-col items-end gap-2">
+                    <SubmissionStatusBadge status={status as SubmissionStatus} />
+                    {reviewDecision && <Badge variant={reviewDecision === 'confirmed' ? 'green' : reviewDecision === 'pending' ? 'yellow' : 'red'}>Match {reviewDecision === 'confirmed' ? 'confirmed' : reviewDecision === 'pending' ? 'pending review' : 'rejected'}</Badge>}
+                  </div>
                 </div>
               </div>
 
@@ -285,8 +289,9 @@ export function ReceiptLookupPage() {
                           <p className="font-semibold text-surface-800 leading-relaxed">{match.explanation}</p>
                         </div>
                         <div className="rounded-xl p-4 bg-white/80 backdrop-blur-sm border border-surface-200/80">
-                          <p className="text-xs font-black uppercase tracking-widest text-surface-500 mb-2">Committee Treatment</p>
+                          <p className="text-xs font-black uppercase tracking-widest text-surface-500 mb-2">Committee Outcome</p>
                           <SubmissionStatusBadge status={entry.treatment as SubmissionStatus} />
+                          {entry.treatment === 'unclassified' && <p className="text-xs font-semibold text-surface-500 mt-2">This report entry has not yet been classified as adopted, amended, rejected with reasons, or not addressed. A confirmed match does not itself mean the submission was adopted.</p>}
                         </div>
                         <div className="rounded-xl p-4 bg-white/80 backdrop-blur-sm border border-surface-200/80">
                           <p className="text-xs font-black uppercase tracking-widest text-surface-500 mb-1.5">Confirmed On</p>

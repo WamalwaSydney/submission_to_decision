@@ -671,9 +671,15 @@ async def bill_flow(
     submissions = []
     for receipt in receipt_result.scalars().all():
         match_result = await db.execute(select(SubmissionMatch).where(SubmissionMatch.receipt_ref == receipt.id).order_by(SubmissionMatch.confidence_score.desc()))
-        match = match_result.scalars().first()
-        entry = next((e for e in entries if match and e.id == match.report_entry_ref), None)
-        submissions.append({"public_id": receipt.public_id, "timestamp": receipt.timestamp, "clause_ref": receipt.clause_ref, "status": entry.treatment if entry and match and match.reviewer_decision == "confirmed" else "awaiting committee report", "match_percentage": round(match.confidence_score * 100, 1) if match else None, "match_decision": match.reviewer_decision if match else None, "reason": entry.stated_reason if entry and match and match.reviewer_decision == "confirmed" else None})
+        receipt_matches = list(match_result.scalars().all())
+        match = (
+            next((item for item in receipt_matches if item.reviewer_decision == "confirmed"), None)
+            or next((item for item in receipt_matches if item.reviewer_decision == "pending"), None)
+            or next((item for item in receipt_matches if item.reviewer_decision == "rejected"), None)
+        )
+        confirmed_match = match if match and match.reviewer_decision == "confirmed" else None
+        entry = next((e for e in entries if confirmed_match and e.id == confirmed_match.report_entry_ref), None)
+        submissions.append({"public_id": receipt.public_id, "timestamp": receipt.timestamp, "clause_ref": receipt.clause_ref, "status": entry.treatment if entry and confirmed_match else "awaiting committee report", "match_percentage": round(match.confidence_score * 100, 1) if match else None, "match_decision": match.reviewer_decision if match else None, "reason": entry.stated_reason if entry and confirmed_match else None})
     return {"bill": to_dict(bill), "flow": [{"stage": h.get("stage"), "date": h.get("date"), "note": h.get("note")} for h in (bill.status_history or [])], "reports": [report_to_dict(r) for r in reports], "report_entries": [to_dict(e) for e in entries], "submissions": submissions}
 
 # ============ Messages ============
@@ -873,15 +879,20 @@ async def get_receipt(public_id: str, db: AsyncSession = Depends(get_db)):
     bill = bill_result.scalar_one()
 
     match_result = await db.execute(
-        select(SubmissionMatch).where(
-            SubmissionMatch.receipt_ref == receipt.id,
-            SubmissionMatch.reviewer_decision == "confirmed",
-        )
+        select(SubmissionMatch)
+        .where(SubmissionMatch.receipt_ref == receipt.id)
+        .order_by(SubmissionMatch.confidence_score.desc())
     )
-    match = match_result.scalars().first()
+    receipt_matches = list(match_result.scalars().all())
+    match = (
+        next((item for item in receipt_matches if item.reviewer_decision == "confirmed"), None)
+        or next((item for item in receipt_matches if item.reviewer_decision == "pending"), None)
+        or next((item for item in receipt_matches if item.reviewer_decision == "rejected"), None)
+    )
+    match_decision = match.reviewer_decision if match else None
 
     match_data = None
-    if match:
+    if match and match.reviewer_decision == "confirmed":
         entry_result = await db.execute(
             select(ReportEntry).where(ReportEntry.id == match.report_entry_ref)
         )
@@ -903,6 +914,7 @@ async def get_receipt(public_id: str, db: AsyncSession = Depends(get_db)):
         "submission_text": receipt.submission_text,
         "timestamp": receipt.timestamp,
         "status": match_data["treatment"] if match_data else "awaiting committee report",
+        "match_decision": match_decision,
         "lodging_status": receipt.lodging_status,
         "hash": receipt.hash,
         "match": match_data,

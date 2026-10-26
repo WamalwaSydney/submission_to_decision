@@ -257,7 +257,8 @@ export function ReviewerQueuePage() {
                                 <FileText className="h-3.5 w-3.5" /> Clause: {entry.clause_ref}
                               </p>
                             )}
-                            <p className="text-xs text-surface-600 mt-1">Treatment: <span className="font-semibold">{entry?.treatment}</span></p>
+                            <p className="text-xs text-surface-600 mt-1">Committee outcome: <span className="font-semibold">{entry?.treatment || 'not classified'}</span></p>
+                            <p className="text-xs text-surface-500 mt-1">Your decision confirms or rejects this match only; it does not determine whether the committee adopted the submission.</p>
                           </div>
                         </div>
 
@@ -423,6 +424,11 @@ export function ReviewerQueuePage() {
                       <p className="text-xs text-surface-500 font-medium flex items-center gap-2">
                         <Clock className="h-3.5 w-3.5" />
                         Reviewed: {new Date(match.timestamp).toLocaleDateString()} · Confidence: {Math.round(match.confidence_score * 100)}%
+                      </p>
+                      <p className="text-xs text-surface-600 font-semibold mt-2">
+                        {isConfirmed
+                          ? `Committee outcome: ${entry?.treatment || 'not available'}${entry?.treatment === 'unclassified' ? ' — outcome classification is still needed.' : ''}`
+                          : 'No confirmed report match; this rejected proposal does not establish a committee outcome.'}
                       </p>
                     </div>
                   </Card>

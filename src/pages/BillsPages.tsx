@@ -151,7 +151,7 @@ export function BillsListPage() {
 }
 export function BillPage() {
   const { id } = useParams<{ id: string }>();
-  const { state, dispatch, getSubmissionStatus, getBillOutcomes } = useApp();
+  const { state, dispatch, getSubmissionStatus, getSubmissionReviewDecision, getBillOutcomes } = useApp();
   const bill = state.bills.find(b => b.id === id);
 
   useEffect(() => {
@@ -352,6 +352,7 @@ export function BillPage() {
           <div className="space-y-4">
             {billReceipts.map((receipt, i) => {
               const status = getSubmissionStatus(receipt.id);
+              const reviewDecision = getSubmissionReviewDecision(receipt.id);
               const match = state.matches.find(m => m.receipt_ref === receipt.id && m.reviewer_decision === 'confirmed');
               const entry = match ? state.reportEntries.find(e => e.id === match.report_entry_ref) : null;
 
@@ -372,8 +373,12 @@ export function BillPage() {
                     >
                       {receipt.public_id}
                     </Link>
-                    <SubmissionStatusBadge status={status as SubmissionStatus} />
+                    <div className="flex flex-wrap gap-2">
+                      <SubmissionStatusBadge status={status as SubmissionStatus} />
+                      {reviewDecision && <Badge variant={reviewDecision === 'confirmed' ? 'green' : reviewDecision === 'pending' ? 'yellow' : 'red'}>Match {reviewDecision === 'confirmed' ? 'confirmed' : reviewDecision === 'pending' ? 'pending review' : 'rejected'}</Badge>}
+                    </div>
                   </div>
+                  {status === 'unclassified' && <p className="text-xs font-semibold text-surface-500 mt-3">The report entry is linked, but its committee outcome has not yet been classified. Match confirmation alone does not mean the submission was adopted.</p>}
                   <p className="text-[15px] text-surface-800 leading-relaxed mb-4 bg-surface-50/60 p-4 rounded-xl border border-surface-100 font-medium">
                     {receipt.submission_text}
                   </p>

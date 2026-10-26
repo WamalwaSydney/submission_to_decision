@@ -157,6 +157,7 @@ interface AppContextType {
   state: AppState;
   dispatch: React.Dispatch<Action>;
   getSubmissionStatus: (receiptId: string) => SubmissionStatus;
+  getSubmissionReviewDecision: (receiptId: string) => ReviewerDecision | null;
   getBillOutcomes: (billId: string) => { status: SubmissionStatus; count: number }[];
 }
 
@@ -199,6 +200,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return entry.treatment;
   };
 
+  const getSubmissionReviewDecision = (receiptId: string): ReviewerDecision | null => {
+    const matches = state.matches.filter(match => match.receipt_ref === receiptId);
+    return matches.find(match => match.reviewer_decision === 'confirmed')?.reviewer_decision
+      || matches.find(match => match.reviewer_decision === 'pending')?.reviewer_decision
+      || matches.find(match => match.reviewer_decision === 'rejected')?.reviewer_decision
+      || null;
+  };
+
   const getBillOutcomes = (billId: string): { status: SubmissionStatus; count: number }[] => {
     const billReceipts = state.receipts.filter(r => r.legislative_item_id === billId);
     const statuses: SubmissionStatus[] = [
@@ -212,7 +221,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AppContext.Provider value={{ state, dispatch, getSubmissionStatus, getBillOutcomes }}>
+    <AppContext.Provider value={{ state, dispatch, getSubmissionStatus, getSubmissionReviewDecision, getBillOutcomes }}>
       {children}
     </AppContext.Provider>
   );
