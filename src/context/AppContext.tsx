@@ -95,14 +95,6 @@ function reducer(state: AppState, action: Action): AppState {
     case 'UPDATE_MATCH_DECISION':
       return {
         ...state,
-        receipts: action.payload.decision === 'confirmed'
-          ? state.receipts.map(receipt => {
-              const confirmedMatch = state.matches.find(match => match.id === action.payload.matchId);
-              return confirmedMatch && receipt.id === confirmedMatch.receipt_ref
-                ? { ...receipt, lodging_status: 'acknowledged' }
-                : receipt;
-            })
-          : state.receipts,
         matches: state.matches.map(m =>
           m.id === action.payload.matchId
             ? { ...m, reviewer_decision: action.payload.decision, reviewer_id: action.payload.reviewerId, timestamp: new Date().toISOString() }
@@ -177,6 +169,7 @@ interface AppContextType {
   dispatch: React.Dispatch<Action>;
   getSubmissionStatus: (receiptId: string) => SubmissionStatus;
   getSubmissionReviewDecision: (receiptId: string) => ReviewerDecision | null;
+  getSubmissionLodgingStatus: (receiptId: string) => LodgingStatus;
   getBillOutcomes: (billId: string) => { status: SubmissionStatus; count: number }[];
 }
 
@@ -232,6 +225,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
       || null;
   };
 
+  const getSubmissionLodgingStatus = (receiptId: string): LodgingStatus => {
+    const confirmedMatch = state.matches.some(
+      match => match.receipt_ref === receiptId && match.reviewer_decision === 'confirmed'
+    );
+    if (confirmedMatch) return 'acknowledged';
+    return state.receipts.find(receipt => receipt.id === receiptId)?.lodging_status || 'pending';
+  };
+
   const getBillOutcomes = (billId: string): { status: SubmissionStatus; count: number }[] => {
     const billReceipts = state.receipts.filter(r => r.legislative_item_id === billId);
     const statuses: SubmissionStatus[] = [
@@ -245,7 +246,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AppContext.Provider value={{ state, dispatch, getSubmissionStatus, getSubmissionReviewDecision, getBillOutcomes }}>
+    <AppContext.Provider value={{ state, dispatch, getSubmissionStatus, getSubmissionReviewDecision, getSubmissionLodgingStatus, getBillOutcomes }}>
       {children}
     </AppContext.Provider>
   );

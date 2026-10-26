@@ -87,6 +87,7 @@ export const api = {
   updateNotice: (noticeId: string, data: Record<string, string | boolean>) => { const form = new FormData(); Object.entries(data).forEach(([k, v]) => form.append(k, String(v))); return apiFetch<any>(`/notices/${encodeURIComponent(noticeId)}`, { method: 'PUT', body: form }); },
   reportContent: (contentType: string, contentId: string, reason: string) => { const form = new FormData(); form.append('content_type', contentType); form.append('content_id', contentId); form.append('reason', reason); return apiFetch<any>('/reports/content', { method: 'POST', body: form }); },
   moderationCases: () => apiFetch<{ cases: any[] }>('/moderation/cases'),
+  decideModerationCase: (caseId: string, decision: 'upheld' | 'dismissed') => { const form = new FormData(); form.append('decision', decision); return apiFetch<any>(`/moderation/cases/${encodeURIComponent(caseId)}`, { method: 'PUT', body: form }); },
   exportAnonymized: () => apiFetch<any>('/export/anonymized'),
   messages: () => apiFetch<{ messages: any[] }>('/messages'),
   updateNotificationLanguage: (language: 'en' | 'sw') => apiFetch<{ notification_language: 'en' | 'sw' }>('/messages/preferences', { method: 'PUT', body: JSON.stringify({ language }) }),

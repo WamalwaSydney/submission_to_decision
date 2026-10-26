@@ -533,7 +533,7 @@ export function RepresentativeDashboardPage() {
 }
 
 export function MyReceiptsPage() {
-  const { state, getSubmissionStatus } = useApp();
+  const { state, getSubmissionStatus, getSubmissionLodgingStatus } = useApp();
   const [accountReceipts, setAccountReceipts] = useState<any[] | null>(null);
   const [receiptsError, setReceiptsError] = useState('');
 
@@ -651,7 +651,7 @@ export function MyReceiptsPage() {
                       </Link>
                       <span className="text-xs font-semibold text-surface-500 ml-auto flex items-center gap-1.5">
                         <FileCheck2 className="h-3.5 w-3.5" />
-                        Lodging: <span className="font-bold text-surface-700">{receipt.lodging_status}</span>
+                        Lodging: <span className="font-bold text-surface-700">{getSubmissionLodgingStatus(receipt.id)}</span>
                       </span>
                     </div>
                   </div>

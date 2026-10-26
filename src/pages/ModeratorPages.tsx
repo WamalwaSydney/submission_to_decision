@@ -524,13 +524,29 @@ export function ReviewerQueuePage() {
 
 export function ReportedContentPage() {
   const { state, dispatch } = useApp();
+  const [loadError, setLoadError] = useState('');
+  const [savingCase, setSavingCase] = useState<string | null>(null);
 
-  const handleDecision = (id: string, decision: 'upheld' | 'dismissed') => {
+  useEffect(() => {
+    if (!state.currentUser || !['reviewer', 'moderator'].includes(state.currentUser.role)) return;
+    api.moderationCases().then(result => {
+      dispatch({ type: 'HYDRATE', payload: { moderationActions: result.cases } });
+      setLoadError('');
+    }).catch(error => setLoadError(error instanceof Error ? error.message : 'Unable to load moderation reports.'));
+  }, [state.currentUser?.id, state.currentUser?.role, dispatch]);
+
+  const handleDecision = async (id: string, decision: 'upheld' | 'dismissed') => {
     if (!state.currentUser) return;
-    dispatch({
-      type: 'UPDATE_MODERATION',
-      payload: { id, decision, reviewerId: state.currentUser.id }
-    });
+    setSavingCase(id);
+    setLoadError('');
+    try {
+      const result = await api.decideModerationCase(id, decision);
+      dispatch({ type: 'UPDATE_MODERATION', payload: { id, decision: result.action.decision, reviewerId: result.action.reviewer_id } });
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : 'Unable to save moderation decision.');
+    } finally {
+      setSavingCase(null);
+    }
   };
 
   return (
@@ -543,9 +559,10 @@ export function ReportedContentPage() {
         Reported <span className="gradient-text">Content</span>
       </h1>
       <p className="text-lg text-surface-600 leading-relaxed max-w-3xl mb-8">
-        Review reported content cases. No content is automatically deleted — all decisions are logged.
+        Review citizen-submitted reports about public submissions. These cases are separate from committee reports used for OCR and outcome matching; no submission is automatically deleted.
       </p>
 
+      {loadError && <p role="alert" className="mb-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-800">{loadError}</p>}
       <Card className="!p-7 md:!p-8 relative overflow-hidden">
         <div className="absolute -top-24 -right-24 w-56 h-56 rounded-full bg-red-100/50 blur-3xl pointer-events-none" />
         <div className="absolute -bottom-24 -left-24 w-56 h-56 rounded-full bg-primary-100/40 blur-3xl pointer-events-none" />
@@ -610,14 +627,16 @@ export function ReportedContentPage() {
                       {action.decision === 'pending' && state.currentUser && (
                         <div className="flex flex-wrap gap-3 pt-2 border-t border-surface-100">
                           <button
-                            onClick={() => handleDecision(action.id, 'upheld')}
-                            className="btn-danger inline-flex items-center gap-2 text-sm"
+                            onClick={() => void handleDecision(action.id, 'upheld')}
+                            disabled={savingCase === action.id}
+                            className="btn-danger inline-flex items-center gap-2 text-sm disabled:opacity-50"
                           >
                             <XCircle className="h-4 w-4" /> Uphold Report
                           </button>
                           <button
-                            onClick={() => handleDecision(action.id, 'dismissed')}
-                            className="btn-secondary inline-flex items-center gap-2 text-sm"
+                            onClick={() => void handleDecision(action.id, 'dismissed')}
+                            disabled={savingCase === action.id}
+                            className="btn-secondary inline-flex items-center gap-2 text-sm disabled:opacity-50"
                           >
                             <CheckCircle2 className="h-4 w-4" /> Dismiss Report
                           </button>

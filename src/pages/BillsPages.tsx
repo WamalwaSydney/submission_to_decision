@@ -157,7 +157,7 @@ export function BillsListPage() {
 }
 export function BillPage() {
   const { id } = useParams<{ id: string }>();
-  const { state, dispatch, getSubmissionStatus, getSubmissionReviewDecision, getBillOutcomes } = useApp();
+  const { state, dispatch, getSubmissionStatus, getSubmissionReviewDecision, getSubmissionLodgingStatus, getBillOutcomes } = useApp();
   const [reportingReceiptId, setReportingReceiptId] = useState<string | null>(null);
   const [reportReason, setReportReason] = useState('');
   const [reportMessage, setReportMessage] = useState('');
@@ -419,7 +419,7 @@ export function BillPage() {
                       <Calendar className="h-3.5 w-3.5" />
                       {new Date(receipt.timestamp).toLocaleDateString()}
                     </span>
-                    <span>Lodging: <span className="font-black text-surface-700">{receipt.lodging_status}</span></span>
+                    <span>Lodging: <span className="font-black text-surface-700">{getSubmissionLodgingStatus(receipt.id)}</span></span>
                     {match && (
                       <span className="text-accent-700 flex items-center gap-1 bg-accent-50 px-2 py-0.5 rounded-md border border-accent-100">
                         <FileCheck className="h-3 w-3" />

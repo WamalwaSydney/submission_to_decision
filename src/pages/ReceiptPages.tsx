@@ -21,7 +21,7 @@ function SubmissionStatusBadge({ status }: { status: SubmissionStatus }) {
 export function ReceiptLookupPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [query, setQuery] = useState(searchParams.get('id') || '');
-  const { state, getSubmissionStatus, getSubmissionReviewDecision } = useApp();
+  const { state, getSubmissionStatus, getSubmissionReviewDecision, getSubmissionLodgingStatus } = useApp();
   const [reportOpen, setReportOpen] = useState(false);
   const [reportReason, setReportReason] = useState('');
   const [reportMessage, setReportMessage] = useState('');
@@ -59,7 +59,7 @@ export function ReceiptLookupPage() {
     setReportSending(true);
     setReportMessage('');
     try {
-      await api.reportContent('receipt', receipt.id, reportReason.trim());
+      await api.reportContent('receipt', receipt.id || receipt.public_id, reportReason.trim());
       setReportMessage('Your report was sent to the moderation team for review.');
       setReportReason('');
       setReportOpen(false);
@@ -198,7 +198,7 @@ export function ReceiptLookupPage() {
                   <div className="pl-3 text-sm leading-relaxed font-semibold">
                     <strong className="font-black">Lodging notice:</strong> This receipt proves a view was submitted on this platform at the given time.
                     It does <span className="underline decoration-warm-500 decoration-2">NOT</span> prove it reached the committee.
-                    Lodging status: <span className="font-black text-warm-900 bg-white/60 px-1.5 py-0.5 rounded">{receipt.lodging_status}</span>.
+                    Lodging status: <span className="font-black text-warm-900 bg-white/60 px-1.5 py-0.5 rounded">{remoteReceipt?.lodging_status || getSubmissionLodgingStatus(receipt.id)}</span>.
                   </div>
                 </DisclaimerBox>
 
