@@ -1434,11 +1434,41 @@ async def report_content(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    # Citizen-to-citizen moderation reports apply only to another citizen's
+    # public submission. Other content types can be added as separate flows.
+    if current_user.role != "citizen":
+        raise HTTPException(status_code=403, detail="Only citizen accounts can report citizen submissions")
+    if content_type != "receipt":
+        raise HTTPException(status_code=422, detail="Only citizen submissions can be reported here")
+    try:
+        receipt_uuid = UUID(content_id)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Invalid submission identifier")
+    receipt_result = await db.execute(select(ParticipationReceipt).where(ParticipationReceipt.id == receipt_uuid))
+    receipt = receipt_result.scalar_one_or_none()
+    if receipt is None:
+        raise HTTPException(status_code=404, detail="Submission not found")
+    author_result = await db.execute(select(User).where(User.id == receipt.author_id))
+    author = author_result.scalar_one_or_none()
+    if author is None or author.role != "citizen":
+        raise HTTPException(status_code=422, detail="Only citizen submissions can be reported")
+    if receipt.author_id == current_user.id:
+        raise HTTPException(status_code=422, detail="You cannot report your own submission")
+    if not reason.strip():
+        raise HTTPException(status_code=422, detail="A report reason is required")
+    existing_result = await db.execute(select(ModerationAction).where(
+        ModerationAction.reporter_id == current_user.id,
+        ModerationAction.content_type == "receipt",
+        ModerationAction.content_id == receipt.id,
+        ModerationAction.decision == "pending",
+    ))
+    if existing_result.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail="You already have a pending report for this submission")
     action = ModerationAction(
         reporter_id=current_user.id,
-        content_type=content_type,
-        content_id=content_id,
-        reason=reason,
+        content_type="receipt",
+        content_id=receipt.id,
+        reason=reason.strip(),
     )
     db.add(action)
     await record_audit(db, entity_type="moderation_action", entity_id=action.id, action="reported", actor_id=current_user.id, details={"content_type": content_type, "reason": reason})

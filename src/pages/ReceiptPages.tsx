@@ -7,7 +7,7 @@ import { ChainVerificationResult, SubmissionStatus } from '../types';
 import {
   Search, CheckCircle2, XCircle, AlertTriangle, Clock,
   FileText, Fingerprint, Shield, ArrowRight, Link as LinkIcon,
-  RefreshCw, Copy, ExternalLink
+  RefreshCw, Copy, ExternalLink, Flag
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Card, Badge, Label, InputField, DisclaimerBox, InfoBox, StatusBadge } from '../components/UI';
@@ -22,6 +22,10 @@ export function ReceiptLookupPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [query, setQuery] = useState(searchParams.get('id') || '');
   const { state, getSubmissionStatus, getSubmissionReviewDecision } = useApp();
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportReason, setReportReason] = useState('');
+  const [reportMessage, setReportMessage] = useState('');
+  const [reportSending, setReportSending] = useState(false);
   const [remoteReceipt, setRemoteReceipt] = useState<any>(null);
   const [lookupError, setLookupError] = useState('');
   const [copiedHash, setCopiedHash] = useState(false);
@@ -48,6 +52,22 @@ export function ReceiptLookupPage() {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setSearchParams({ id: query });
+  };
+  const submitReport = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!receipt || !reportReason.trim()) return;
+    setReportSending(true);
+    setReportMessage('');
+    try {
+      await api.reportContent('receipt', receipt.id, reportReason.trim());
+      setReportMessage('Your report was sent to the moderation team for review.');
+      setReportReason('');
+      setReportOpen(false);
+    } catch (error) {
+      setReportMessage(error instanceof Error ? error.message : 'Could not submit this report.');
+    } finally {
+      setReportSending(false);
+    }
   };
 
   return (
@@ -316,6 +336,28 @@ export function ReceiptLookupPage() {
               )}
             </AnimatePresence>
 
+            {/* Citizen-to-citizen submission reporting */}
+            {state.currentUser?.role === 'citizen' && receipt.author_id !== state.currentUser.id && (
+              <Card className="!p-5 border-warm-200">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h3 className="font-bold text-surface-900">See a problem with this submission?</h3>
+                    <p className="text-sm text-surface-600">Report it to the moderation team. The submission is not automatically removed.</p>
+                  </div>
+                  <button type="button" onClick={() => { setReportOpen(v => !v); setReportMessage(''); }} className="btn-secondary inline-flex items-center gap-2">
+                    <Flag className="h-4 w-4" /> Report submission
+                  </button>
+                </div>
+                {reportOpen && (
+                  <form onSubmit={submitReport} className="mt-4 space-y-3">
+                    <label className="block text-sm font-semibold text-surface-700" htmlFor="submission-report-reason">Why are you reporting this submission?</label>
+                    <textarea id="submission-report-reason" required minLength={5} maxLength={2000} value={reportReason} onChange={e => setReportReason(e.target.value)} className="input-field min-h-24 w-full" placeholder="Explain the concern for the moderation team." />
+                    <button disabled={reportSending || reportReason.trim().length < 5} type="submit" className="btn-primary disabled:opacity-50">{reportSending ? 'Sending…' : 'Send report'}</button>
+                  </form>
+                )}
+                {reportMessage && <p role="status" className="mt-3 text-sm font-semibold text-surface-700">{reportMessage}</p>}
+              </Card>
+            )}
             {/* Action buttons */}
             <div className="flex flex-wrap gap-4">
               <Link to="/receipt-verify" className="btn-secondary !px-6 !py-3 inline-flex">

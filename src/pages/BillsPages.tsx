@@ -5,7 +5,7 @@ import { getDaysOfNotice, getWindowLength } from '../utils/noticeDates';
 import { SubmissionStatus } from '../types';
 import {
   FileText, Clock, Building2, ArrowRight, ArrowLeft,
-  FileCheck, Calendar, FileSearch, Gavel, Users, Download, SlidersHorizontal, RotateCcw
+  FileCheck, Calendar, FileSearch, Gavel, Users, Download, SlidersHorizontal, RotateCcw, Flag
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, PieChart, Pie, Cell } from 'recharts';
@@ -158,6 +158,26 @@ export function BillsListPage() {
 export function BillPage() {
   const { id } = useParams<{ id: string }>();
   const { state, dispatch, getSubmissionStatus, getSubmissionReviewDecision, getBillOutcomes } = useApp();
+  const [reportingReceiptId, setReportingReceiptId] = useState<string | null>(null);
+  const [reportReason, setReportReason] = useState('');
+  const [reportMessage, setReportMessage] = useState('');
+  const [reportSending, setReportSending] = useState(false);
+  const submitSubmissionReport = async (e: React.FormEvent, receiptId: string) => {
+    e.preventDefault();
+    if (!reportReason.trim()) return;
+    setReportSending(true);
+    setReportMessage('');
+    try {
+      await api.reportContent('receipt', receiptId, reportReason.trim());
+      setReportMessage('Report sent to the moderation team.');
+      setReportReason('');
+      setReportingReceiptId(null);
+    } catch (error) {
+      setReportMessage(error instanceof Error ? error.message : 'Could not submit this report.');
+    } finally {
+      setReportSending(false);
+    }
+  };
   const bill = state.bills.find(b => b.id === id);
 
   useEffect(() => {
@@ -410,6 +430,21 @@ export function BillPage() {
                   {(entry?.stated_reason || match?.reviewer_reason) && (
                     <div className="mt-4 text-xs bg-warm-50 p-4 rounded-xl border border-warm-200 text-warm-800 leading-relaxed">
                       <strong className="font-black">Reason:</strong> {entry?.stated_reason || match?.reviewer_reason}
+                    </div>
+                  )}
+                  {state.currentUser?.role === 'citizen' && receipt.author_id !== state.currentUser.id && (
+                    <div className="mt-4 border-t border-surface-100 pt-4">
+                      <button type="button" onClick={() => { setReportingReceiptId(reportingReceiptId === receipt.id ? null : receipt.id); setReportMessage(''); setReportReason(''); }} className="btn-secondary inline-flex items-center gap-2 text-sm">
+                        <Flag className="h-4 w-4" /> Report this submission
+                      </button>
+                      {reportingReceiptId === receipt.id && (
+                        <form onSubmit={e => submitSubmissionReport(e, receipt.id)} className="mt-3 space-y-3">
+                          <label className="block text-sm font-semibold text-surface-700" htmlFor={`bill-report-${receipt.id}`}>Why are you reporting this submission?</label>
+                          <textarea id={`bill-report-${receipt.id}`} required minLength={5} maxLength={2000} value={reportReason} onChange={e => setReportReason(e.target.value)} className="input-field min-h-24 w-full" placeholder="Explain the concern for the moderation team." />
+                          <button disabled={reportSending || reportReason.trim().length < 5} type="submit" className="btn-primary disabled:opacity-50">{reportSending ? 'Sending…' : 'Send report'}</button>
+                        </form>
+                      )}
+                      {reportMessage && <p role="status" className="mt-3 text-sm font-semibold text-surface-700">{reportMessage}</p>}
                     </div>
                   )}
                 </motion.div>

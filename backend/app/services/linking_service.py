@@ -192,8 +192,18 @@ async def _notify_decision(db: AsyncSession, match: SubmissionMatch, decision: s
     await notification_service.notify_receipt_event(db, receipt, key, event, facts)
 
 async def get_pending_matches(db: AsyncSession) -> List[SubmissionMatch]:
-    result = await db.execute(select(SubmissionMatch).where(SubmissionMatch.reviewer_decision == "pending"))
-    return list(result.scalars().all())
+    result = await db.execute(
+        select(SubmissionMatch)
+        .where(SubmissionMatch.reviewer_decision == "pending")
+        .order_by(SubmissionMatch.confidence_score.desc(), SubmissionMatch.timestamp.asc())
+    )
+    # One receipt should have at most one active proposal in the review queue.
+    # Legacy data (or earlier repeated OCR runs) can contain duplicates; keep
+    # the strongest proposal visible without mutating the audit/history rows.
+    unique_by_receipt = {}
+    for match in result.scalars().all():
+        unique_by_receipt.setdefault(match.receipt_ref, match)
+    return list(unique_by_receipt.values())
 
 async def confirm_match(db: AsyncSession, match_id: str, reviewer_id: str) -> SubmissionMatch:
     result = await db.execute(select(SubmissionMatch).where(SubmissionMatch.id == match_id))
