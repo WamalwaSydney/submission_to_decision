@@ -1,4 +1,6 @@
-// Canonical outcome statuses plus an explicit non-outcome label for extracted text awaiting classification.
+// Canonical outcome statuses plus an explicit label for report text awaiting classification.
+// A confirmed submission match is treated as adopted unless an explicit
+// committee treatment overrides it.
 
 export type SubmissionStatus = 
   | 'awaiting committee report'

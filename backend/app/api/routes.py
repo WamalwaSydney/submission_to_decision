@@ -571,6 +571,7 @@ async def get_bill(bill_id: UUID, db: AsyncSession = Depends(get_db)):
         "amended": 0,
         "rejected with reasons": 0,
         "not addressed": 0,
+        "unclassified": 0,
     }
 
     for receipt in receipts:
@@ -589,8 +590,11 @@ async def get_bill(bill_id: UUID, db: AsyncSession = Depends(get_db)):
             )
             entry = entry_result.scalar_one_or_none()
 
-        if entry:
-            outcome_counts[entry.treatment] = outcome_counts.get(entry.treatment, 0) + 1
+        if match:
+            # In this workflow, accepting a match means adoption unless the
+            # official report explicitly records another treatment.
+            treatment = entry.treatment if entry and entry.treatment not in {"unclassified", "awaiting committee report"} else "adopted"
+            outcome_counts[treatment] = outcome_counts.get(treatment, 0) + 1
         else:
             outcome_counts["awaiting committee report"] += 1
 
@@ -679,7 +683,7 @@ async def bill_flow(
         )
         confirmed_match = match if match and match.reviewer_decision == "confirmed" else None
         entry = next((e for e in entries if confirmed_match and e.id == confirmed_match.report_entry_ref), None)
-        submissions.append({"public_id": receipt.public_id, "timestamp": receipt.timestamp, "clause_ref": receipt.clause_ref, "status": entry.treatment if entry and confirmed_match else "awaiting committee report", "match_percentage": round(match.confidence_score * 100, 1) if match else None, "match_decision": match.reviewer_decision if match else None, "reason": entry.stated_reason if entry and confirmed_match else None})
+        submissions.append({"public_id": receipt.public_id, "timestamp": receipt.timestamp, "clause_ref": receipt.clause_ref, "status": (entry.treatment if entry and entry.treatment not in {"unclassified", "awaiting committee report"} else "adopted") if confirmed_match else "awaiting committee report", "match_percentage": round(match.confidence_score * 100, 1) if match else None, "match_decision": match.reviewer_decision if match else None, "reason": entry.stated_reason if entry and confirmed_match else None})
     return {"bill": to_dict(bill), "flow": [{"stage": h.get("stage"), "date": h.get("date"), "note": h.get("note")} for h in (bill.status_history or [])], "reports": [report_to_dict(r) for r in reports], "report_entries": [to_dict(e) for e in entries], "submissions": submissions}
 
 # ============ Messages ============
@@ -902,7 +906,7 @@ async def get_receipt(public_id: str, db: AsyncSession = Depends(get_db)):
                 "method": match.match_method,
                 "confidence": match.confidence_score,
                 "explanation": match.explanation,
-                "treatment": entry.treatment,
+                "treatment": entry.treatment if entry.treatment not in {"unclassified", "awaiting committee report"} else "adopted",
                 "stated_reason": entry.stated_reason,
             }
 
@@ -913,7 +917,7 @@ async def get_receipt(public_id: str, db: AsyncSession = Depends(get_db)):
         "clause_ref": receipt.clause_ref,
         "submission_text": receipt.submission_text,
         "timestamp": receipt.timestamp,
-        "status": match_data["treatment"] if match_data else "awaiting committee report",
+        "status": match_data["treatment"] if match_data else ("adopted" if match_decision == "confirmed" else "awaiting committee report"),
         "match_decision": match_decision,
         "lodging_status": receipt.lodging_status,
         "hash": receipt.hash,

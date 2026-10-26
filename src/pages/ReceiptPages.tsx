@@ -41,6 +41,9 @@ export function ReceiptLookupPage() {
   const reviewDecision = receipt ? (remoteReceipt?.match_decision || getSubmissionReviewDecision(receipt.id)) : null;
   const match = receipt ? state.matches.find(m => m.receipt_ref === receipt.id && m.reviewer_decision === 'confirmed') : null;
   const entry = remoteReceipt?.match ? { treatment: remoteReceipt.match.treatment, stated_reason: remoteReceipt.match.stated_reason } : (match ? state.reportEntries.find(e => e.id === match.report_entry_ref) : null);
+  const displayedTreatment = entry && ['unclassified', 'awaiting committee report'].includes(entry.treatment)
+    ? 'adopted'
+    : entry?.treatment;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -290,8 +293,8 @@ export function ReceiptLookupPage() {
                         </div>
                         <div className="rounded-xl p-4 bg-white/80 backdrop-blur-sm border border-surface-200/80">
                           <p className="text-xs font-black uppercase tracking-widest text-surface-500 mb-2">Committee Outcome</p>
-                          <SubmissionStatusBadge status={entry.treatment as SubmissionStatus} />
-                          {entry.treatment === 'unclassified' && <p className="text-xs font-semibold text-surface-500 mt-2">This report entry has not yet been classified as adopted, amended, rejected with reasons, or not addressed. A confirmed match does not itself mean the submission was adopted.</p>}
+                          <SubmissionStatusBadge status={displayedTreatment as SubmissionStatus} />
+                          {entry.treatment === 'unclassified' && <p className="text-xs font-semibold text-surface-500 mt-2">This confirmed match is recorded as adopted by default. If the official report records an amendment, rejection with reasons, or that it was not addressed, the submission status will update accordingly.</p>}
                         </div>
                         <div className="rounded-xl p-4 bg-white/80 backdrop-blur-sm border border-surface-200/80">
                           <p className="text-xs font-black uppercase tracking-widest text-surface-500 mb-1.5">Confirmed On</p>

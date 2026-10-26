@@ -378,7 +378,7 @@ export function BillPage() {
                       {reviewDecision && <Badge variant={reviewDecision === 'confirmed' ? 'green' : reviewDecision === 'pending' ? 'yellow' : 'red'}>Match {reviewDecision === 'confirmed' ? 'confirmed' : reviewDecision === 'pending' ? 'pending review' : 'rejected'}</Badge>}
                     </div>
                   </div>
-                  {status === 'unclassified' && <p className="text-xs font-semibold text-surface-500 mt-3">The report entry is linked, but its committee outcome has not yet been classified. Match confirmation alone does not mean the submission was adopted.</p>}
+                  {status === 'adopted' && match && <p className="text-xs font-semibold text-surface-500 mt-3">This submission was matched to the committee record and is recorded as adopted unless the report explicitly records an amendment, rejection with reasons, or that it was not addressed.</p>}
                   <p className="text-[15px] text-surface-800 leading-relaxed mb-4 bg-surface-50/60 p-4 rounded-xl border border-surface-100 font-medium">
                     {receipt.submission_text}
                   </p>

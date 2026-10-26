@@ -55,7 +55,7 @@ function ReportTreatmentEditor({ entry }: { entry: ReportEntry }) {
     </div>
     {treatment === 'rejected with reasons' && <textarea aria-label="Reason stated in committee report" value={reason} onChange={event => { setReason(event.target.value); setFeedback(''); }} rows={2} placeholder="Enter the reason stated in the committee report" className="input-field mt-2 text-sm" />}
     <p role="status" className={`mt-2 text-xs font-semibold ${feedback.includes('saved') ? 'text-green-700' : feedback ? 'text-red-700' : 'text-surface-500'}`}>
-      {feedback || 'Match confirmation is separate: only select an outcome supported by the committee report.'}
+      {feedback || 'A confirmed match is recorded as adopted unless the official report supports a different treatment.'}
     </p>
   </div>;
 }
@@ -109,16 +109,30 @@ export function ReviewerQueuePage() {
     setDecisionMatchId(matchId);
     setDecisionError('');
     try {
-      await api.decideMatch(matchId, decision === 'confirmed' ? 'confirm' : 'reject');
+      const result = await api.decideMatch(matchId, decision === 'confirmed' ? 'confirm' : 'reject');
+      const persistedMatch = result?.match;
+      if (persistedMatch) {
+        dispatch({ type: 'UPSERT_MATCH', payload: persistedMatch });
+      }
     } catch (error) {
       setDecisionError(error instanceof Error ? error.message : 'Unable to update the match. Please refresh and try again.');
       setDecisionMatchId(null);
       return;
     }
-    dispatch({
-      type: 'UPDATE_MATCH_DECISION',
-      payload: { matchId, decision, reviewerId: state.currentUser.id }
-    });
+    // Keep the fallback for older API responses that do not return the
+    // persisted match object. New responses are upserted above so a match
+    // confirmed from a partial queue snapshot is still visible to the public
+    // outcome trail immediately.
+    if (!state.matches.some(match => match.id === matchId)) {
+      const refreshed = await api.bootstrap();
+      const serverMatch = refreshed.matches.find(match => match.id === matchId);
+      if (serverMatch) dispatch({ type: 'UPSERT_MATCH', payload: serverMatch });
+    } else {
+      dispatch({
+        type: 'UPDATE_MATCH_DECISION',
+        payload: { matchId, decision, reviewerId: state.currentUser.id }
+      });
+    }
     dispatch({
       type: 'ADD_AUDIT_LOG',
       payload: {
@@ -482,7 +496,7 @@ export function ReviewerQueuePage() {
                       </p>
                       <p className="text-xs text-surface-600 font-semibold mt-2">
                         {isConfirmed
-                          ? `Committee outcome: ${entry?.treatment || 'not available'}${entry?.treatment === 'unclassified' ? ' — outcome classification is still needed.' : ''}`
+                          ? `Committee outcome: ${entry?.treatment && !['unclassified', 'awaiting committee report'].includes(entry.treatment) ? entry.treatment : 'adopted by confirmed match'}`
                           : 'No confirmed report match; this rejected proposal does not establish a committee outcome.'}
                       </p>
                       {canModerate && isConfirmed && entry && <ReportTreatmentEditor entry={entry} />}

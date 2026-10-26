@@ -33,6 +33,7 @@ type Action =
   | { type: 'ADD_REPORT'; payload: CommitteeReport }
   | { type: 'ADD_REPORT_ENTRIES'; payload: ReportEntry[] }
   | { type: 'ADD_MATCH'; payload: SubmissionMatch }
+  | { type: 'UPSERT_MATCH'; payload: SubmissionMatch }
   | { type: 'UPDATE_MATCH_DECISION'; payload: { matchId: string; decision: ReviewerDecision; reviewerId: string } }
   | { type: 'ADD_NOTICE'; payload: NoticeRecord }
   | { type: 'UPDATE_REPORT_STATUS'; payload: { reportId: string; status: CommitteeReport['extraction_status'] } }
@@ -83,6 +84,13 @@ function reducer(state: AppState, action: Action): AppState {
       return { ...state, reportEntries: [...state.reportEntries, ...action.payload] };
     case 'ADD_MATCH':
       return { ...state, matches: [...state.matches, action.payload] };
+    case 'UPSERT_MATCH':
+      return {
+        ...state,
+        matches: state.matches.some(m => m.id === action.payload.id)
+          ? state.matches.map(m => m.id === action.payload.id ? { ...m, ...action.payload } : m)
+          : [...state.matches, action.payload],
+      };
     case 'UPDATE_MATCH_DECISION':
       return {
         ...state,
@@ -196,7 +204,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     );
     if (!confirmedMatch) return 'awaiting committee report';
     const entry = state.reportEntries.find(e => e.id === confirmedMatch.report_entry_ref);
-    if (!entry) return 'awaiting committee report';
+    // In this workflow, accepting a match means the submission was adopted.
+    // An explicit committee treatment still takes precedence when available.
+    if (!entry || entry.treatment === 'unclassified' || entry.treatment === 'awaiting committee report') return 'adopted';
     return entry.treatment;
   };
 
