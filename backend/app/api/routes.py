@@ -1087,7 +1087,7 @@ async def update_report_entry(
     entry_id: UUID,
     payload: ReportEntryUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_role("committee_officer", "administrator")),
+    current_user: User = Depends(require_role("committee_officer", "reviewer", "moderator", "administrator")),
 ):
     allowed_treatments = {"adopted", "amended", "rejected with reasons", "not addressed"}
     if payload.treatment not in allowed_treatments:
@@ -1096,6 +1096,8 @@ async def update_report_entry(
     entry = result.scalar_one_or_none()
     if not entry:
         raise HTTPException(status_code=404, detail="Report entry not found")
+    if payload.treatment == "rejected with reasons" and not (payload.stated_reason or entry.stated_reason or "").strip():
+        raise HTTPException(status_code=422, detail="A reason from the committee report is required for this outcome")
     entry.treatment = payload.treatment
     entry.stated_reason = payload.stated_reason
     outcome_change = await record_audit(db, entity_type="report_entry", entity_id=entry.id, action="updated", actor_id=current_user.id, details={"treatment": payload.treatment, "stated_reason": payload.stated_reason})

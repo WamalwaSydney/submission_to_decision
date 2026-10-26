@@ -1,12 +1,64 @@
 import React, { useEffect, useState } from 'react';
 import { useApp } from '../context/AppContext';
-import { ReviewerDecision } from '../types';
+import { ReportEntry, ReviewerDecision, SubmissionStatus } from '../types';
 import { api } from '../api/endpoints';
 import { v4 as uuidv4 } from 'uuid';
 import { CheckCircle2, XCircle, Clock, AlertTriangle, Flag, Shield, Gavel, Users, FileText, Sparkles } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { Card, DisclaimerBox, InfoBox, Badge, Label, SelectField, BtnPrimary, BtnSecondary, BtnDanger } from '../components/UI';
 import { confidenceClasses, confidenceBarClass, confidenceLabel } from '../utils/confidence';
+
+function ReportTreatmentEditor({ entry }: { entry: ReportEntry }) {
+  const { dispatch } = useApp();
+  const [treatment, setTreatment] = useState<SubmissionStatus>(entry.treatment);
+  const [reason, setReason] = useState(entry.stated_reason || '');
+  const [saving, setSaving] = useState(false);
+  const [feedback, setFeedback] = useState('');
+  const changed = treatment !== entry.treatment || reason.trim() !== (entry.stated_reason || '').trim();
+
+  useEffect(() => {
+    setTreatment(entry.treatment);
+    setReason(entry.stated_reason || '');
+    setFeedback('');
+  }, [entry.treatment, entry.stated_reason]);
+
+  const save = async () => {
+    if (treatment === 'unclassified' || treatment === 'awaiting committee report') return;
+    if (treatment === 'rejected with reasons' && !reason.trim()) {
+      setFeedback('Add the reason stated in the official report before saving this outcome.');
+      return;
+    }
+    setSaving(true);
+    setFeedback('');
+    try {
+      await api.updateReportEntry(entry.report_ref, entry.id, treatment, reason.trim() || undefined);
+      dispatch({ type: 'UPDATE_REPORT_ENTRY', payload: { entryId: entry.id, treatment, stated_reason: reason.trim() || undefined } });
+      setFeedback('Committee outcome saved.');
+    } catch (error) {
+      setFeedback(error instanceof Error ? error.message : 'Unable to save the committee outcome.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return <div className="mt-3 rounded-lg border border-surface-200 bg-white/80 p-3">
+    <p className="text-xs font-bold text-surface-700 mb-2">Classify outcome from the official report</p>
+    <div className="flex flex-wrap gap-2">
+      <select aria-label="Committee report outcome" value={treatment} onChange={event => { setTreatment(event.target.value as SubmissionStatus); setFeedback(''); }} disabled={saving} className="input-field min-h-10 flex-1 min-w-[190px] !py-2 text-sm">
+        <option value="unclassified" disabled>Unclassified (choose an outcome)</option>
+        <option value="adopted">Adopted</option>
+        <option value="amended">Amended</option>
+        <option value="rejected with reasons">Rejected with reasons</option>
+        <option value="not addressed">Not addressed</option>
+      </select>
+      <button type="button" onClick={save} disabled={saving || !changed || treatment === 'unclassified'} className="btn-primary min-h-10 !px-4 text-sm disabled:opacity-50">{saving ? 'Saving…' : 'Save outcome'}</button>
+    </div>
+    {treatment === 'rejected with reasons' && <textarea aria-label="Reason stated in committee report" value={reason} onChange={event => { setReason(event.target.value); setFeedback(''); }} rows={2} placeholder="Enter the reason stated in the committee report" className="input-field mt-2 text-sm" />}
+    <p role="status" className={`mt-2 text-xs font-semibold ${feedback.includes('saved') ? 'text-green-700' : feedback ? 'text-red-700' : 'text-surface-500'}`}>
+      {feedback || 'Match confirmation is separate: only select an outcome supported by the committee report.'}
+    </p>
+  </div>;
+}
 
 export function ReviewerQueuePage() {
   const { state, dispatch } = useApp();
@@ -272,6 +324,8 @@ export function ReviewerQueuePage() {
                           </div>
                         </InfoBox>
 
+                        {canModerate && entry && <ReportTreatmentEditor entry={entry} />}
+
                         <div className="flex flex-wrap gap-3">
                           <button
                             type="button"
@@ -369,6 +423,7 @@ export function ReviewerQueuePage() {
                 <p className="text-sm font-semibold text-surface-700 mb-1">Report entry: {entry?.clause_ref || 'Entry'}{entry?.treatment && entry.treatment !== 'unclassified' ? ` · ${entry.treatment}` : entry?.treatment === 'unclassified' ? ' · Treatment unclassified' : ''}</p>
                 <p className="text-sm text-surface-700 leading-relaxed mb-2">{entry?.extracted_summary || 'Report entry details are loading.'}</p>
                 <p className="text-xs text-surface-600 leading-relaxed mb-4">{match.explanation}</p>
+                {canModerate && entry && <ReportTreatmentEditor entry={entry} />}
                 <div className="flex flex-wrap gap-3">
                   <button type="button" onClick={() => handleDecision(match.id, 'confirmed')} disabled={!canModerate || decisionMatchId !== null} className="btn-primary inline-flex min-h-10 items-center gap-2 !bg-gradient-to-r !from-green-600 !to-emerald-700 disabled:opacity-60"><CheckCircle2 className="h-4 w-4" />{decisionMatchId === match.id ? 'Saving…' : 'Confirm Match'}</button>
                   <button type="button" onClick={() => handleDecision(match.id, 'rejected')} disabled={!canModerate || decisionMatchId !== null} className="btn-danger inline-flex min-h-10 items-center gap-2 disabled:opacity-60"><XCircle className="h-4 w-4" />Reject Match</button>
@@ -430,6 +485,7 @@ export function ReviewerQueuePage() {
                           ? `Committee outcome: ${entry?.treatment || 'not available'}${entry?.treatment === 'unclassified' ? ' — outcome classification is still needed.' : ''}`
                           : 'No confirmed report match; this rejected proposal does not establish a committee outcome.'}
                       </p>
+                      {canModerate && isConfirmed && entry && <ReportTreatmentEditor entry={entry} />}
                     </div>
                   </Card>
                 </motion.div>
