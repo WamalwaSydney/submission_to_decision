@@ -6,7 +6,12 @@ if (!API_URL) {
 
 export class ApiError extends Error {
   constructor(public status: number, public body: unknown) {
-    super(`API request failed with status ${status}`);
+    const detail = body && typeof body === 'object' && 'detail' in body
+      ? (body as { detail?: unknown }).detail
+      : undefined;
+    super(typeof detail === 'string' && detail.trim()
+      ? detail
+      : `API request failed with status ${status}`);
     this.name = 'ApiError';
   }
 }
