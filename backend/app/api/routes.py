@@ -1492,6 +1492,9 @@ async def report_content(
         reason=reason.strip(),
     )
     db.add(action)
+    # SQLAlchemy applies the UUID primary-key default during flush. The audit
+    # row requires a non-null entity_id, so persist the action first.
+    await db.flush()
     await record_audit(db, entity_type="moderation_action", entity_id=action.id, action="reported", actor_id=current_user.id, details={"content_type": content_type, "reason": reason})
     await db.commit()
     await db.refresh(action)
