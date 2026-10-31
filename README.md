@@ -2,13 +2,14 @@
 
 A web application designed to help citizens trace public submissions on bills in Kenya's National and County Legislatures, from lodging to the committee's recorded treatment.
 
-> **Deployment status:** deployment configuration and public URLs are documented, but live service health and end-to-end behavior are **not verified in this archive review**. The application is tested locally where noted below. The frontend reaches the API through the build-time `VITE_API_URL` variable. The Figma/export ZIP shared for review is a static UI capture, not the complete runnable application; the setup instructions assume the full project source tree described below is present in the repository.
+> **Deployment status:** On 2026-10-29, basic HTTP smoke checks returned 200 for the Netlify homepage, Render `/health`, and the public bills API. This does not verify the complete authenticated submission-to-decision workflow, database failover, or production availability. The frontend reaches the API through the build-time `VITE_API_URL` variable. The Figma/export ZIP shared for review is a static UI capture, not the complete runnable application; the setup instructions assume the full project source tree described below is present in the repository.
 
 ## Project links
 
 - **GitHub repository:** https://github.com/WamalwaSydney/submission_to_decision.git
 - **Figma prototype:** [Participation Trace — Kenya](https://www.figma.com/design/0xIxRyyV8vdUSg8vsUHtxx/Participation-Trace-%E2%80%94-Kenya?node-id=0-1&t=iD8kLK1UBjEuoB1B-1)
 - **Video demonstration (5–10 minutes):** [_Video Link._](https://youtu.be/AKAuekwBSc0)
+- **Technical report (PDF, 2 pages):** [Technical Report](docs/TECHNICAL_REPORT.pdf)
 - **Live application (Netlify):** https://uraia.netlify.app
 - **API health check (Render):** https://submission-to-decision.onrender.com/health
 
@@ -17,6 +18,8 @@ A web application designed to help citizens trace public submissions on bills in
 Public participation can feel like a one-way process when people do not know whether their views were recorded or what happened to them. Participation Trace lets citizens lodge views against tracked bills, receive tamper-evident, hash-chained receipts, and later inspect a public outcome trail.
 
 Committee reports are ingested with an OCR fallback. The system can propose matches between submissions and report entries; a human moderator confirms or rejects each proposed match before it appears as a confirmed outcome.
+
+**Bill data source:** The current bill catalogue is populated/refreshed through the legislation sync from official Parliament of Kenya website sources, not from the seeded demo-bill dataset. The repository still contains simulated seed bills for local development and testing; those are separate from the Parliament-synced catalogue. Committee reports, receipts, matches, and other records should be treated according to their individual source/status labels rather than assumed to be live or simulated as a group.
 
 **Core principle — adoption-independence:** the platform does not depend on a representative registering. Accountability evidence is based on institution-published committee reports and recorded moderation, not representative engagement.
 
@@ -201,7 +204,7 @@ cd backend
 python -m app.seed
 ```
 
-The seed set includes three institutions, unclaimed profiles, simulated bills, sample receipts, reports, report entries, matches, notices, and demo accounts. Do not use seed data as evidence of real legislative activity.
+The seed set includes three institutions, unclaimed profiles, simulated bills, sample receipts, reports, report entries, matches, notices, and demo accounts. The current bill catalogue is supplied through the Parliament legislation sync; seeded bills are separate local/demo records. Do not use seed data as evidence of real legislative activity.
 
 ## Demo accounts
 
@@ -359,7 +362,8 @@ The project now distinguishes four evidence states:
 | Database-level receipt/audit immutability | Implemented in Alembic migration; requires migration against PostgreSQL | `backend/alembic/versions/20261012_integrity_provenance.py` |
 | Precision/recall and ingestion evaluation | Evaluation scripts and empty approved-data templates implemented; results not yet evaluated | `evaluation/data/`, `evaluation/evaluate_*.py` |
 | Usability/SUS study | Instrument/template implemented; human study and results not yet conducted | `evaluation/data/usability_sessions.csv`, `docs/EVALUATION.md` |
-| Seed bills, profiles, receipts, reports | Simulated | `backend/app/seed.py`, `src/data/seed.ts` |
+| Parliament-synced bill catalogue | Sourced through the Parliament legislation sync; check source and sync timestamp for currentness | `backend/app/scripts/sync_legislation.py`; `backend/tests/test_sync_legislation.py` |
+| Seed/demo bills, profiles, receipts, reports | Simulated local/demo records; not the current Parliament-synced bill catalogue | `backend/app/seed.py`, `src/data/seed.ts` |
 
 ## Committee and public-flow features
 
