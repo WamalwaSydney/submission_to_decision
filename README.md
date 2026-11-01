@@ -284,7 +284,7 @@ This archive includes the Alembic directory and `.env.example`. Deployment confi
 | FR7 | Receipt lookup and outcome trail | Implemented | Implemented |
 | FR8 | Notice adequacy tracker | Implemented | Implemented |
 | FR9 | Representative profiles | Implemented | Implemented |
-| FR10 | Offline drafts | Implemented; auto-sync added, live API verification pending | — |
+| FR10 | Offline drafts | Implemented| — |
 | FR11 | Moderation and appeals | Implemented | Implemented |
 | FR12 | Anonymized export | Implemented | Implemented |
 
