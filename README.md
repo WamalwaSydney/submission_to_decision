@@ -8,9 +8,9 @@ A web application designed to help citizens trace public submissions on bills in
 
 - **GitHub repository:** https://github.com/WamalwaSydney/submission_to_decision.git
 - **Figma prototype:** [Participation Trace — Kenya](https://www.figma.com/design/0xIxRyyV8vdUSg8vsUHtxx/Participation-Trace-%E2%80%94-Kenya?node-id=0-1&t=iD8kLK1UBjEuoB1B-1)
-- **Video demonstration (5–10 minutes):** [_Video Link._](https://youtu.be/AKAuekwBSc0)
-- **Technical report (PDF, 2 pages):** [Technical Report](docs/TECHNICAL_REPORT.pdf)
-- **Live application (Netlify):** https://uraia.netlify.app
+- **Video demonstration (5–10 minutes):** [_Video Link._](https://www.youtube.com/watch?v=WPp6CnCSf0Y)
+- **Technical report (PDF, 2 pages):** [Technical Report](https://drive.google.com/file/d/1q9JY7gkEAiBDc2BhVNsxL6lmVeTWuHaA/view?usp=drive_link)
+- **Live application (Netlify):** https://uraia-4.netlify.app
 - **API health check (Render):** https://submission-to-decision.onrender.com/health
 
 ## Overview
