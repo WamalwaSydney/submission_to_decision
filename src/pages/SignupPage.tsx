@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { redirectTarget } from '../utils/redirect';
 import { Alert, Box, IconButton, InputAdornment, MenuItem, TextField, Typography } from '@mui/material';
 import { ArrowRight, Copy, Download, Eye, EyeOff, LockKeyhole, UserRoundPlus } from 'lucide-react';
 import { Card } from '../components/UI';
@@ -13,14 +14,22 @@ const ROLE_OPTIONS: { value: PublicSignupRole; label: string }[] = [
   { value: 'committee_officer', label: 'Clerk’s Office / Committee Secretariat' },
 ];
 
+const LEGISLATURES = ['National Assembly', 'Nairobi City County Assembly', 'Trans Nzoia County Assembly'];
+
 export function SignupPage() {
   const { state, dispatch } = useApp();
   const navigate = useNavigate();
+  const location = useLocation();
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [role, setRole] = useState<PublicSignupRole>('citizen');
   const [notificationLanguage, setNotificationLanguage] = useState<'en' | 'sw'>('en');
   const [committeeId, setCommitteeId] = useState('');
+  // Clerk's Office staff first pick their legislature, then a committee in it.
+  const [legislature, setLegislature] = useState('');
+  const legislatureCommittees = state.committees
+    .filter(committee => committee.institution === legislature && !/simulated/i.test(committee.name))
+    .sort((a, b) => a.name.localeCompare(b.name));
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -69,6 +78,10 @@ export function SignupPage() {
       setError('The passwords do not match.');
       return;
     }
+    if (role === 'committee_officer' && !legislature) {
+      setError('Choose the legislature you work for.');
+      return;
+    }
     if (role === 'committee_officer' && !committeeId) {
       setError('Select the official committee you work for.');
       return;
@@ -78,7 +91,7 @@ export function SignupPage() {
     try {
       const response = await api.register(normalizedName, normalizedEmail, password, role, {
         notification_language: notificationLanguage,
-        ...(role === 'committee_officer' ? { committee_id: committeeId } : {}),
+        ...(role === 'committee_officer' ? { committee_id: committeeId, institution: legislature } : {}),
       });
       if (!response.recovery_codes?.length) throw new Error('The recovery codes were not returned. Contact support before leaving this page.');
       if (response.status === 'pending_approval') {
@@ -137,7 +150,7 @@ export function SignupPage() {
             <button type="button" onClick={() => { const blob = new Blob([`Participation Trace recovery codes\n\n${recoveryCodes.join('\n')}\n\nEach code works once. Store securely offline.\n`], { type: 'text/plain' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'participation-trace-recovery-codes.txt'; a.click(); URL.revokeObjectURL(url); }} className="btn-secondary inline-flex items-center gap-2"><Download size={16} />Download codes</button>
             <button type="button" onClick={() => void navigator.clipboard.writeText(recoveryCodes.join('\n'))} className="btn-secondary inline-flex items-center gap-2"><Copy size={16} />Copy codes</button>
           </Box>
-          <button type="button" onClick={() => { setRecoveryCodes([]); if (pendingApproval) navigate('/signin'); else navigate('/'); }} className="btn-primary w-full !py-3">I saved these codes — continue</button>
+          <button type="button" onClick={() => { setRecoveryCodes([]); if (pendingApproval) navigate('/signin'); else navigate(redirectTarget(location.state), { replace: true }); }} className="btn-primary w-full !py-3">I saved these codes — continue</button>
         </Box> : <Box component="form" onSubmit={handleSubmit} sx={{ display: 'grid', gap: 2 }}>
           {error && <Alert severity="error" role="alert">{error}</Alert>}
           {successMessage && <Alert severity="success" role="status">{successMessage} <Link to="/signin" className="font-bold underline">Go to sign in</Link>.</Alert>}
@@ -188,8 +201,19 @@ export function SignupPage() {
           {role === 'committee_officer' && (
             <>
               <Alert severity="info" sx={{ borderRadius: '12px' }}>
-                Select the existing committee record synced from Parliament. An administrator must approve your Clerk’s Office access before you can sign in.
+                Choose your legislature and committee. An administrator must approve your Clerk’s Office access before you can sign in. Once approved, your account can only see and manage that committee’s bills, reports and calls for views.
               </Alert>
+              <TextField
+                select
+                label="Your legislature"
+                value={legislature}
+                onChange={event => { setLegislature(event.target.value); setCommitteeId(''); }}
+                required
+                fullWidth
+              >
+                <MenuItem value="">Select a legislature</MenuItem>
+                {LEGISLATURES.map(name => <MenuItem key={name} value={name}>{name}</MenuItem>)}
+              </TextField>
               <TextField
                 select
                 label="Your committee"
@@ -197,10 +221,11 @@ export function SignupPage() {
                 onChange={event => setCommitteeId(event.target.value)}
                 required
                 fullWidth
-                helperText={committeesLoading ? 'Loading synced committees from Parliament…' : committeesError ? committeesError : state.committees.length ? 'Your account will only access this committee’s workspace.' : 'No synced committees are available yet.'}
+                disabled={!legislature}
+                helperText={!legislature ? 'Choose your legislature first.' : committeesLoading ? 'Loading committees…' : committeesError ? committeesError : legislatureCommittees.length ? 'Your account will only access this committee’s workspace.' : 'No committees are listed for this legislature yet. Ask an administrator to add yours.'}
               >
-                <MenuItem value="">{committeesLoading ? 'Loading synced committees…' : 'Select a committee'}</MenuItem>
-                {state.committees.map(committee => <MenuItem key={committee.id} value={committee.id}>{committee.name} — {committee.institution}</MenuItem>)}
+                <MenuItem value="">{committeesLoading ? 'Loading committees…' : 'Select a committee'}</MenuItem>
+                {legislatureCommittees.map(committee => <MenuItem key={committee.id} value={committee.id}>{committee.name}</MenuItem>)}
               </TextField>
             </>
           )}
@@ -277,7 +302,7 @@ export function SignupPage() {
 
       <Typography sx={{ textAlign: 'center', mt: 2.5, color: '#526060', fontSize: 13 }}>
         Already have an account?{' '}
-        <Link to="/signin" className="font-extrabold text-primary-700 hover:text-primary-800">
+        <Link to="/signin" state={location.state} className="font-extrabold text-primary-700 hover:text-primary-800">
           Sign in
         </Link>
       </Typography>

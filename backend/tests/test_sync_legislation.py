@@ -306,3 +306,82 @@ def test_committee_alias_merge_does_not_update_profile_foreign_key():
     assert any("UPDATE users SET committee_id" in sql for sql in conn.statements)
     assert any("UPDATE legislative_items SET committee_id" in sql for sql in conn.statements)
     assert not any("representative_profiles" in sql for sql in conn.statements)
+
+
+# ---- Formats from the live Bills Tracker (as at 23 October 2026) ----
+
+def _layout_line(pieces, width=185):
+    line = [" "] * width
+    for position, value in pieces:
+        line[position:position + len(value)] = value
+    return "".join(line)
+
+
+LIVE_HEADER = _layout_line([
+    (0, "S/No/ BILL"), (25, "SPONSOR"), (41, "NA/Sen."), (56, "DATED"), (67, "MATURITY"),
+    (84, "GAZETTE"), (95, "1ST READ"), (110, "2ND READ"), (125, "3RD READ"), (139, "REMARKS"), (157, "ASSENT"),
+])
+
+
+def test_tracker_references_with_abbreviated_house_names_are_parsed():
+    raw = "\n".join([
+        "136. The Breastfeeding Mothers Bill, 2024 Hon. Sabina Chege, MP NA. Bill No. 8 of 2024 16/02/2024 29/02/2024 34 02/05/2024 30/07/2025; 06/08/2025; 13/08/2025. Committee Stage: 14/10/2026 14/10/2026 Passed",
+        "22. The County Governments Additional Allocations (No.2) Bill, 2022 Chairperson, Standing Committee on Finance and Budget Sen. Bill No. 4 of 2022 26/10/2022 08/11/2022 190 29/11/2022 29/11/2022 01/12/2022 12/12/2022",
+    ])
+    layout = "\n".join([
+        LIVE_HEADER,
+        _layout_line([(0, "  22.  The County"), (56, "26/10/2022"), (67, "08/11/2022"), (95, "29/11/2022"), (110, "29/11/2022;"), (125, "01/12/2022"), (157, "12/12/2022")]),
+        _layout_line([(110, "Committee"), ]),
+        _layout_line([(110, "Stage: 30/11/2022")]),
+        _layout_line([(0, " 136.  The Breastfeeding"), (56, "16/02/2024"), (67, "29/02/2024"), (95, "02/05/2024"), (110, "30/07/2025;"), (125, "14/10/2026"), (139, "Passed")]),
+        _layout_line([(110, "06/08/2025;")]),
+        _layout_line([(110, "13/08/2025.")]),
+        _layout_line([(110, "Committee")]),
+        _layout_line([(110, "Stage:")]),
+        _layout_line([(110, "14/10/2026")]),
+    ])
+    rows = {row.identifier: row for row in parse_bill_stage_tracker(raw, "https://parliament.go.ke/bt.pdf", date(2026, 10, 23), layout)}
+
+    breastfeeding = rows["NA/2024/Bill-008"]
+    assert breastfeeding.title == "The Breastfeeding Mothers Bill, 2024"
+    assert breastfeeding.stage == "Passed by National Assembly"
+    assert [event["stage"] for event in breastfeeding.history] == [
+        "Published", "First Reading", "Second Reading", "Committee of the Whole House", "Third Reading",
+    ]
+    assert breastfeeding.history[0]["date"] == "2024-02-16"
+    assert breastfeeding.history[2]["note"].endswith("2025-07-30, 2025-08-06, 2025-08-13).")
+
+    senate_bill = rows["SENATE/2022/Bill-004"]
+    assert senate_bill.house == "senate"
+    assert senate_bill.stage == "Assented"
+    assert senate_bill.history[-1] == {"date": "2022-12-12", "stage": "Assented", "note": "Assented to by the President."}
+
+
+def test_official_title_replaces_proposal_working_title_on_exact_match():
+    proposal = BillRow(title="The Breast feeding Mothers Bill, 2023", identifier="NA/2024/Bill-008", house="na", number=8, year=2024,
+                       stage="Published", source_url="https://parliament.go.ke/lp.pdf", source_file_ref="DLS/NA/BILLS/2/44/2023")
+    official = BillRow(title="The Breastfeeding Mothers Bill, 2024", identifier="NA/2024/Bill-008", house="na", number=8, year=2024,
+                       stage="Passed by National Assembly", source_url="https://parliament.go.ke/bt.pdf", source_file_ref=None,
+                       stage_source_url="https://parliament.go.ke/bt.pdf", stage_as_at=date(2026, 10, 23),
+                       history=({"date": "2024-02-16", "stage": "Published", "note": "Published in the Kenya Gazette."},))
+    merged = merge_bill_stage_rows([proposal], [official])[0]
+    assert merged.title == "The Breastfeeding Mothers Bill, 2024"
+    assert merged.stage == "Passed by National Assembly"
+    assert merged.source_file_ref == "DLS/NA/BILLS/2/44/2023"
+    assert merged.history == official.history
+
+
+def test_proposal_only_bill_lists_its_tracker_once_and_keeps_bill_pdfs():
+    from app.scripts.sync_legislation import merge_tracker_documents
+    row = BillRow(title="The Sample Bill, 2024", identifier="NA/2024/Bill-090", house="na", number=90, year=2024,
+                  stage="Published", source_url="https://parliament.go.ke/lp.pdf", source_file_ref=None)
+    assert bill_documents(row) == [{"name": "Legislative Proposals Tracker", "url": "https://parliament.go.ke/lp.pdf"}]
+    existing = [
+        {"name": "Legislative Proposals Tracker", "url": "https://parliament.go.ke/old-lp.pdf"},
+        {"name": "Legislative Proposals Tracker", "url": "https://parliament.go.ke/old-lp.pdf"},
+        {"name": "Official bill document (Parliament PDF)", "url": "https://parliament.go.ke/bill.pdf"},
+    ]
+    assert merge_tracker_documents(existing, row) == [
+        {"name": "Legislative Proposals Tracker", "url": "https://parliament.go.ke/lp.pdf"},
+        {"name": "Official bill document (Parliament PDF)", "url": "https://parliament.go.ke/bill.pdf"},
+    ]

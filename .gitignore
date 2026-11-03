@@ -42,6 +42,7 @@ pnpm-debug.log*
 # Uploads and local storage
 uploads/
 backend/uploads/
+backend/var/
 storage/
 tmp/
 temp/
@@ -88,4 +89,4 @@ coverage/
 .render/
 
 # Local scripts and personal files
-builddrip-push.ps1
+drip-push.ps1

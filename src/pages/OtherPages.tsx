@@ -7,14 +7,15 @@ import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   PieChart, Pie, Cell,
 } from 'recharts';
-import { Card, DisclaimerBox, InfoBox, Badge, Label, InputField } from '../components/UI';
+import { Card, DisclaimerBox, InfoBox, Badge, Label, InputField, StatusBadge } from '../components/UI';
+import { STAGE_META, STAGE_ORDER } from '../utils/submissionStage';
 import { api } from '../api/endpoints';
 
 export function ResearchExportPage() {
   const { state, getSubmissionStatus, getBillOutcomes } = useApp();
 
-  const outcomeTotals = ['adopted', 'amended', 'rejected with reasons', 'not addressed', 'unclassified', 'awaiting committee report'].map(status => ({
-    name: status.replace(' with reasons', ''),
+  const outcomeTotals = STAGE_ORDER.map(status => ({
+    name: STAGE_META[status].label,
     count: state.bills.reduce((total, bill) => total + getBillOutcomes(bill.id).filter(item => item.status === status).reduce((sum, item) => sum + item.count, 0), 0),
   }));
   const outcomeTotal = outcomeTotals.reduce((sum, item) => sum + item.count, 0);
@@ -107,7 +108,7 @@ export function ResearchExportPage() {
               </div>
               <h2 className="text-2xl font-black text-surface-900 tracking-tight mb-3">Outcome Trail Dataset</h2>
               <p className="text-sm text-surface-600 leading-relaxed mb-6">
-                Per-bill outcome counts: how many submissions were adopted, amended, rejected with reasons, not addressed, or awaiting committee report.
+                Per-bill counts of where each submission is: received, with the committee, report published, response under review, or its outcome (adopted, amended, rejected with reasons, not addressed).
               </p>
               <button
                 onClick={exportOutcomeTrail}
@@ -565,13 +566,6 @@ export function MyReceiptsPage() {
 
   const myReceipts = accountReceipts ?? state.receipts.filter(r => r.author_id === state.currentUser?.id);
 
-  const statusMap: Record<string, any> = {
-    'awaiting committee report': 'yellow',
-    'adopted': 'green',
-    'amended': 'blue',
-    'rejected with reasons': 'red',
-    'unclassified': 'gray',
-  };
 
   return (
     <div>
@@ -609,7 +603,6 @@ export function MyReceiptsPage() {
           {myReceipts.map((receipt, i) => {
             const bill = state.bills.find(b => b.id === receipt.legislative_item_id);
             const status = getSubmissionStatus(receipt.id);
-            const statusVariant = statusMap[status] || 'gray';
             
             return (
               <motion.div
@@ -628,9 +621,7 @@ export function MyReceiptsPage() {
                           <span className="font-mono font-black text-primary-700 bg-gradient-to-r from-primary-50 to-accent-50 px-3 py-1.5 rounded-xl border border-primary-100 text-sm tracking-wide">
                             {receipt.public_id}
                           </span>
-                          <Badge variant={statusVariant} showIcon className="!text-[11px]">
-                            {status}
-                          </Badge>
+                          <StatusBadge status={status} />
                         </div>
                         <p className="text-sm font-semibold text-surface-800 mb-1">{bill?.title}</p>
                         <p className="text-xs text-surface-500 font-medium flex items-center gap-1.5">

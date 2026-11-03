@@ -67,6 +67,8 @@ class LegislativeItem(Base):
     receipts = relationship("ParticipationReceipt", back_populates="legislative_item")
     reports = relationship("CommitteeReport", back_populates="bill")
     committee_id = Column(UUID(as_uuid=True), ForeignKey("committees.id"))
+    # "official record", "subject matter" (awaiting confirmation) or "administrator"
+    committee_assignment_source = Column(String(30))
     notices = relationship("NoticeRecord", back_populates="bill")
     committee = relationship("Committee", back_populates="bills")
 
@@ -85,6 +87,18 @@ class ParticipationReceipt(Base):
     previous_hash = Column(String(64), nullable=False)
     chain_sequence = Column(BigInteger, nullable=False, default=0)
     author_name_public = Column(String(255))
+    # Receipts are append-only, so an edit is a new row. Version n>1 has
+    # public_id "<ID>-v<n>" and submission_ref "<ID>" (the citizen's original
+    # receipt ID). The current version is the highest revision.
+    revision = Column(Integer, nullable=False, default=1, server_default="1")
+    submission_ref = Column(String(20), index=True)
+    # Optional memorandum uploaded as a document. Its SHA-256 is part of the
+    # receipt hash, so the file is covered by the tamper-evident chain.
+    attachment_name = Column(String(255))
+    attachment_mime_type = Column(String(100))
+    attachment_size_bytes = Column(BigInteger)
+    attachment_sha256 = Column(String(64))
+    attachment_storage_ref = Column(String(1000))
 
     author = relationship("User", back_populates="receipts")
     legislative_item = relationship("LegislativeItem", back_populates="receipts")

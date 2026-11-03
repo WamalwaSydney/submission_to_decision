@@ -1,10 +1,11 @@
-import { apiFetch } from './client';
-import { User } from '../types';
+import { apiFetch, apiFetchBlob } from './client';
+import { ReceiptVerification, User } from '../types';
 
 export interface LoginResponse { access_token: string; token_type: string; user: User; }
 export type SignupRole = 'citizen' | 'committee_officer' | 'reviewer' | 'administrator';
 export interface SignupOptions {
   committee_id?: string;
+  institution?: string;
   notification_language?: 'en' | 'sw';
 }
 export interface RegisterResponse {
@@ -29,7 +30,9 @@ export interface BootstrapResponse {
 export const api = {
   bootstrap: () => apiFetch<BootstrapResponse>('/bootstrap'),
   committees: () => apiFetch<{ committees: any[] }>('/committees'),
-  createCommittee: (data: { name: string; institution: string; description?: string; contact_email?: string; account_name: string; account_email: string; account_password: string }) => apiFetch<any>('/committees', { method: 'POST', body: JSON.stringify(data) }),
+  createCommittee: (data: { name: string; institution: string; description?: string; contact_email?: string; account_name?: string; account_email?: string; account_password?: string }) => apiFetch<any>('/committees', { method: 'POST', body: JSON.stringify(data) }),
+  setBillCommittee: (billId: string, committeeId: string | null) => apiFetch<{ bill: any }>(`/bills/${encodeURIComponent(billId)}/committee`, { method: 'PUT', body: JSON.stringify({ committee_id: committeeId }) }),
+  confirmBillCommittees: (billIds: string[]) => apiFetch<{ confirmed: number }>('/bills/committee/confirm', { method: 'POST', body: JSON.stringify({ bill_ids: billIds }) }),
   committeeBills: () => apiFetch<{ bills: any[] }>('/committees/me/bills'),
   ingestBill: (data: { title: string; identifier: string; stage: string; source_url?: string; file?: File | null }) => {
     const form = new FormData();
@@ -55,15 +58,28 @@ export const api = {
   receipt: (publicId: string) => apiFetch<any>(`/receipts/${encodeURIComponent(publicId)}`),
   myReceipts: () => apiFetch<{ receipts: any[] }>('/receipts/my'),
   reviewQueueReceipts: () => apiFetch<{ receipts: any[] }>('/receipts/review-queue'),
-  createReceipt: (data: { legislative_item_id: string; clause_ref?: string; submission_text: string; show_name_publicly: boolean }) => {
+  createReceipt: (data: { legislative_item_id: string; clause_ref?: string; submission_text: string; show_name_publicly: boolean; document?: File | null }) => {
     const form = new FormData();
     form.append('legislative_item_id', data.legislative_item_id);
     if (data.clause_ref) form.append('clause_ref', data.clause_ref);
     form.append('submission_text', data.submission_text);
     form.append('show_name_publicly', String(data.show_name_publicly));
+    if (data.document) form.append('document', data.document);
     return apiFetch<any>('/receipts', { method: 'POST', body: form });
   },
+  updateReceipt: (publicId: string, data: { clause_ref?: string; submission_text: string; show_name_publicly: boolean; document?: File | null; remove_document?: boolean }) => {
+    const form = new FormData();
+    if (data.clause_ref) form.append('clause_ref', data.clause_ref);
+    form.append('submission_text', data.submission_text);
+    form.append('show_name_publicly', String(data.show_name_publicly));
+    if (data.document) form.append('document', data.document);
+    form.append('remove_document', String(Boolean(data.remove_document)));
+    return apiFetch<any>(`/receipts/${encodeURIComponent(publicId)}`, { method: 'PUT', body: form });
+  },
+  myReceiptForBill: (billId: string) => apiFetch<{ receipt: any | null }>(`/receipts/mine/${encodeURIComponent(billId)}`),
+  downloadReceiptDocument: (publicId: string) => apiFetchBlob(`/receipts/${encodeURIComponent(publicId)}/document`),
   verifyChain: () => apiFetch<any>('/receipts/verify'),
+  verifyReceipt: (publicId: string) => apiFetch<ReceiptVerification>(`/receipts/${encodeURIComponent(publicId.trim())}/verify`),
   uploadReport: (file: File, billRef: string, institution: string, dateTabled: string, sourceUrl?: string) => {
     const form = new FormData();
     form.append('file', file);

@@ -98,6 +98,14 @@ export interface RepresentativeProfile {
   created_date: string;
 }
 
+export interface ParticipationWindow {
+  status: 'open' | 'not_yet_open' | 'closed';
+  accepting: boolean;
+  reason: string;
+  opens_on?: string | null;
+  closes_on?: string | null;
+}
+
 export interface LegislativeItem {
   id: string;
   title: string;
@@ -113,6 +121,8 @@ export interface LegislativeItem {
   status_history: { date: string; stage: string; note: string }[];
   is_simulated: boolean;
   committee_id?: string;
+  committee_assignment_source?: 'official record' | 'subject matter' | 'administrator' | null;
+  participation?: ParticipationWindow;
 }
 
 export interface ParticipationReceipt {
@@ -127,6 +137,11 @@ export interface ParticipationReceipt {
   hash: string;
   previous_hash: string;
   author_name_public?: string; // optional per privacy_prefs
+  revision?: number;
+  attachment_name?: string | null;
+  attachment_mime_type?: string | null;
+  attachment_size_bytes?: number | null;
+  has_document?: boolean;
 }
 
 export interface CommitteeReport {
@@ -214,5 +229,19 @@ export interface ChainVerificationResult {
   valid: boolean;
   firstBrokenIndex?: number;
   totalChecked: number;
-  details: { index: number; receiptId: string; valid: boolean; expectedHash: string; actualHash: string }[];
+  brokenCount?: number;
+  details: { index: number; receiptId: string; valid: boolean; expectedHash: string; actualHash: string; problems?: string[]; superseded?: boolean }[];
+}
+
+export interface ReceiptVerification {
+  receipt_id: string;
+  valid: boolean;
+  content_matches: boolean;
+  link_matches: boolean;
+  next_links_back: boolean;
+  position: number;
+  superseded: boolean;
+  actual_hash: string;
+  previous_hash: string;
+  problems: string[];
 }

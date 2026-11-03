@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { redirectTarget } from '../utils/redirect';
 import { Alert, Box, Divider, IconButton, InputAdornment, TextField, Typography } from '@mui/material';
 import { ArrowRight, Eye, EyeOff, LockKeyhole } from 'lucide-react';
 import { Card } from '../components/UI';
@@ -10,6 +11,8 @@ import { api } from '../api/endpoints';
 export function LoginPage() {
   const { dispatch } = useApp();
   const navigate = useNavigate();
+  const location = useLocation();
+  const continuingSubmission = redirectTarget(location.state, '').startsWith('/submit');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -25,7 +28,7 @@ export function LoginPage() {
       localStorage.setItem('access_token', response.access_token);
       localStorage.setItem('current_user', JSON.stringify(response.user));
       dispatch({ type: 'SET_USER', payload: response.user });
-      navigate('/');
+      navigate(redirectTarget(location.state), { replace: true });
     } catch (error) {
       setError(error instanceof Error ? error.message : 'Unable to sign in.');
     }
@@ -41,7 +44,9 @@ export function LoginPage() {
           Sign in to <Box component="span" className="gradient-text">Participation Trace</Box>
         </Typography>
         <Typography sx={{ color: '#526060', fontSize: 15, lineHeight: 1.7 }}>
-          Continue to your participation dashboard. Public bill and receipt browsing is always open.
+          {continuingSubmission
+            ? 'Sign in to continue with your submission. You will return to the bill you chose.'
+            : 'Continue to your participation dashboard. Public bill and receipt browsing is always open.'}
         </Typography>
       </Box>
 
@@ -97,7 +102,7 @@ export function LoginPage() {
           </Typography>
           <Divider sx={{ my: 2.5, color: '#778181', fontSize: 12 }}>or</Divider>
           <Typography sx={{ textAlign: 'center', color: '#526060', fontSize: 13 }}>
-            New to the platform? <Link to="/signup" className="font-extrabold text-primary-700 hover:text-primary-800">Create an account</Link>
+            New to the platform? <Link to="/signup" state={location.state} className="font-extrabold text-primary-700 hover:text-primary-800">Create an account</Link>
           </Typography>
         </Card>
       </Box>

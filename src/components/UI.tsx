@@ -1,4 +1,5 @@
 import React from 'react';
+import { STAGE_META, StageTone, normalizeStage } from '../utils/submissionStage';
 import {
   Card as MuiCard,
   CardContent,
@@ -673,14 +674,11 @@ export function Divider({ label }: { label?: string }) {
   );
 }
 
+const STAGE_VARIANT: Record<StageTone, BadgeVariant> = { progress: 'yellow', success: 'green', info: 'blue', danger: 'red', neutral: 'gray' };
+
+/** Submission stages show their plain-language label; other statuses show as-is. */
 export function StatusBadge({ status }: { status: any }) {
   const map: Record<string, BadgeVariant> = {
-    'awaiting committee report': 'yellow',
-    adopted: 'green',
-    amended: 'blue',
-    'rejected with reasons': 'red',
-    'not addressed': 'gray',
-    unclassified: 'gray',
     confirmed: 'green',
     pending: 'yellow',
     rejected: 'red',
@@ -688,9 +686,14 @@ export function StatusBadge({ status }: { status: any }) {
     active: 'accent',
     draft: 'warm',
   };
-  const v = map[status] || 'gray';
+  const legacy = ['awaiting committee report', 'rejected with reasons', 'not addressed', 'adopted', 'amended', 'unclassified'];
+  if (typeof status === 'string' && (status in STAGE_META || legacy.includes(status))) {
+    const meta = STAGE_META[normalizeStage(status)];
+    // Stage names wrap onto a second line rather than being cut off with "…".
+    return <Badge variant={STAGE_VARIANT[meta.tone]} showIcon sx={{ textTransform: 'none', letterSpacing: 0, height: 'auto', minHeight: 24, maxWidth: '100%', '& .MuiChip-label': { whiteSpace: 'normal', overflow: 'visible', textOverflow: 'clip', py: 0.5, lineHeight: 1.3 } }}>{meta.label}</Badge>;
+  }
   return (
-    <Badge variant={v} showIcon>
+    <Badge variant={map[status] || 'gray'} showIcon>
       {status}
     </Badge>
   );

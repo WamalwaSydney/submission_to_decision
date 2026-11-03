@@ -1,300 +1,117 @@
 # Submission-to-Decision Traceability Platform — Kenya
 
-A web application designed to help citizens trace public submissions on bills in Kenya's National and County Legislatures, from lodging to the committee's recorded treatment.
+Participation Trace helps citizens follow their public-participation submissions on bills in Kenya's National Assembly and county assemblies, from the moment they send a view to the committee's recorded response.
 
-> **Deployment status:** On 2026-10-29, basic HTTP smoke checks returned 200 for the Netlify homepage, Render `/health`, and the public bills API. This does not verify the complete authenticated submission-to-decision workflow, database failover, or production availability. The frontend reaches the API through the build-time `VITE_API_URL` variable. The Figma/export ZIP shared for review is a static UI capture, not the complete runnable application; the setup instructions assume the full project source tree described below is present in the repository.
+> **Deployment status (3 November 2026):** the hosted site (Netlify, Render, Neon) is healthy but runs the previous release. The changes described below — county assemblies, submission stages, edits and document uploads, committee scoping, rate limits and the redesigned pages — are validated locally (84 backend tests, type check and production build) and are **not yet deployed**. See [Deploying this release](#deploying-this-release).
 
 ## Project links
 
 - **GitHub repository:** https://github.com/WamalwaSydney/submission_to_decision.git
 - **Figma prototype:** [Participation Trace — Kenya](https://www.figma.com/design/0xIxRyyV8vdUSg8vsUHtxx/Participation-Trace-%E2%80%94-Kenya?node-id=0-1&t=iD8kLK1UBjEuoB1B-1)
 - **Video demonstration (5–10 minutes):** [_Video Link._](https://www.youtube.com/watch?v=WPp6CnCSf0Y)
-- **Technical report (PDF, 2 pages):** [Technical Report](https://drive.google.com/file/d/1q9JY7gkEAiBDc2BhVNsxL6lmVeTWuHaA/view?usp=drive_link)
+- **Technical report (PDF, 2 pages):** [`docs/TECHNICAL_REPORT.pdf`](docs/TECHNICAL_REPORT.pdf) (source: [`docs/TECHNICAL_REPORT.typ`](docs/TECHNICAL_REPORT.typ))
 - **Live application (Netlify):** https://uraia-4.netlify.app
 - **API health check (Render):** https://submission-to-decision.onrender.com/health
 
-## Overview
+## What the platform does
 
-Public participation can feel like a one-way process when people do not know whether their views were recorded or what happened to them. Participation Trace lets citizens lodge views against tracked bills, receive tamper-evident, hash-chained receipts, and later inspect a public outcome trail.
+Public participation can feel one-way: people rarely learn whether their views were recorded or what happened to them. Participation Trace:
 
-Committee reports are ingested with an OCR fallback. The system can propose matches between submissions and report entries; a human moderator confirms or rejects each proposed match before it appears as a confirmed outcome.
+1. lists bills from the **National Assembly**, **Nairobi City County Assembly** and **Trans Nzoia County Assembly**, with each bill's stage and whether its committee is taking public views;
+2. lets a citizen send **one view per bill** — typed, or uploaded as a memorandum — and edit it until the call for views closes;
+3. issues a **tamper-evident, hash-chained receipt** that anyone can verify;
+4. reads the **committee report** when it is tabled and proposes which part of it answers each view;
+5. has a **moderator confirm or reject** every proposal, so no outcome is shown without a human decision;
+6. shows each submission's stage in plain language: **Received → With the committee → Report published → Response under review → Adopted / Amended / Rejected with reasons / Not addressed in the report**.
 
-**Bill data source:** The current bill catalogue is populated/refreshed through the legislation sync from official Parliament of Kenya website sources, not from the seeded demo-bill dataset. The repository still contains simulated seed bills for local development and testing; those are separate from the Parliament-synced catalogue. Committee reports, receipts, matches, and other records should be treated according to their individual source/status labels rather than assumed to be live or simulated as a group.
+**Scope:** tracing stops at the committee report, because that is where the legislature formally records what it heard from the public and how it treated each view. A platform receipt proves what this platform recorded and when; it does not prove the view reached the committee. This is an independent pilot, not an official legislative record, and not legal advice.
 
-**Core principle — adoption-independence:** the platform does not depend on a representative registering. Accountability evidence is based on institution-published committee reports and recorded moderation, not representative engagement.
+## Roles
 
-This is an independent pilot. It is not an official legislative record system, does not guarantee a response or resolution, and does not provide legal advice. A platform receipt proves what this platform recorded and when; it does not, by itself, prove endorsement, adoption, or official receipt by an Assembly. Demo records are simulated.
+| Role | Can do |
+|---|---|
+| Visitor | Browse bills and calls for views, track and verify any receipt |
+| Citizen | Submit, edit and track their own views; receive bilingual updates |
+| Clerk's Office / Committee secretariat (`committee_officer`) | For **their own committee only**: ingest bills, publish calls for views, upload and verify committee reports. Chooses legislature and committee at sign-up; an administrator approves the account. |
+| Moderator (`reviewer`) | Review proposed matches (Awaiting action, Triage, Completed) and reported submissions |
+| Administrator | Approve accounts, manage committees, confirm committee assignments, export data |
 
-## Pilot scope
+Each role gets its own home page with the actions it needs.
 
-- **National Assembly:** legislative tracking.
-- **Nairobi County Assembly:** pilot citizen activity in two constituencies.
-- **Trans Nzoia County Assembly:** pilot citizen activity in three wards.
+## Where the data comes from
 
-## Technology stack
-
-| Layer | Technology | Purpose |
+| Data | Source | Script |
 |---|---|---|
-| Frontend | React, TypeScript, Vite, Material UI, Tailwind CSS | Responsive, mobile-first user interface |
-| Backend | FastAPI, Python, REST | Application API and server-side workflows |
-| Database | PostgreSQL 15+, SQLAlchemy 2 (async, `asyncpg`), Alembic | Relational records, schema, and migrations |
-| Integrity | SHA-256 / Web Crypto API | Tamper-evident receipt-chain hashing and verification |
-| Authentication | JWT, role-based access, argon2 password hashing | Authenticated roles and endpoint access |
-| Report processing | pdfplumber / PyMuPDF, Tesseract OCR fallback | Extract text from committee reports |
-| Matching | Clause rules and rapidfuzz similarity | Suggest candidate links for human review |
-| Local development | Docker Compose | Run the API and database locally |
-| Hosting | Netlify, Render, Neon | Static frontend, containerized API, managed PostgreSQL |
-| CI/CD | GitHub integration with Netlify and Render | Build, health checks, migrations, and controlled deploys |
+| National Assembly bills, stages and dated history | Parliament's official Bills Tracker and legislative proposals tracker (PDFs) | `backend/app/scripts/sync_legislation.py` |
+| Calls for memoranda, committee reports | Parliament website | same |
+| Nairobi and Trans Nzoia bills | Each assembly's bills page | `backend/app/scripts/sync_county_bills.py` |
+| County Acts (bills that became law) | Kenya Law county legislation pages | same |
+| County committees | Each assembly's published committee list | `backend/app/committee_assignment.py` |
+| Which committee handles a bill | Official evidence; otherwise suggested from the bill's subject and confirmed by an administrator | same |
 
-## Deployment — Netlify + Render + Neon
+Neither county assembly publishes a bill's current stage online, so county bills show **"Published by the assembly"** until a Clerk's Office account records the stage or the bill appears on Kenya Law as an Act. The Parliament sync runs the county sync and committee assignment at the end. Seed data (`python -m app.seed`) is simulated and kept separate from synced bills.
 
-The deployment is split into three services:
+## Technology
 
-| Layer | Service | Configuration |
-|---|---|---|
-| Frontend | Netlify | Build command `npm run build`, publish directory `dist`, variable `VITE_API_URL` |
-| API | Render Web Service (Docker) | Dockerfile at `backend/Dockerfile`; variables `DATABASE_URL`, `JWT_SECRET_KEY`, `CORS_ORIGINS` |
-| Database | Neon PostgreSQL | `postgresql+asyncpg://` connection string with `ssl=require`, stored only on Render |
+| Layer | Technology |
+|---|---|
+| Frontend | React 18, TypeScript, Vite, Material UI, Tailwind CSS v4 (Kenyan flag palette) |
+| Backend | FastAPI (Python 3.11), SQLAlchemy 2 (async), Alembic |
+| Database | PostgreSQL 15 (Neon in production) with append-only triggers on receipts and the audit log |
+| Integrity | SHA-256 hash chain with full and single-receipt verification |
+| Reports | `pdftotext`, Tesseract OCR fallback |
+| Matching | Gemini proposals with manipulation guards; mandatory human review |
+| Security | JWT, argon2, recovery codes, role and committee scope checks, in-memory rate limits |
+| Hosting | Netlify (frontend), Render (API, Docker), Neon (database) |
 
-```text
-Browser ──HTTPS──▶ Netlify (static Vite build)
-   │
-   └──HTTPS (VITE_API_URL)──▶ Render (FastAPI) ──TLS──▶ Neon (PostgreSQL)
-```
+More detail: [docs/SYSTEM.md](docs/SYSTEM.md) (architecture and rules), [docs/API.md](docs/API.md), [docs/DB.md](docs/DB.md), [docs/DECISIONS.md](docs/DECISIONS.md), [docs/EVALUATION.md](docs/EVALUATION.md).
 
-### Environment variables
+## Running locally
 
-**Render (API service)**
-
-```text
-DATABASE_URL=postgresql+asyncpg://<user>:<rotated-password>@<neon-host>/<database>?ssl=require
-JWT_SECRET_KEY=<long-random-secret>
-CORS_ORIGINS=https://<netlify-site>.netlify.app
-```
-
-**Netlify (frontend)**
-
-```text
-VITE_API_URL=https://<render-service>.onrender.com/api/v1
-```
-
-> **Never** place database credentials or `JWT_SECRET_KEY` in Netlify or in any `VITE_*` variable. Anything prefixed `VITE_` is bundled into the public frontend. Commit only an `.env.example` containing placeholder values.
-
-The frontend talks to the API through `src/api/client.ts` and `src/api/endpoints.ts`. Bootstrap data, authentication, receipt submission, receipt lookup, chain verification, clerk uploads, notices, profile claims, and moderator match decisions all go through the Render API.
-
-### Deployment order
-
-1. **Rotate secrets.** Rotate any Neon password and JWT secret that were previously committed or shared.
-2. **Configure and deploy the API.** Set `DATABASE_URL`, `JWT_SECRET_KEY` and `CORS_ORIGINS` in Render, then deploy from `backend/Dockerfile`.
-3. **Check health.** Confirm `GET https://<render-service>.onrender.com/health` returns HTTP 200.
-4. **Migrate and seed Neon** through a controlled step (see below), not on every request or on every container start.
-5. **Configure the frontend.** In Netlify go to **Site configuration → Environment variables**, add `VITE_API_URL` for the Production scope, and redeploy.
-6. **Verify in the browser.** Open the Network tab and confirm requests go to the Render hostname.
-7. **Fix CORS if needed.** If requests are blocked, add the exact Netlify origin (scheme + host, no trailing slash, no path) to `CORS_ORIGINS` on Render and redeploy.
-
-### Migrations and seeding
-
-- Apply schema changes with Alembic against Neon as a deliberate release step, for example from a trusted machine using the rotated connection string, or through Render's pre-deploy command if your plan supports it:
-
-  ```bash
-  cd backend
-  alembic upgrade head
-  ```
-
-- Seed demo data only on demo/staging databases:
-
-  ```bash
-  cd backend
-  python -m app.seed
-  ```
-
-- Keep migrations backward-compatible and test them on a separate Neon branch or staging database before touching production data. Neon branching is convenient for this.
-
-### Single-page-app routing on Netlify
-
-React Router routes such as `/login` or `/receipts/<id>` need a fallback rule, otherwise refreshing a deep link returns a 404. Add either a `public/_redirects` file or a `netlify.toml` entry:
-
-```text
-/*    /index.html   200
-```
-
-### Platform behaviour to plan for
-
-- **Cold starts.** Render's free web services spin down when idle, so the first request after a quiet period can be slow. Wait for `/health` before a live demo, or use a paid instance.
-- **Neon auto-suspend.** Neon's free compute can suspend when idle and resume on the next connection, which adds a short delay. Make sure the API retries or tolerates the first connection.
-- **Uploaded committee reports.** A Render web service's local filesystem is ephemeral unless a persistent disk is attached. Do not rely on local disk for uploaded PDFs; either attach a persistent disk, store the extracted text and file contents in the database, or use external object storage. Confirm which approach the code uses before the pilot.
-- **Report processing.** PDF extraction and the Tesseract OCR fallback run inside the Docker container on Render. Make sure the Dockerfile installs Tesseract and that the instance has enough memory for large scanned reports.
-- **Limits change.** Free-plan limits and pricing for all three providers change over time; check each provider's current plan page before relying on them.
-
-## Main workflow
-
-1. A visitor browses tracked bills and public notices.
-2. A citizen submits a view against a bill and, optionally, a clause.
-3. The platform issues a receipt and records the submission in the hash chain.
-4. A clerk uploads or records committee-report material.
-5. The system extracts report text and proposes possible matches.
-6. A moderator confirms or rejects each match and records the decision.
-7. Public receipt and bill pages display the trace, confirmed status, and stated committee reason.
-
-### Clerk’s Office notice records
-
-From **Notice Records → Add Notice Record**, a Clerk’s Office user can type to search the complete live bill catalogue. The picker includes both synchronized bills and bills ingested locally; it is intentionally broader than the committee-only ingestion list. Institution choices are populated from active platform committees and live bill institutions, and selecting a bill pre-fills its institution.
-
-Notice records can be edited from the registry. The edit form hydrates the saved bill, institution, dates, mode, and bill-text accessibility value, so an institution is not lost or shown as blank. The backend validates the selected live bill and platform institution on both create and update.
-
-If **Bill text was accessible alongside the notice** is selected, the saved notice provides an **Open bill text** link to the bill’s Documents section. External documents open at their validated source URL; uploaded bill PDFs are served through the protected storage-backed bill-document route without exposing filesystem paths.
-
-### Automated in-app notifications
-
-Citizen notifications are generated for meaningful workflow events: submission receipt, a public notice or committee report becoming available, a proposed match awaiting human review, a human-confirmed or rejected match, and a later correction to a confirmed outcome. Proposed matches remain provisional until a human reviewer decides; AI does not determine the match or outcome. Citizens choose English or Kiswahili at signup and can change the preference on the Automated Updates page.
-
-When `GEMINI_API_KEY` is configured, Gemini drafts concise wording from the event facts (not the citizen's raw submission text). If the provider is unavailable or returns unusable output, the backend uses built-in English/Kiswahili templates. Notifications are stored in the citizen-only in-app inbox with event keys for retry deduplication, language, generator, delivery state, source snapshot/references, and an audit event. The manual message-creation endpoint has been removed.
-
-Apply the new database migration before running the updated backend against an existing database:
+### Full stack with Docker Compose
 
 ```bash
-cd backend
-alembic upgrade head
+docker compose up -d --build
 ```
 
-`GEMINI_NOTIFICATION_MODEL` optionally selects the drafting model; without a configured Gemini key, the bilingual templates continue to send notifications.
+| Service | Address |
+|---|---|
+| Frontend | http://localhost:3000 |
+| API | http://localhost:8001/api/v1 (the container's port 8000 is mapped to 8001) |
+| PostgreSQL | localhost:5432 inside Docker as host `postgres` |
 
-## Quick start — local development
+Run backend commands **inside the backend container**. The database host name `postgres` only exists on the Compose network, and a PostgreSQL server installed on Windows can take port 5432 on `localhost`:
 
-### Frontend
+```bash
+docker compose exec backend alembic upgrade head                      # apply migrations
+docker compose exec backend python -m app.seed                        # demo data (local only)
+docker compose exec backend python -m app.scripts.sync_legislation    # National Assembly + counties
+docker compose exec backend python -m app.scripts.sync_county_bills   # counties only
+```
 
-From the repository root:
+A database created by the seed script has no append-only triggers. To match production, stamp it and install the triggers as described in [docs/DB.md](docs/DB.md#migrations).
+
+After changing frontend code, rebuild the frontend container (`docker compose up -d --build frontend`) and hard-refresh the browser (Ctrl+Shift+R); the app registers a service worker.
+
+### Frontend dev server
 
 ```bash
 npm ci
 npm run dev
 ```
 
-For a production build and type check:
+Create `.env.local` with `VITE_API_URL=http://localhost:8001/api/v1`. CORS allows `http://localhost:3000` by default; set `CORS_ORIGINS` on the backend for other ports.
 
-```bash
-npm run typecheck
-npm run build
-```
+### Demo accounts (seed data, password `password123`)
 
-Point the frontend at a local API by creating `.env.local`:
+| Account | Role |
+|---|---|
+| `jane@example.com` | Citizen |
+| `mod@example.com` | Moderator |
+| `admin@example.com` | Administrator |
+| `committee@example.com` | Clerk's Office (simulated committee) |
 
-```text
-VITE_API_URL=http://localhost:8000/api/v1
-```
-
-### Full stack with Docker Compose
-
-```bash
-docker compose up -d
-```
-
-The local Compose configuration is intended to start:
-
-- PostgreSQL on port 5432
-- FastAPI backend on port 8000
-- React frontend on port 3000
-
-Local development uses the Compose PostgreSQL container, not Neon. Do not point local experiments at the production Neon database.
-
-### Seed data
-
-```bash
-cd backend
-python -m app.seed
-```
-
-The seed set includes three institutions, unclaimed profiles, simulated bills, sample receipts, reports, report entries, matches, notices, and demo accounts. The current bill catalogue is supplied through the Parliament legislation sync; seeded bills are separate local/demo records. Do not use seed data as evidence of real legislative activity.
-
-## Demo accounts
-
-Sign in at `/login` using a simulated account:
-
-- Jane Citizen — citizen
-- Hon. Simulated Rep — representative
-- Mod User — moderator
-- Admin User — administrator
-- Clerk User — clerk
-
-These are demo accounts, not production credentials. Never use real passwords in a demo environment, and do not seed demo accounts into a database that holds real pilot data.
-
-## CI/CD
-
-- **Netlify** builds and deploys the frontend from GitHub on push to the production branch; pull requests can get deploy previews.
-- **Render** builds and deploys the API from GitHub using `backend/Dockerfile`, and uses `/health` as its health check path.
-- **GitHub Actions** (in `.github/workflows/`) should run `npm run typecheck`, `npm run build` and `pytest backend/tests/` on every pull request, and branch protection should require them to pass before merging to the production branch.
-- Keep staging and production data separate (for example separate Neon branches or databases, with separate Render services and Netlify contexts).
-
-## Project structure
-
-```text
-├── README.md
-├── docs/
-│   ├── DECISIONS.md
-│   ├── SYSTEM.md
-│   ├── API.md
-│   ├── DB.md
-│   └── diagrams/
-│       ├── usecase.puml
-│       ├── class.puml
-│       ├── erd.puml
-│       ├── architecture.puml
-│       ├── sequence-submission.puml
-│       └── sequence-profile.puml
-├── src/                         # React frontend (deployed to Netlify)
-│   ├── App.tsx
-│   ├── types.ts
-│   ├── api/
-│   │   ├── client.ts
-│   │   └── endpoints.ts
-│   ├── context/AppContext.tsx
-│   ├── data/seed.ts
-│   ├── utils/hashChain.ts
-│   ├── utils/offline.ts
-│   ├── components/
-│   └── pages/
-├── backend/                     # FastAPI application (deployed to Render)
-│   ├── app/
-│   │   ├── main.py
-│   │   ├── models.py
-│   │   ├── auth.py
-│   │   ├── seed.py
-│   │   ├── api/routes.py
-│   │   └── services/
-│   ├── tests/
-│   ├── requirements.txt
-│   └── Dockerfile
-├── docker-compose.yml
-├── .github/workflows/
-└── package.json
-```
-
-This archive includes the Alembic directory and `.env.example`. Deployment configuration should be supplied by the hosting environment or added before production deployment; do not claim a live deployment unless the frontend/API/database smoke test has been completed against the deployed services.
-
-## Functional requirements (reported status)
-
-| ID | Requirement | Frontend | Backend |
-|---|---|---|---|
-| FR1 | Submit view and issue receipt | Implemented | Implemented |
-| FR2 | Append-only hash chain | Implemented | Implemented |
-| FR3 | Committee-report ingestion (PDF) | UI | Implemented |
-| FR4 | OCR fallback | — | Implemented |
-| FR5 | Match proposals generated after report ingestion | Implemented | Implemented |
-| FR6 | Human review | Implemented | Implemented |
-| FR7 | Receipt lookup and outcome trail | Implemented | Implemented |
-| FR8 | Notice adequacy tracker | Implemented | Implemented |
-| FR9 | Representative profiles | Implemented | Implemented |
-| FR10 | Offline drafts | Implemented; auto-sync added, live API verification pending | — |
-| FR11 | Moderation and appeals | Implemented | Implemented |
-| FR12 | Anonymized export | Implemented | Implemented |
-
-Report upload now generates idempotent match proposals for moderator review. Report entry correction and report verification are server-backed. Before submission, still distinguish working end-to-end behavior from UI-only or simulated behavior and complete a live smoke test if deployment is claimed.
-
-## Status vocabulary
-
-- **Submission/outcome:** awaiting committee report · adopted · amended · rejected with reasons · not addressed
-- **Representative:** unclaimed · verified and active · verified but inactive
-- **Profile labels:** verified · pilot · simulated · unclaimed
+Never seed demo accounts into a database holding real pilot data.
 
 ## Testing
 
@@ -303,80 +120,77 @@ Report upload now generates idempotent match proposals for moderator review. Rep
 npm run typecheck
 npm run build
 
-# Backend
-cd backend
-TEST_DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/participation_platform_test pytest tests/
+# Backend (inside the container; the test database must contain "test" in its name)
+docker compose exec -e TEST_DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/participation_platform_test backend python -m pytest
 ```
 
-The backend tests require a reachable PostgreSQL test database. If no test database is available, the database-dependent tests are skipped with an explicit reason rather than silently passing.
+Create the test database once with `docker compose exec postgres psql -U postgres -c "create database participation_platform_test"`. The tests install the same append-only triggers as production, so code that tries to change a receipt fails in tests too. The `evaluation/` folder is mounted into the backend container for the report-parsing fixtures.
 
-Key test areas include hash-chain tamper detection, append-only enforcement, role/endpoint permissions, OCR fallback, matching quality, and offline draft behavior. Only claim tests pass after running them against a reachable PostgreSQL test database; tests skipped because of an unavailable database are not passing evidence.
+Latest local run (3 November 2026): **84 passed**, 6 warnings (third-party `passlib` deprecations). Coverage includes:
 
-After each deployment, also run a manual smoke test against the live URLs: `/health` returns 200, a demo user can sign in, a receipt can be created and looked up, chain verification passes, and a moderator decision is saved. Authorization must be enforced on the server, not only by hiding UI navigation.
+- **Receipts and the chain:** tamper detection (edited text, deleted receipt, swapped document), append-only enforcement, edits and versions.
+- **Participation rules:** when a bill accepts views, one submission per bill, document uploads.
+- **Submission stages**, from received to outcome.
+- **Access and abuse:** committee scope, rate limits and sign-in lockout, AI-manipulation guards.
+- **Data sync:** National Assembly tracker formats, county parsers, committee assignment.
+- **Reports:** report parsing and OCR fixtures.
 
-## Security and data handling
+## Deploying this release
 
-- Secrets live only in Render's environment settings (and local untracked `.env` files). Never commit them, and rotate any that have been exposed.
-- Neon connections require TLS (`ssl=require`).
-- `CORS_ORIGINS` should list only the exact frontend origin(s) you use.
-- Enable backups or point-in-time recovery on Neon appropriate to your plan and rehearse a restore before storing real pilot data.
-- Use simulated or non-sensitive data until authentication, authorization, data retention, monitoring, backup, and restore have been tested.
+The hosted services are configured as before: Netlify builds the frontend with `VITE_API_URL`, Render runs `backend/Dockerfile` with `DATABASE_URL`, `JWT_SECRET_KEY` and `CORS_ORIGINS`, and Neon stores the data (`ssl=require`). Never put secrets in a `VITE_*` variable.
 
-## Design and accessibility
+1. Back up Neon (or create a branch) and test the steps there first.
+2. Deploy the API, then run `alembic upgrade head` against Neon. The two new migrations add columns only; receipts are never rewritten.
+3. Run `python -m app.scripts.sync_legislation` against Neon. This updates National Assembly stages, adds the county bills and committees, and assigns committees.
+4. Deploy the frontend.
+5. In **Administration → Committee assignments**, confirm the subject-matter suggestions, starting with bills open for views.
+6. Smoke test: `/health`, sign in, submit, edit, look up and verify a receipt, a moderator decision, and a Clerk's Office account seeing only its committee.
 
-Design considerations include a mobile-first layout, low-bandwidth use, role-aware navigation, offline drafts, explicit privacy choices, and clear status labels. Figma exports and screenshots should be stored under `docs/` and labelled as design evidence, not as proof that every interaction is implemented.
+Platform notes:
 
-## Legal context
+- **Cold starts:** Render's free tier sleeps when idle, so the first request can take 30+ seconds.
+- **Storage:** uploaded committee reports and memoranda need a persistent disk (`REPORT_STORAGE_DIR`).
+- **Gemini:** set `GEMINI_API_KEY` to enable AI proposals and reworded notifications. Without it, bilingual templates are used and no AI proposals are made.
+- **Production chain:** the production receipt chain currently fails verification because of early seed receipts with placeholder hashes. A decision on an audited checkpoint is pending ([docs/DECISIONS.md](docs/DECISIONS.md)).
 
-The Constitution of Kenya 2010, including Articles 10(2)(a), 118(1)(b), and 196, provides context for public-participation design. This platform is not legal advice and does not replace official legislative records or proceedings.
+## Project structure
+
+```text
+├── backend/
+│   ├── app/
+│   │   ├── api/routes.py            # REST API
+│   │   ├── participation.py         # when a bill accepts views
+│   │   ├── submission_stage.py      # a submission's journey
+│   │   ├── committee_assignment.py  # committees for bills; county committees
+│   │   ├── rate_limit.py            # request limits and sign-in lockout
+│   │   ├── scripts/                 # sync_legislation.py, sync_county_bills.py
+│   │   └── services/                # receipts, ingestion, matching, documents, notifications, report worker
+│   ├── alembic/versions/            # migrations
+│   └── tests/
+├── src/
+│   ├── pages/                       # role home pages, bills, submit, receipts, moderation, admin, Clerk's Office
+│   ├── components/                  # Layout, UI, Participation (stage pill, progress tracker)
+│   ├── context/AppContext.tsx       # app data; Clerk's Office scoping
+│   └── utils/submissionStage.ts     # stage labels shared with the backend rules
+├── docs/                            # SYSTEM, API, DB, DECISIONS, EVALUATION, technical report
+├── evaluation/                      # evaluation scripts and synthetic fixtures
+└── docker-compose.yml
+```
 
 ## Limitations
 
-- The platform cannot require a representative or committee to engage.
-- It cannot guarantee that a concern is resolved.
+- Submissions are not yet forwarded to committee clerks, so the platform cannot prove a view reached the committee.
+- Committee reports often summarise themes rather than individual views, so some views will be "Not addressed in the report" even where a general response exists.
+- County coverage is two assemblies, and their websites publish neither bill stages nor committee reports.
+- Subject-matter committee assignments need administrator confirmation.
+- The interface is English-only; notifications are English and Kiswahili.
+- The app loads about 2.3 MB of data at start-up, which is slow on mobile data.
 - Online submissions are not statistically representative of the public.
-- Device and connectivity gaps remain a pilot limitation.
-- Most of the application interface remains English-only. Automated citizen notifications support English and Kiswahili.
-- Free tiers on Netlify, Render and Neon are limited and can change; they are not a production availability or backup guarantee, and the API may have cold-start delays.
+
+## Legal context
+
+The Constitution of Kenya 2010 — Articles 10(2)(a), 118(1)(b) and 196 — and National Assembly Standing Order 127 provide the context for public participation. The platform does not replace official legislative records or proceedings.
 
 ## License
 
 © 2026 Participation Traceability Platform — Kenya Pilot. All rights reserved.
-
-## Evidence status (updated 2026-10-12)
-
-The project now distinguishes four evidence states:
-
-- **Implemented:** code path exists and is covered by a local unit/build check.
-- **Simulated:** seed records or synthetic PDF fixtures used only for demonstrations/regression tests.
-- **Evaluated:** a result produced from approved de-identified ground-truth or participant data.
-- **Not yet verified:** requires a PostgreSQL deployment, real source reports, approved labels, or human participants.
-
-### Current status
-
-| Area | Status | Evidence |
-|---|---|---|
-| Offline draft automatic synchronization | Implemented, not yet verified against a live API | `src/App.tsx`, `src/utils/offline.ts` |
-| Durable report storage and SHA-256 provenance | Implemented for configurable persistent storage; production object storage not yet verified | `backend/app/services/storage_service.py`, report metadata fields |
-| Native/scanned extraction fixtures | Implemented as synthetic regression fixtures | `evaluation/fixtures/` |
-| Database-level receipt/audit immutability | Implemented in Alembic migration; requires migration against PostgreSQL | `backend/alembic/versions/20261012_integrity_provenance.py` |
-| Precision/recall and ingestion evaluation | Evaluation scripts and empty approved-data templates implemented; results not yet evaluated | `evaluation/data/`, `evaluation/evaluate_*.py` |
-| Usability/SUS study | Instrument/template implemented; human study and results not yet conducted | `evaluation/data/usability_sessions.csv`, `docs/EVALUATION.md` |
-| Parliament-synced bill catalogue | Sourced through the Parliament legislation sync; check source and sync timestamp for currentness | `backend/app/scripts/sync_legislation.py`; `backend/tests/test_sync_legislation.py` |
-| Seed/demo bills, profiles, receipts, reports | Simulated local/demo records; not the current Parliament-synced bill catalogue | `backend/app/seed.py`, `src/data/seed.ts` |
-
-## Committee and public-flow features
-
-The current implementation includes first-class `committees`. An administrator can create a committee and its committee account through `POST /api/v1/committees`. A committee account can ingest bills through `POST /api/v1/committees/me/bills` and can see only bills assigned to that committee through `GET /api/v1/committees/me/bills`. Notice management is broader by design: its bill picker uses the public live-bill catalogue so a Clerk’s Office can record a notice against any synchronized or locally ingested live bill.
-
-Citizens can submit views against public bills. The receipt remains hash-chained and append-only. `GET /api/v1/bills/{bill_id}/flow` exposes the public bill timeline, committee reports, confirmed outcome status, and match percentage without exposing citizen account IDs. Citizens can contact the responsible committee through the messages interface when an outcome requires clarification. Committee accounts can read and reply through the same message system; message sends and reads are audited.
-
-Matching uses an optional free hosted Gemini proposal layer. Configure `GEMINI_API_KEY`, `GEMINI_API_BASE`, and `GEMINI_MATCH_MODEL` to enable it. The configured default is `gemini-2.5-flash-lite`, which Google currently lists with free input/output tokens on its free tier. LLM proposals return a percentage-style score and explanation, but remain `pending` until a human moderator confirms them. Free-tier quota errors and provider outages automatically fall back to the deterministic clause/text matcher. No AI system can honestly guarantee perfect matching; the system therefore abstains below its confidence threshold and keeps human moderation as the final decision.
-
-The `researcher` role has been removed from registration, seed data, frontend role types, and navigation. Legacy researcher accounts are migrated to citizens by `20261015_committees_messages`. Public identifier-free outcome export is available without a researcher account.
-
-## Automated matching alerts and confidence colors
-
-After each matching run, the backend automatically sends a system-generated alert to the citizen who owns each receipt. A no-match alert explains that no defensible report link met the threshold. A pending-match alert reports the proposed percentage and evidence while clearly stating that moderator confirmation is still required. After a moderator confirms a report treatment, the citizen receives a separate final outcome alert containing the percentage, treatment, and committee-stated reason. Alerts are idempotent per receipt and outcome phase, so rerunning matching does not send duplicates.
-
-Confidence is shown consistently as **red / Low** below 50%, **amber / Moderate** from 50% through 74.9%, and **green / High** at 75% or above. These bands are communication thresholds, not proof of correctness; the score remains an evidence-weighted proposal and not an automated legal or legislative decision.

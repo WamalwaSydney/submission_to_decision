@@ -1,4 +1,3 @@
-version: '3.8'
 
 services:
   # PostgreSQL Database
@@ -38,6 +37,7 @@ services:
         condition: service_healthy
     volumes:
       - ./backend:/app
+      - ./evaluation:/evaluation:ro
       - uploads:/app/uploads
 
   # React Frontend

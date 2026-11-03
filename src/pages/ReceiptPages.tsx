@@ -3,16 +3,63 @@ import { useSearchParams, Link } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import { verifyChain } from '../utils/hashChain';
 import { api } from '../api/endpoints';
-import { ChainVerificationResult, SubmissionStatus } from '../types';
+import { ChainVerificationResult, ReceiptVerification, SubmissionStatus } from '../types';
 import {
   Search, CheckCircle2, XCircle, AlertTriangle, Clock,
   FileText, Fingerprint, Shield, ArrowRight, Link as LinkIcon,
-  RefreshCw, Copy, ExternalLink, Flag
+  RefreshCw, Copy, ExternalLink, Flag, Printer, MessageCircle, Smartphone
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Card, Badge, Label, InputField, DisclaimerBox, InfoBox, StatusBadge } from '../components/UI';
 import { confidenceClasses, confidenceBarClass, confidenceLabel } from '../utils/confidence';
 import { copyText } from '../utils/clipboard';
+import QRCode from 'qrcode';
+import { SubmissionProgress } from '../components/Participation';
+import { STAGE_META, normalizeStage } from '../utils/submissionStage';
+
+function receiptLink(publicId: string) {
+  return `${window.location.origin}${window.location.pathname}#/receipt-lookup?id=${encodeURIComponent(publicId)}`;
+}
+
+/** Print, share by WhatsApp or SMS, or copy the link to a receipt. */
+function ReceiptActions({ publicId, billTitle }: { publicId: string; billTitle: string }) {
+  const [copied, setCopied] = useState(false);
+  const message = `My submission on ${billTitle} has receipt ${publicId}. Track it here: ${receiptLink(publicId)}`;
+  return (
+    <div className="flex flex-wrap gap-2 no-print">
+      <button type="button" className="action-button is-secondary" onClick={() => window.print()}><Printer aria-hidden="true" /> Print or save as PDF</button>
+      <a className="action-button is-secondary" href={`https://wa.me/?text=${encodeURIComponent(message)}`} target="_blank" rel="noreferrer"><MessageCircle aria-hidden="true" /> Share on WhatsApp</a>
+      <a className="action-button is-secondary" href={`sms:?&body=${encodeURIComponent(message)}`}><Smartphone aria-hidden="true" /> Send by SMS</a>
+      <button type="button" className="action-button is-secondary" onClick={async () => { setCopied(await copyText(receiptLink(publicId))); setTimeout(() => setCopied(false), 2000); }}><Copy aria-hidden="true" /> {copied ? 'Link copied' : 'Copy link'}</button>
+    </div>
+  );
+}
+
+/** Only shown when printing: a one-page receipt with a QR code back to this page. */
+function PrintableReceipt({ publicId, billTitle, billIdentifier, issued, stage, hash }: { publicId: string; billTitle: string; billIdentifier: string; issued: string; stage: string; hash: string }) {
+  const [qr, setQr] = useState('');
+  useEffect(() => {
+    QRCode.toDataURL(receiptLink(publicId), { margin: 1, width: 220, color: { dark: '#101616', light: '#ffffff' } }).then(setQr).catch(() => setQr(''));
+  }, [publicId]);
+  return (
+    <div className="receipt-print" aria-hidden="true">
+      <div className="receipt-print-flag" />
+      <p className="receipt-print-kicker">Participation Trace · Public participation receipt</p>
+      <h1>{publicId}</h1>
+      <table>
+        <tbody>
+          <tr><th>Bill</th><td>{billTitle} ({billIdentifier})</td></tr>
+          <tr><th>Submitted</th><td>{new Date(issued).toLocaleString('en-KE')}</td></tr>
+          <tr><th>Stage</th><td>{STAGE_META[normalizeStage(stage)].label}</td></tr>
+          <tr><th>Receipt hash</th><td className="mono">{hash}</td></tr>
+        </tbody>
+      </table>
+      {qr && <img src={qr} alt="" width={150} height={150} />}
+      <p>Scan the code or visit the link to track this submission and check it has not been changed. This receipt proves the view was submitted on this platform at the time shown; it does not prove it reached the committee.</p>
+      <p className="mono">{receiptLink(publicId)}</p>
+    </div>
+  );
+}
 
 function SubmissionStatusBadge({ status }: { status: SubmissionStatus }) {
   return StatusBadge({ status });
@@ -29,11 +76,17 @@ export function ReceiptLookupPage() {
   const [remoteReceipt, setRemoteReceipt] = useState<any>(null);
   const [lookupError, setLookupError] = useState('');
   const [copiedHash, setCopiedHash] = useState(false);
+  const [integrity, setIntegrity] = useState<ReceiptVerification | null>(null);
 
   useEffect(() => {
     if (!query) { setRemoteReceipt(null); return; }
     setLookupError('');
-    api.receipt(query.toUpperCase()).then(setRemoteReceipt).catch(() => {
+    setIntegrity(null);
+    api.receipt(query).then(found => {
+      setRemoteReceipt(found);
+      // Check this receipt against the chain as soon as it is found.
+      api.verifyReceipt(found.public_id).then(setIntegrity).catch(() => setIntegrity(null));
+    }).catch(() => {
       setRemoteReceipt(null);
       setLookupError('Receipt not found on the API.');
     });
@@ -187,13 +240,19 @@ export function ReceiptLookupPage() {
                   </div>
                   <div className="flex flex-col items-end gap-2">
                     <SubmissionStatusBadge status={status as SubmissionStatus} />
-                    {reviewDecision && <Badge variant={reviewDecision === 'confirmed' ? 'green' : reviewDecision === 'pending' ? 'yellow' : 'red'}>Match {reviewDecision === 'confirmed' ? 'confirmed' : reviewDecision === 'pending' ? 'pending review' : 'rejected'}</Badge>}
                   </div>
                 </div>
               </div>
 
               {/* Receipt body */}
               <div className="p-7 md:p-9 space-y-6">
+                <section className="rounded-2xl p-5 border border-surface-200 bg-surface-50" aria-label="Where this submission is">
+                  <h3 className="text-sm font-black text-surface-900 mb-4">Where this submission is</h3>
+                  <SubmissionProgress stage={status || 'received'} />
+                </section>
+                <ReceiptActions publicId={receipt.public_id} billTitle={bill.title} />
+                <PrintableReceipt publicId={receipt.public_id} billTitle={bill.title} billIdentifier={bill.identifier}
+                  issued={receipt.timestamp} stage={status || 'received'} hash={remoteReceipt?.hash || receipt.hash} />
                 <DisclaimerBox className="!p-5">
                   <div className="pl-3 text-sm leading-relaxed font-semibold">
                     <strong className="font-black">Lodging notice:</strong> This receipt proves a view was submitted on this platform at the given time.
@@ -235,6 +294,14 @@ export function ReceiptLookupPage() {
                     </p>
                   </div>
                 </div>
+
+                {integrity && <ReceiptCheck check={integrity} />}
+                {remoteReceipt?.superseded && (
+                  <p className="notice-box is-closed !m-0">
+                    This is an earlier version of an edited submission. The current version is{' '}
+                    <Link to={`/receipt-lookup?id=${remoteReceipt.current_public_id}`} className="font-mono font-bold underline">{remoteReceipt.current_public_id}</Link>.
+                  </p>
+                )}
 
                 {/* Hashes */}
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 pt-4 border-t border-surface-200/80">
@@ -374,8 +441,34 @@ export function ReceiptLookupPage() {
   );
 }
 
+function ReceiptCheck({ check }: { check: ReceiptVerification }) {
+  return (
+    <div className={`notice-box ${check.valid ? 'is-info' : 'is-error'}`} role="status">
+      <strong>{check.valid ? `Receipt ${check.receipt_id} is intact.` : `Receipt ${check.receipt_id} failed verification.`}</strong>{' '}
+      {check.valid
+        ? `Its hash matches its content, it links to the receipt before it, and it is position ${check.position} in the chain.${check.superseded ? ' This is an earlier version of an edited submission.' : ''}`
+        : check.problems.join(' ')}
+    </div>
+  );
+}
+
 export function ReceiptVerifyPage() {
-  const { state } = useApp();
+  const [singleId, setSingleId] = useState('');
+  const [singleCheck, setSingleCheck] = useState<ReceiptVerification | null>(null);
+  const [singleError, setSingleError] = useState('');
+  const [singleChecking, setSingleChecking] = useState(false);
+  const checkOne = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!singleId.trim()) return;
+    setSingleChecking(true); setSingleError(''); setSingleCheck(null);
+    try {
+      setSingleCheck(await api.verifyReceipt(singleId));
+    } catch (error) {
+      setSingleError(error instanceof Error ? error.message : 'Could not check this receipt.');
+    } finally {
+      setSingleChecking(false);
+    }
+  };
   const [result, setResult] = useState<ChainVerificationResult | null>(null);
   const [verifying, setVerifying] = useState(false);
   const [verificationError, setVerificationError] = useState('');
@@ -388,6 +481,7 @@ export function ReceiptVerifyPage() {
       setResult({
         valid: remote.valid,
         totalChecked: remote.total_checked,
+        brokenCount: remote.broken_count,
         firstBrokenIndex: remote.first_broken_index ?? undefined,
         details: (remote.details || []).map((item: any) => ({
           index: item.index,
@@ -395,6 +489,8 @@ export function ReceiptVerifyPage() {
           valid: item.valid,
           expectedHash: item.expected_hash,
           actualHash: item.actual_hash,
+          problems: item.problems || [],
+          superseded: item.superseded,
         })),
       });
     } catch (error) {
@@ -428,8 +524,8 @@ export function ReceiptVerifyPage() {
             <Shield className="h-5 w-5" />
           </div>
           <p className="text-sm font-semibold leading-relaxed">
-            <strong className="font-black">Note:</strong> Full cryptographic verification against the server requires a live connection.
-            This check validates the chain integrity of all receipts currently loaded in your session.
+            <strong className="font-black">How this works:</strong> the platform recomputes every receipt's SHA-256 hash from its content and checks that each one points to the receipt before it.
+            This includes earlier versions of edited submissions, which stay on the record. A single changed word, swapped document or deleted receipt shows up as a broken link.
           </p>
         </div>
       </InfoBox>
@@ -446,8 +542,8 @@ export function ReceiptVerifyPage() {
             <div>
               <p className="text-xs font-black uppercase tracking-[0.18em] text-primary-600 mb-2">Current Chain</p>
               <h2 className="text-3xl md:text-4xl font-black text-surface-900 tracking-tight mb-1">
-                {state.receipts.length.toLocaleString()}
-                <span className="text-surface-400 font-bold"> receipts</span>
+                {result ? result.totalChecked.toLocaleString() : 'Every'}
+                <span className="text-surface-400 font-bold"> {result ? 'receipts checked' : 'receipt, every version'}</span>
               </h2>
               <p className="text-sm text-surface-600 font-medium leading-relaxed max-w-xl">
                 Each receipt's hash is computed from its content, timestamp, and the previous receipt's hash.
@@ -471,6 +567,18 @@ export function ReceiptVerifyPage() {
             )}
           </button>
         </div>
+      </Card>
+
+      <Card className="!p-7 md:!p-8" hover={false}>
+        <h2 className="text-xl font-black text-[#182020] mb-1">Check one receipt</h2>
+        <p className="text-sm text-[#596767] mb-4">Enter a receipt ID to confirm it has not been changed and is still linked into the chain.</p>
+        <form onSubmit={checkOne} className="flex flex-col sm:flex-row gap-3">
+          <label htmlFor="verify-one" className="sr-only">Receipt ID</label>
+          <input id="verify-one" value={singleId} onChange={e => setSingleId(e.target.value)} placeholder="e.g. RCT-KN8X2M" className="input-field font-mono sm:max-w-sm" />
+          <button type="submit" disabled={singleChecking || !singleId.trim()} className="action-button is-primary">{singleChecking ? 'Checking…' : 'Check receipt'}</button>
+        </form>
+        {singleCheck && <div className="mt-4"><ReceiptCheck check={singleCheck} /></div>}
+        {singleError && <p role="alert" className="notice-box is-error mt-4">{singleError}</p>}
       </Card>
 
       {verificationError && (
@@ -525,7 +633,7 @@ export function ReceiptVerifyPage() {
                   <p className={`text-lg font-semibold leading-relaxed ${
                     result.valid ? 'text-accent-700/90' : 'text-red-700/90'
                   }`}>
-                    {result.totalChecked === 0 ? 'No receipt links are currently loaded in this session.' : `${result.totalChecked} receipts checked.`}
+                    {result.totalChecked === 0 ? 'No receipts have been issued yet.' : `${result.totalChecked} receipts checked${result.brokenCount ? `, ${result.brokenCount} broken` : ''}.`}
                     {result.firstBrokenIndex !== undefined && (
                       <> First broken link at position <span className="font-black bg-white/80 px-2 py-0.5 rounded-md">{result.firstBrokenIndex + 1}</span> (receipt{' '}
                         <span className="font-mono font-bold">{result.details[result.firstBrokenIndex].receiptId}</span>).</>
@@ -564,7 +672,7 @@ export function ReceiptVerifyPage() {
                       <th>#</th>
                       <th>Receipt ID</th>
                       <th>Status</th>
-                      <th>Hash Preview</th>
+                      <th>Hash / problem</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -579,7 +687,10 @@ export function ReceiptVerifyPage() {
                             <Badge variant="red" showIcon>Broken</Badge>
                           )}
                         </td>
-                        <td className="font-mono text-[11px] text-surface-500 truncate max-w-[240px]">{d.actualHash.slice(0, 20)}...</td>
+                        <td className="font-mono text-[11px] text-surface-500 max-w-[420px]">
+                          {d.actualHash.slice(0, 20)}…{d.superseded && <span className="ml-2 font-sans font-bold text-[#687575]">earlier version</span>}
+                          {!d.valid && d.problems?.map(problem => <span key={problem} className="block mt-1 font-sans text-xs font-semibold text-[#7a1f1c] whitespace-normal">{problem}</span>)}
+                        </td>
                       </tr>
                     ))}
                   </tbody>

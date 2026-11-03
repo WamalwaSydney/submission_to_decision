@@ -48,6 +48,15 @@ async def db_session():
         await conn.execute(text("DROP SCHEMA public CASCADE"))
         await conn.execute(text("CREATE SCHEMA public"))
         await conn.run_sync(Base.metadata.create_all)
+        # Same append-only protection as production (20261012_integrity_provenance),
+        # so code that tries to UPDATE or DELETE a receipt fails here too.
+        await conn.execute(text("""
+            CREATE OR REPLACE FUNCTION prevent_append_only_modification() RETURNS TRIGGER AS $$
+            BEGIN RAISE EXCEPTION '% rows are append-only and cannot be modified or deleted', TG_TABLE_NAME; END;
+            $$ LANGUAGE plpgsql"""))
+        for table, prefix in (("participation_receipts", "receipt"), ("audit_log", "audit")):
+            await conn.execute(text(f"CREATE TRIGGER trg_{prefix}_prevent_update BEFORE UPDATE ON {table} FOR EACH ROW EXECUTE FUNCTION prevent_append_only_modification()"))
+            await conn.execute(text(f"CREATE TRIGGER trg_{prefix}_prevent_delete BEFORE DELETE ON {table} FOR EACH ROW EXECUTE FUNCTION prevent_append_only_modification()"))
 
     async with TestSession() as session:
         yield session

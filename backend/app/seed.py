@@ -2,7 +2,7 @@
 
 import asyncio
 import uuid
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from sqlalchemy import select
 
 from app.database import async_session, engine, Base
@@ -12,6 +12,7 @@ from app.models import (
     AuditLog
 )
 from app.auth import get_password_hash
+from app.services.receipt_service import compute_receipt_hash
 
 GENESIS_HASH = "0" * 64
 
@@ -39,9 +40,13 @@ async def seed():
             User(id=uuid.UUID("00000000-0000-0000-0000-000000000004"), role="administrator", name="Admin User", email="admin@example.com", password_hash=get_password_hash("password123"), status="active"),
         ]
         session.add_all(users)
+        # users and committees reference each other, so flush in dependency order:
+        # admin user -> committee (created_by) -> committee officer (committee_id).
+        await session.flush()
         committee = Committee(id=uuid.UUID("80000000-0000-0000-0000-000000000001"), name="Simulated Finance Committee", institution="National Assembly", description="Demo committee account; all records are simulated.", contact_email="committee@example.com", created_by=users[3].id)
-        committee_user = User(id=uuid.UUID("00000000-0000-0000-0000-000000000006"), role="committee_officer", name="Simulated Finance Committee", email="committee@example.com", password_hash=get_password_hash("password123"), committee_id=committee.id, status="active")
         session.add(committee)
+        await session.flush()
+        committee_user = User(id=uuid.UUID("00000000-0000-0000-0000-000000000006"), role="committee_officer", name="Simulated Finance Committee", email="committee@example.com", password_hash=get_password_hash("password123"), committee_id=committee.id, status="active")
         session.add(committee_user)
         await session.flush()
         # Legislative Items (Bills)
@@ -63,14 +68,26 @@ async def seed():
         
         # Participation Receipts
         receipts = [
-            ParticipationReceipt(id=uuid.UUID("30000000-0000-0000-0000-000000000001"), public_id="RCT-KN8X2M", author_id=users[0].id, legislative_item_id=bills[0].id, clause_ref="Clause 4", submission_text="The proposed zoning changes in Clause 4 would disproportionately affect small businesses in Westlands. I urge the committee to include a provision for small business relocation assistance.", chain_sequence=1, lodging_status="pending", timestamp=datetime(2026, 2, 5, 10, 30, 0), hash="abc123def456789012345678901234567890123456789012345678901234", previous_hash=GENESIS_HASH),
-            ParticipationReceipt(id=uuid.UUID("30000000-0000-0000-0000-000000000002"), public_id="RCT-PQ7Y3N", author_id=users[0].id, legislative_item_id=bills[1].id, submission_text="The proposed market fees increase will hurt informal traders. Please consider a graduated fee structure based on business size.", chain_sequence=2, lodging_status="lodged", timestamp=datetime(2026, 3, 2, 14, 15, 0), hash="def789ghi012345678901234567890123456789012345678901234567890", previous_hash="abc123def456789012345678901234567890123456789012345678901234"),
-            ParticipationReceipt(id=uuid.UUID("30000000-0000-0000-0000-000000000003"), public_id="RCT-AB4Z9K", author_id=users[0].id, legislative_item_id=bills[2].id, clause_ref="Clause 7", submission_text="Smallholder farmers in Trans Nzoia need guaranteed access to subsidized fertilizer as proposed in Clause 7, but the eligibility criteria should include cooperatives, not just individual farmers.", chain_sequence=3, lodging_status="acknowledged", timestamp=datetime(2026, 2, 25, 9, 0, 0), hash="ghi345jkl678901234567890123456789012345678901234567890123456", previous_hash="def789ghi012345678901234567890123456789012345678901234567890"),
-            ParticipationReceipt(id=uuid.UUID("30000000-0000-0000-0000-000000000004"), public_id="RCT-MN5C1P", author_id=users[0].id, legislative_item_id=bills[0].id, submission_text="Environmental impact assessments should be mandatory before any zoning change takes effect, as per the constitutional right to a clean environment.", chain_sequence=4, lodging_status="pending", timestamp=datetime(2026, 2, 8, 16, 45, 0), hash="jkl901mno234567890123456789012345678901234567890123456789012", previous_hash="ghi345jkl678901234567890123456789012345678901234567890123456"),
-            ParticipationReceipt(id=uuid.UUID("30000000-0000-0000-0000-000000000005"), public_id="RCT-WX6D8R", author_id=users[0].id, legislative_item_id=bills[4].id, submission_text="The traffic management plan should prioritize pedestrian safety near schools and hospitals in Nairobi.", chain_sequence=5, lodging_status="pending", timestamp=datetime(2026, 2, 22, 11, 20, 0), hash="mno567pqr890123456789012345678901234567890123456789012345678", previous_hash="jkl901mno234567890123456789012345678901234567890123456789012"),
+            ParticipationReceipt(id=uuid.UUID("30000000-0000-0000-0000-000000000001"), public_id="RCT-KN8X2M", author_id=users[0].id, legislative_item_id=bills[0].id, clause_ref="Clause 4", submission_text="The proposed zoning changes in Clause 4 would disproportionately affect small businesses in Westlands. I urge the committee to include a provision for small business relocation assistance.", chain_sequence=1, lodging_status="pending", timestamp=datetime(2026, 2, 5, 10, 30, 0), hash="", previous_hash=""),
+            ParticipationReceipt(id=uuid.UUID("30000000-0000-0000-0000-000000000002"), public_id="RCT-PQ7Y3N", author_id=users[0].id, legislative_item_id=bills[1].id, submission_text="The proposed market fees increase will hurt informal traders. Please consider a graduated fee structure based on business size.", chain_sequence=2, lodging_status="lodged", timestamp=datetime(2026, 3, 2, 14, 15, 0), hash="", previous_hash=""),
+            ParticipationReceipt(id=uuid.UUID("30000000-0000-0000-0000-000000000003"), public_id="RCT-AB4Z9K", author_id=users[0].id, legislative_item_id=bills[2].id, clause_ref="Clause 7", submission_text="Smallholder farmers in Trans Nzoia need guaranteed access to subsidized fertilizer as proposed in Clause 7, but the eligibility criteria should include cooperatives, not just individual farmers.", chain_sequence=3, lodging_status="acknowledged", timestamp=datetime(2026, 2, 25, 9, 0, 0), hash="", previous_hash=""),
+            ParticipationReceipt(id=uuid.UUID("30000000-0000-0000-0000-000000000004"), public_id="RCT-MN5C1P", author_id=users[0].id, legislative_item_id=bills[0].id, submission_text="Environmental impact assessments should be mandatory before any zoning change takes effect, as per the constitutional right to a clean environment.", chain_sequence=4, lodging_status="pending", timestamp=datetime(2026, 2, 8, 16, 45, 0), hash="", previous_hash=""),
+            ParticipationReceipt(id=uuid.UUID("30000000-0000-0000-0000-000000000005"), public_id="RCT-WX6D8R", author_id=users[0].id, legislative_item_id=bills[4].id, submission_text="The traffic management plan should prioritize pedestrian safety near schools and hospitals in Nairobi.", chain_sequence=5, lodging_status="pending", timestamp=datetime(2026, 2, 22, 11, 20, 0), hash="", previous_hash=""),
         ]
+        # Link the demo receipts into a genuine hash chain (in sequence order), so
+        # a freshly seeded database passes /receipts/verify like real data would.
+        previous_hash = GENESIS_HASH
+        for receipt in sorted(receipts, key=lambda r: r.chain_sequence):
+            receipt.timestamp = receipt.timestamp.replace(tzinfo=timezone.utc)
+            receipt.previous_hash = previous_hash
+            receipt.hash = compute_receipt_hash({
+                "id": receipt.id, "author_id": receipt.author_id, "legislative_item_id": receipt.legislative_item_id,
+                "clause_ref": receipt.clause_ref, "submission_text": receipt.submission_text,
+                "timestamp": receipt.timestamp, "previous_hash": previous_hash,
+            })
+            previous_hash = receipt.hash
         session.add_all(receipts)
-        
+
         # Committee Reports
         reports = [
             CommitteeReport(id=uuid.UUID("40000000-0000-0000-0000-000000000001"), bill_ref=bills[2].id, institution="Trans Nzoia County Assembly", date_tabled=date(2026, 3, 15), source_document_ref="TNCA-Report-2026-007.pdf", extraction_status="verified", ocr_used=False, is_simulated=True),

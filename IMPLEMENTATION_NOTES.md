@@ -47,3 +47,38 @@ Matching now queues system-origin messages automatically. Citizens receive a mat
 - `npm run typecheck` — passed.
 - `npm run build` — passed; Vite reports the existing large-main-chunk warning.
 - `python3 -m py_compile backend/app/api/routes.py` — passed.
+
+## Release notes — 2026-11-03 (validated locally, not yet deployed)
+
+**Legislation data**
+- **National Assembly stages:** the Bills Tracker parser now reads "NA." / "Sen." references, which recovers 39% of rows that were being skipped. Bills get a dated stage history, official titles, "Passed by National Assembly" and other remarks, and no duplicate tracker documents.
+- **County sync:** Nairobi City County Assembly and Trans Nzoia County Assembly bills, plus their Acts from Kenya Law, are synced (`app.scripts.sync_county_bills`). 28 county committees were created from each assembly's published lists.
+- **Committee assignment:** official evidence first, otherwise by subject from the bill title. Administrators confirm suggestions in a new admin tab, and the sync never overrides an administrator's choice.
+
+**Submissions**
+- **Participation windows:** a call for memoranda decides; otherwise First Reading only. Assented and post-committee bills refuse submissions.
+- **One submission per bill:** citizens can edit until the window closes. Edits are new append-only chain entries (`<ID>-v2`), so the receipt ID never changes.
+- **Memoranda:** can be uploaded as PDF, .docx or .txt. The document's SHA-256 is part of the receipt hash.
+- **Stages:** submissions move through Received, With the committee, Report published, Response under review, then the outcome. A rejected match now shows as "Not addressed in the report".
+
+**Hash chain**
+- The seed builds a real chain.
+- There is a single-receipt check (`GET /receipts/{id}/verify`) shown on every receipt.
+- The verification report explains why any link fails.
+
+**Security**
+- **Committee scope:** Clerk's Office accounts are limited to their own committee, both in the API and in the web client.
+- **Rate limits:** a global limit, sign-in lockout, and sign-up and reset limits.
+- **No anonymous jobs:** report processing moved to a background worker, so anonymous visitors can no longer trigger OCR or AI calls.
+- **AI manipulation guards:** the Gemini rules sit in its system instruction; instruction-like submissions are flagged and capped, and unsupported scores are capped.
+
+**Interface**
+- **Design and homes:** Kenyan flag design system, and a home page for each role.
+- **Bills pages:** a bills list with status filters and a legislature filter. The bill page has a stage tracker, a paginated submissions table and a submission dialog.
+- **Submitting and receipts:** a three-step submit flow with autosave; printable receipts with a QR code, plus WhatsApp and SMS sharing.
+- **Moderation:** the match review page has tabs, filters, a review panel and bulk scoring.
+- **Clerk's Office:** sign-up asks for the legislature first.
+
+**Migrations:** `20261103_submission_revisions` and `20261103_committee_source`, both adding columns only.
+
+**Validation:** 84 backend tests passed; `npm run typecheck` and `npm run build` passed. Browser checks covered each role. Hosted services still run the previous release.

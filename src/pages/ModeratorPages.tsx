@@ -1,11 +1,14 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import { Dialog, DialogActions, DialogContent, DialogTitle, IconButton } from '@mui/material';
 import { useApp } from '../context/AppContext';
 import { ReportEntry, ReviewerDecision, SubmissionStatus } from '../types';
 import { api } from '../api/endpoints';
 import { v4 as uuidv4 } from 'uuid';
-import { CheckCircle2, XCircle, Clock, AlertTriangle, Flag, Shield, Gavel, Users, FileText, Sparkles } from 'lucide-react';
+import { CheckCircle2, XCircle, Clock, AlertTriangle, Flag, Shield, Gavel, Users, FileText, Sparkles, Search } from 'lucide-react';
 import { motion } from 'framer-motion';
-import { Card, DisclaimerBox, InfoBox, Badge, Label, SelectField, BtnPrimary, BtnSecondary, BtnDanger } from '../components/UI';
+import { Card, DisclaimerBox, InfoBox, Badge, Label, SelectField, BtnPrimary, BtnSecondary, BtnDanger, StatusBadge } from '../components/UI';
+import { treatmentStage } from '../utils/submissionStage';
 import { confidenceClasses, confidenceBarClass, confidenceLabel } from '../utils/confidence';
 
 function ReportTreatmentEditor({ entry }: { entry: ReportEntry }) {
@@ -60,8 +63,42 @@ function ReportTreatmentEditor({ entry }: { entry: ReportEntry }) {
   </div>;
 }
 
+type QueueTab = 'awaiting' | 'triage' | 'completed';
+type TriageReason = 'ready' | 'extract' | 'mismatch' | 'no_report';
+const QUEUE_PAGE_SIZE = 20;
+const TRIAGE_LABELS: Record<TriageReason, string> = {
+  ready: 'Ready to score',
+  extract: 'Report needs reading',
+  mismatch: 'Report reference conflict',
+  no_report: 'No report yet',
+};
+const isFlagged = (explanation?: string) => /^Warning for moderators/.test(explanation || '');
+const houseKey = (value?: string) => value?.toLowerCase().includes('senate') ? 'senate' : value?.toLowerCase().includes('national assembly') || value?.toLowerCase() === 'na' ? 'na' : value?.toLowerCase();
+
+function Pager({ page, count, onPage }: { page: number; count: number; onPage: (page: number) => void }) {
+  const pages = Math.max(1, Math.ceil(count / QUEUE_PAGE_SIZE));
+  if (pages <= 1) return null;
+  return (
+    <div className="committee-notice-pagination">
+      <p>Showing {(page - 1) * QUEUE_PAGE_SIZE + 1}–{Math.min(page * QUEUE_PAGE_SIZE, count)} of {count}</p>
+      <div className="committee-notice-page-controls">
+        <button type="button" onClick={() => onPage(page - 1)} disabled={page === 1} aria-label="Previous page">‹</button>
+        {Array.from({ length: pages }, (_, i) => i + 1).filter(n => n === 1 || n === pages || Math.abs(n - page) <= 1).map((n, i, list) => (
+          <React.Fragment key={n}>
+            {i > 0 && n - list[i - 1] > 1 && <span className="px-1 text-surface-400">…</span>}
+            <button type="button" className={n === page ? 'is-active' : ''} aria-current={n === page ? 'page' : undefined} onClick={() => onPage(n)}>{n}</button>
+          </React.Fragment>
+        ))}
+        <button type="button" onClick={() => onPage(page + 1)} disabled={page === pages} aria-label="Next page">›</button>
+      </div>
+    </div>
+  );
+}
+
 export function ReviewerQueuePage() {
   const { state, dispatch } = useApp();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab = (searchParams.get('tab') as QueueTab) || 'awaiting';
   const [queueLoading, setQueueLoading] = useState(true);
   const [queueError, setQueueError] = useState('');
   const [decisionMatchId, setDecisionMatchId] = useState<string | null>(null);
@@ -69,455 +106,424 @@ export function ReviewerQueuePage() {
   const [generatingBillId, setGeneratingBillId] = useState<string | null>(null);
   const [extractingReportId, setExtractingReportId] = useState<string | null>(null);
   const [generationFeedback, setGenerationFeedback] = useState<Record<string, string>>({});
-  const [recentGeneratedMatches, setRecentGeneratedMatches] = useState<any[]>([]);
-  const pendingMatches = state.matches.filter(m => m.reviewer_decision === 'pending');
-  const reviewedMatches = state.matches.filter(m => m.reviewer_decision !== 'pending');
-  const unmatchedReceipts = state.receipts.filter(receipt => !state.matches.some(match => match.receipt_ref === receipt.id));
+  const [bulkProgress, setBulkProgress] = useState('');
+  // filters
+  const [query, setQuery] = useState('');
+  const [billFilter, setBillFilter] = useState('all');
+  const [band, setBand] = useState<'all' | 'high' | 'moderate' | 'low'>('all');
+  const [flaggedOnly, setFlaggedOnly] = useState(false);
+  const [triageFilter, setTriageFilter] = useState<'all' | TriageReason>('all');
+  const [decisionFilter, setDecisionFilter] = useState<'all' | 'confirmed' | 'rejected'>('all');
+  const [sort, setSort] = useState<'priority' | 'oldest' | 'newest'>('priority');
+  const [page, setPage] = useState(1);
+  // review panel
+  const [openMatchId, setOpenMatchId] = useState<string | null>(null);
+  const [rejecting, setRejecting] = useState(false);
+  const [rejectReason, setRejectReason] = useState('');
+
   const canModerate = state.currentUser?.role === 'reviewer' || state.currentUser?.role === 'moderator';
+  const receiptById = useMemo(() => new Map(state.receipts.map(r => [r.id, r])), [state.receipts]);
+  const billById = useMemo(() => new Map(state.bills.map(b => [b.id, b])), [state.bills]);
+  const entryById = useMemo(() => new Map(state.reportEntries.map(e => [e.id, e])), [state.reportEntries]);
+  const pendingMatches = state.matches.filter(m => m.reviewer_decision === 'pending');
+  const reviewedMatches = state.matches.filter(m => m.reviewer_decision === 'confirmed' || m.reviewer_decision === 'rejected');
+  const unmatchedReceipts = state.receipts.filter(receipt => !state.matches.some(match => match.receipt_ref === receipt.id));
+
+  const refreshQueue = async () => {
+    const [snapshot, pending, queueReceipts] = await Promise.all([api.bootstrap(), api.pendingMatches(), api.reviewQueueReceipts()]);
+    dispatch({ type: 'HYDRATE', payload: {
+      bills: snapshot.bills,
+      receipts: queueReceipts.receipts,
+      reports: snapshot.reports,
+      reportEntries: snapshot.report_entries,
+      matches: [...snapshot.matches.filter(match => match.reviewer_decision !== 'pending'), ...pending.matches],
+    } });
+  };
 
   useEffect(() => {
     let cancelled = false;
-    if (state.currentUser?.role !== 'reviewer' && state.currentUser?.role !== 'moderator') {
-      setQueueLoading(false);
-      return () => { cancelled = true; };
-    }
+    if (!canModerate) { setQueueLoading(false); return () => { cancelled = true; }; }
     setQueueLoading(true);
-    api.autoProcessMatches().then(() => Promise.all([api.bootstrap(), api.pendingMatches(), api.reviewQueueReceipts()])).then(([snapshot, pending, queueReceipts]) => {
-      if (cancelled) return;
-      dispatch({
-        type: 'HYDRATE',
-        payload: {
-          bills: snapshot.bills,
-          receipts: queueReceipts.receipts,
-          reports: snapshot.reports,
-          reportEntries: snapshot.report_entries,
-          matches: [...snapshot.matches.filter(match => match.reviewer_decision !== 'pending'), ...pending.matches],
-        },
-      });
-      setQueueError('');
-    }).catch(error => {
+    api.autoProcessMatches().then(() => refreshQueue()).then(() => { if (!cancelled) setQueueError(''); }).catch(error => {
       if (!cancelled) setQueueError(error instanceof Error ? error.message : 'Unable to refresh the review queue.');
-    }).finally(() => {
-      if (!cancelled) setQueueLoading(false);
-    });
+    }).finally(() => { if (!cancelled) setQueueLoading(false); });
     return () => { cancelled = true; };
   }, [dispatch, state.currentUser?.id, state.currentUser?.role]);
 
-  const handleDecision = async (matchId: string, decision: ReviewerDecision) => {
-    if (!state.currentUser) return;
-    if (decision === 'pending') return;
+  const setTab = (next: QueueTab) => {
+    const params = new URLSearchParams(searchParams);
+    if (next === 'awaiting') params.delete('tab'); else params.set('tab', next);
+    setSearchParams(params, { replace: true });
+    setPage(1); setBillFilter('all'); setQuery(''); setSort('priority');
+  };
+
+  // ---- triage reasons ----
+  const triageReason = (receipt: typeof state.receipts[number]): { reason: TriageReason; reportToExtract?: string } => {
+    const bill = billById.get(receipt.legislative_item_id);
+    const reports = state.reports.filter(report => report.bill_ref === receipt.legislative_item_id);
+    if (!reports.length) return { reason: 'no_report' };
+    const mismatch = reports.some(report =>
+      (report.bill_year != null && bill?.bill_year != null && report.bill_year !== bill.bill_year) ||
+      (report.bill_number != null && bill?.bill_number != null && report.bill_number !== bill.bill_number) ||
+      (report.bill_house && bill?.bill_house && houseKey(report.bill_house) !== houseKey(bill.bill_house)));
+    if (mismatch) return { reason: 'mismatch' };
+    const hasEntries = state.reportEntries.some(entry => reports.some(report => report.id === entry.report_ref));
+    if (!hasEntries) return { reason: 'extract', reportToExtract: reports.find(report => report.source_url)?.id };
+    return { reason: 'ready' };
+  };
+
+  // ---- decisions ----
+  const handleDecision = async (matchId: string, decision: ReviewerDecision, reason?: string) => {
+    if (!state.currentUser || decision === 'pending') return false;
+    if (decision === 'rejected' && !reason?.trim()) {
+      setDecisionError('Give a reason when you reject a proposed match.');
+      return false;
+    }
     setDecisionMatchId(matchId);
     setDecisionError('');
     try {
-      let reason: string | undefined;
-      if (decision === 'rejected') {
-        reason = window.prompt('Reason for rejecting this submission match (required):')?.trim();
-        if (!reason) {
-          setDecisionError('A reason is required when rejecting a submission match.');
-          setDecisionMatchId(null);
-          return;
-        }
-      }
-      const result = await api.decideMatch(matchId, decision === 'confirmed' ? 'confirm' : 'reject', reason);
-      const persistedMatch = result?.match;
-      if (persistedMatch) {
-        dispatch({ type: 'UPSERT_MATCH', payload: persistedMatch });
-      }
+      const result = await api.decideMatch(matchId, decision === 'confirmed' ? 'confirm' : 'reject', reason?.trim());
+      if (result?.match) dispatch({ type: 'UPSERT_MATCH', payload: result.match });
+      else dispatch({ type: 'UPDATE_MATCH_DECISION', payload: { matchId, decision, reviewerId: state.currentUser.id } });
+      dispatch({ type: 'ADD_AUDIT_LOG', payload: { id: uuidv4(), entity_type: 'match', entity_id: matchId, action: decision === 'confirmed' ? 'confirmed' : 'rejected', details: `Match ${decision} by ${state.currentUser.name}`, timestamp: new Date().toISOString() } });
+      return true;
     } catch (error) {
       setDecisionError(error instanceof Error ? error.message : 'Unable to update the match. Please refresh and try again.');
+      return false;
+    } finally {
       setDecisionMatchId(null);
-      return;
     }
-    // Keep the fallback for older API responses that do not return the
-    // persisted match object. New responses are upserted above so a match
-    // confirmed from a partial queue snapshot is still visible to the public
-    // outcome trail immediately.
-    if (!state.matches.some(match => match.id === matchId)) {
-      const refreshed = await api.bootstrap();
-      const serverMatch = refreshed.matches.find(match => match.id === matchId);
-      if (serverMatch) dispatch({ type: 'UPSERT_MATCH', payload: serverMatch });
-    } else {
-      dispatch({
-        type: 'UPDATE_MATCH_DECISION',
-        payload: { matchId, decision, reviewerId: state.currentUser.id }
-      });
-    }
-    dispatch({
-      type: 'ADD_AUDIT_LOG',
-      payload: {
-        id: uuidv4(),
-        entity_type: 'match',
-        entity_id: matchId,
-        action: decision === 'confirmed' ? 'confirmed' : 'rejected',
-        details: `Match ${decision} by ${state.currentUser.name}`,
-        timestamp: new Date().toISOString(),
-      }
-    });
-    setRecentGeneratedMatches(previous => previous.filter(match => match.id !== matchId));
-    setDecisionMatchId(null);
   };
 
-  const generateForReceipt = async (receiptId: string, billId: string) => {
+  const scoreBill = async (billId: string, receiptId?: string) => {
     setGeneratingBillId(billId);
-    setQueueError('');
-    setGenerationFeedback(previous => ({ ...previous, [receiptId]: 'Scoring this submission against the bill’s extracted committee report…' }));
+    if (receiptId) setGenerationFeedback(previous => ({ ...previous, [receiptId]: 'Scoring against the committee report…' }));
     try {
       const generated = await api.generateMatches(billId);
-      const forReceipt = generated.matches.filter(match => match.receipt_ref === receiptId);
-      if (forReceipt.length) {
-        setRecentGeneratedMatches(previous => {
-          const byId = new Map(previous.map(match => [match.id, match]));
-          for (const match of forReceipt) byId.set(match.id, match);
-          return [...byId.values()];
-        });
-        setGenerationFeedback(previous => ({ ...previous, [receiptId]: `Scoring complete: ${forReceipt.length} proposal${forReceipt.length === 1 ? '' : 's'} created. Review the score and report entry below, then confirm or reject.` }));
-      } else {
-        setGenerationFeedback(previous => ({ ...previous, [receiptId]: 'Scoring completed, but no new proposal was returned for this submission. Check that the report has extracted entries and that a proposal is not already pending or previously reviewed.' }));
+      if (receiptId) {
+        const found = generated.matches.filter(match => match.receipt_ref === receiptId).length;
+        setGenerationFeedback(previous => ({ ...previous, [receiptId]: found ? `${found} proposal${found === 1 ? '' : 's'} created — see Awaiting action.` : 'No defensible match was found in the report for this submission.' }));
       }
-      const [snapshot, pending, queueReceipts] = await Promise.all([api.bootstrap(), api.pendingMatches(), api.reviewQueueReceipts()]);
-      dispatch({ type: 'HYDRATE', payload: {
-        bills: snapshot.bills,
-        receipts: queueReceipts.receipts,
-        reports: snapshot.reports,
-        reportEntries: snapshot.report_entries,
-        matches: [...snapshot.matches.filter(match => match.reviewer_decision !== 'pending'), ...pending.matches],
-      } });
-    } catch (error) {
-      setQueueError(error instanceof Error ? error.message : 'Unable to generate match proposals.');
+      return generated.matches.length;
     } finally {
       setGeneratingBillId(null);
     }
   };
 
-  const retryExtractionForReceipt = async (receiptId: string, reportId: string) => {
+  const scoreAllReady = async (billIds: string[]) => {
+    let created = 0;
+    for (const [index, billId] of billIds.entries()) {
+      setBulkProgress(`Scoring bill ${index + 1} of ${billIds.length}…`);
+      try { created += await scoreBill(billId); } catch { /* keep going; per-bill errors are rare and retriable */ }
+    }
+    await refreshQueue();
+    setBulkProgress(`Done: ${created} new proposal${created === 1 ? '' : 's'} added to Awaiting action.`);
+  };
+
+  const retryExtraction = async (receiptId: string, reportId: string) => {
     setExtractingReportId(reportId);
-    setGenerationFeedback(previous => ({ ...previous, [receiptId]: 'Re-extracting the official Parliament PDF one page at a time…' }));
+    setGenerationFeedback(previous => ({ ...previous, [receiptId]: 'Reading the committee report PDF…' }));
     try {
       const result = await api.retryReportExtraction(reportId);
-      const proposals = result.matches.filter(match => match.receipt_ref === receiptId);
-      if (proposals.length) {
-        setRecentGeneratedMatches(previous => {
-          const byId = new Map(previous.map(match => [match.id, match]));
-          proposals.forEach(match => byId.set(match.id, match));
-          return [...byId.values()];
-        });
-      }
-      setGenerationFeedback(previous => ({
-        ...previous,
-        [receiptId]: result.entries_extracted
-          ? `Extracted ${result.entries_extracted} reviewable report entr${result.entries_extracted === 1 ? 'y' : 'ies'}.${proposals.length ? ` Created ${proposals.length} proposal${proposals.length === 1 ? '' : 's'}; review the score below.` : ' No proposal was returned for this submission; check the bill reference and existing moderation decisions.'}`
-          : 'The Parliament PDF still yielded no reviewable entries. Check the backend extraction log and confirm the linked report is the correct bill report.',
-      }));
-      const [snapshot, pending, queueReceipts] = await Promise.all([api.bootstrap(), api.pendingMatches(), api.reviewQueueReceipts()]);
-      dispatch({ type: 'HYDRATE', payload: {
-        bills: snapshot.bills,
-        receipts: queueReceipts.receipts,
-        reports: snapshot.reports,
-        reportEntries: snapshot.report_entries,
-        matches: [...snapshot.matches.filter(match => match.reviewer_decision !== 'pending'), ...pending.matches],
-      } });
+      setGenerationFeedback(previous => ({ ...previous, [receiptId]: result.entries_extracted ? `Read ${result.entries_extracted} report entr${result.entries_extracted === 1 ? 'y' : 'ies'}; ${result.matches.length} proposal${result.matches.length === 1 ? '' : 's'} created.` : 'The PDF still gave no readable entries. Check that the linked report is the right one.' }));
+      await refreshQueue();
     } catch (error) {
-      setGenerationFeedback(previous => ({ ...previous, [receiptId]: error instanceof Error ? error.message : 'Unable to extract the linked report PDF.' }));
+      setGenerationFeedback(previous => ({ ...previous, [receiptId]: error instanceof Error ? error.message : 'Unable to read the report PDF.' }));
     } finally {
       setExtractingReportId(null);
     }
   };
 
+  // ---- filtered lists ----
+  const needle = query.trim().toLowerCase();
+  const matchesText = (receipt?: typeof state.receipts[number], extra = '') => {
+    if (!needle) return true;
+    const bill = receipt ? billById.get(receipt.legislative_item_id) : undefined;
+    return `${receipt?.public_id || ''} ${receipt?.submission_text || ''} ${bill?.title || ''} ${extra}`.toLowerCase().includes(needle);
+  };
+  const scoreBand = (score: number) => (score >= 0.75 ? 'high' : score >= 0.5 ? 'moderate' : 'low');
+
+  const awaitingRows = pendingMatches
+    .filter(match => { const receipt = receiptById.get(match.receipt_ref); return matchesText(receipt, entryById.get(match.report_entry_ref)?.extracted_summary); })
+    .filter(match => billFilter === 'all' || receiptById.get(match.receipt_ref)?.legislative_item_id === billFilter)
+    .filter(match => band === 'all' || scoreBand(match.confidence_score) === band)
+    .filter(match => !flaggedOnly || isFlagged(match.explanation))
+    .sort((a, b) => sort === 'oldest' ? (a.timestamp || '').localeCompare(b.timestamp || '')
+      : sort === 'newest' ? (b.timestamp || '').localeCompare(a.timestamp || '')
+      // Priority: possible manipulation first, then the strongest proposals.
+      : Number(isFlagged(b.explanation)) - Number(isFlagged(a.explanation)) || b.confidence_score - a.confidence_score);
+
+  const triageAll = unmatchedReceipts.map(receipt => ({ receipt, ...triageReason(receipt) }));
+  const triageCounts = triageAll.reduce((counts, row) => ({ ...counts, [row.reason]: (counts[row.reason] || 0) + 1 }), {} as Record<TriageReason, number>);
+  const triageRows = triageAll
+    .filter(row => triageFilter === 'all' || row.reason === triageFilter)
+    .filter(row => billFilter === 'all' || row.receipt.legislative_item_id === billFilter)
+    .filter(row => matchesText(row.receipt))
+    .sort((a, b) => sort === 'newest' ? (b.receipt.timestamp || '').localeCompare(a.receipt.timestamp || '') : (a.receipt.timestamp || '').localeCompare(b.receipt.timestamp || ''));
+  const readyBillIds = Array.from(new Set(triageAll.filter(row => row.reason === 'ready').map(row => row.receipt.legislative_item_id)));
+
+  const completedRows = reviewedMatches
+    .filter(match => decisionFilter === 'all' || match.reviewer_decision === decisionFilter)
+    .filter(match => billFilter === 'all' || receiptById.get(match.receipt_ref)?.legislative_item_id === billFilter)
+    .filter(match => matchesText(receiptById.get(match.receipt_ref), match.reviewer_reason || ''))
+    .sort((a, b) => sort === 'oldest' ? (a.timestamp || '').localeCompare(b.timestamp || '') : (b.timestamp || '').localeCompare(a.timestamp || ''));
+
+  const rowsForTab = tab === 'awaiting' ? awaitingRows.length : tab === 'triage' ? triageRows.length : completedRows.length;
+  const pageCount = Math.max(1, Math.ceil(rowsForTab / QUEUE_PAGE_SIZE));
+  const currentPage = Math.min(page, pageCount);
+  const slice = <T,>(rows: T[]) => rows.slice((currentPage - 1) * QUEUE_PAGE_SIZE, currentPage * QUEUE_PAGE_SIZE);
+
+  const billsInTab = Array.from(new Set(
+    (tab === 'awaiting' ? pendingMatches.map(m => receiptById.get(m.receipt_ref)?.legislative_item_id)
+      : tab === 'triage' ? unmatchedReceipts.map(r => r.legislative_item_id)
+      : reviewedMatches.map(m => receiptById.get(m.receipt_ref)?.legislative_item_id)).filter(Boolean) as string[],
+  )).map(id => billById.get(id)).filter(Boolean).sort((a, b) => a!.title.localeCompare(b!.title)) as typeof state.bills;
+
+  // ---- review panel ----
+  const openMatch = state.matches.find(m => m.id === openMatchId) || null;
+  const openIndex = openMatch ? awaitingRows.findIndex(m => m.id === openMatch.id) : -1;
+  const closePanel = () => { setOpenMatchId(null); setRejecting(false); setRejectReason(''); setDecisionError(''); };
+  const decideAndAdvance = async (decision: ReviewerDecision) => {
+    if (!openMatch) return;
+    const nextId = openMatch.reviewer_decision === 'pending' ? (awaitingRows[openIndex + 1] || awaitingRows[openIndex - 1])?.id : undefined;
+    const ok = await handleDecision(openMatch.id, decision, decision === 'rejected' ? rejectReason : undefined);
+    if (!ok) return;
+    setRejecting(false); setRejectReason('');
+    if (nextId && nextId !== openMatch.id) setOpenMatchId(nextId); else closePanel();
+  };
+
+  const tabs: { id: QueueTab; label: string; count: number; note: string }[] = [
+    { id: 'awaiting', label: 'Awaiting action', count: pendingMatches.length, note: 'AI proposals to confirm or reject' },
+    { id: 'triage', label: 'Triage', count: unmatchedReceipts.length, note: 'Submissions with no proposal yet' },
+    { id: 'completed', label: 'Completed', count: reviewedMatches.length, note: 'Decisions already made' },
+  ];
+
   return (
-    <div>
-      <div className="inline-flex items-center gap-2 mb-4">
-        <span className="w-8 h-px bg-gradient-to-r from-primary-500 to-accent-500 rounded-full" />
-        <span className="text-xs font-black uppercase tracking-[0.18em] text-primary-600">Moderation</span>
+    <div className="space-y-6">
+      <header>
+        <p className="text-xs font-black uppercase tracking-[0.18em] text-primary-600 mb-3">Moderation</p>
+        <h1 className="text-4xl md:text-5xl font-black tracking-tighter text-surface-900 mb-3">Match review</h1>
+        <p className="text-lg text-surface-600 leading-relaxed max-w-3xl m-0">Check that each proposed committee response really answers the citizen's view. Nothing is shown to the public as an outcome until you confirm it.</p>
+      </header>
+
+      {!canModerate && <p className="notice-box is-closed">Sign in with a moderator account to review matches.</p>}
+      {queueLoading && <p role="status" className="text-sm font-semibold text-surface-500 m-0">Refreshing the review queue…</p>}
+      {queueError && <p role="alert" className="notice-box is-error">{queueError}</p>}
+
+      <div className="queue-tabs" role="tablist" aria-label="Review queue">
+        {tabs.map(item => (
+          <button key={item.id} type="button" role="tab" aria-selected={tab === item.id} className={`queue-tab ${tab === item.id ? 'is-active' : ''}`} onClick={() => setTab(item.id)}>
+            <strong>{item.count}</strong><span>{item.label}</span><small>{item.note}</small>
+          </button>
+        ))}
       </div>
-      <h1 className="text-4xl md:text-5xl font-black tracking-tighter text-surface-900 mb-4">
-        Match Review <span className="gradient-text">Queue</span>
-      </h1>
-      <p className="text-lg text-surface-600 leading-relaxed max-w-3xl mb-8">
-        Review proposed matches between citizen submissions and committee report entries. Nothing is published until you confirm a match.
-      </p>
 
-      {queueLoading && <p role="status" className="mb-4 text-sm font-semibold text-surface-500">Refreshing matches from the live review queue…</p>}
-      {queueError && <div role="alert" className="mb-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-800">{queueError}</div>}
-      {decisionError && <div role="alert" className="mb-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-800">{decisionError}</div>}
-
-      {!state.currentUser && (
-        <DisclaimerBox className="!p-5 mb-6">
-          <div className="flex items-start gap-3">
-            <Shield className="h-5 w-5 mt-0.5 flex-shrink-0 text-warm-600" />
-            <p className="text-sm text-surface-700 font-medium">Sign in as a reviewer to review matches.</p>
+      <section className="bill-filters" aria-label="Filter the queue">
+        <div className="bill-filter-row">
+          <div className="bill-search">
+            <label htmlFor="queue-search" className="sr-only">Search</label>
+            <Search className="h-5 w-5" aria-hidden="true" />
+            <input id="queue-search" type="search" value={query} onChange={e => { setQuery(e.target.value); setPage(1); }} placeholder="Search receipt ID, submission text or bill" className="input-field" />
           </div>
-        </DisclaimerBox>
-      )}
-
-      <Card className="!p-7 md:!p-8 relative overflow-hidden mb-8">
-        <div className="absolute -top-24 -right-24 w-56 h-56 rounded-full bg-primary-100/60 blur-3xl pointer-events-none" />
-        <div className="absolute -bottom-24 -left-24 w-56 h-56 rounded-full bg-accent-100/60 blur-3xl pointer-events-none" />
-        <div className="relative">
-          <div className="inline-flex items-center gap-3 mb-6">
-            <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-primary-500 to-accent-500 flex items-center justify-center text-white shadow-md shadow-primary-500/30">
-              <Clock className="h-5.5 w-5.5" />
-            </div>
-            <div>
-              <div className="text-xs font-black uppercase tracking-[0.18em] text-primary-600 mb-1">Awaiting Action</div>
-              <h2 className="text-2xl font-black text-surface-900 tracking-tight">Pending Review ({pendingMatches.length})</h2>
-            </div>
-          </div>
-
-          {pendingMatches.length === 0 ? (
-            <div className="text-center py-12">
-              <div className="mx-auto w-20 h-20 rounded-full bg-gradient-to-br from-surface-100 to-surface-200 flex items-center justify-center mb-4">
-                <CheckCircle2 className="h-10 w-10 text-surface-400" />
-              </div>
-              <p className="text-lg font-semibold text-surface-700 mb-1">All caught up!</p>
-              <p className="text-surface-500">No matches pending review. New proposals appear here after a report is ingested or a submission arrives for a bill with an existing report.</p>
-            </div>
-          ) : (
-            <div className="space-y-5">
-              {pendingMatches.map((match, i) => {
-                const receipt = state.receipts.find(r => r.id === match.receipt_ref);
-                const entry = state.reportEntries.find(e => e.id === match.report_entry_ref);
-                const bill = receipt ? state.bills.find(b => b.id === receipt.legislative_item_id) : null;
-                const confidencePct = Math.round(match.confidence_score * 100);
-
-                return (
-                  <motion.div
-                    key={match.id}
-                    initial={{ opacity: 0, y: 14 }}
-                    whileInView={{ opacity: 1, y: 0 }}
-                    viewport={{ once: true }}
-                    transition={{ duration: 0.35, delay: i * 0.04 }}
-                  >
-                    <Card className="!p-0 relative overflow-hidden">
-                      <div className="absolute inset-y-0 left-0 w-1 rounded-l-2xl bg-gradient-to-b from-warm-400 to-warm-600" />
-                      <div className="p-5 md:p-6">
-                        <div className="flex flex-wrap items-center gap-3 mb-5">
-                          <Badge variant="warm" showIcon>{match.match_method}</Badge>
-                          <div className="flex items-center gap-3 flex-1 min-w-[200px]">
-                            <span className="text-xs font-bold uppercase tracking-wider text-surface-500">Confidence</span>
-                            <div className="flex-1 h-2.5 rounded-full bg-surface-100 overflow-hidden">
-                              <div
-                                className={`h-full rounded-full ${confidenceBarClass(match.confidence_score)} transition-all`}
-                                style={{ width: `${confidencePct}%` }}
-                              />
-                            </div>
-                            <span className={`rounded-full border px-2.5 py-1 text-xs font-black ${confidenceClasses(match.confidence_score)}`}>{confidenceLabel(match.confidence_score)} · {confidencePct}%</span>
-                          </div>
-                        </div>
-
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-5">
-                          <div className="bg-gradient-to-br from-warm-50 to-warm-100/60 rounded-xl p-4 border border-warm-100">
-                            <div className="flex items-center gap-2 mb-2">
-                              <Users className="h-4 w-4 text-warm-600" />
-                              <span className="text-xs font-black uppercase tracking-[0.15em] text-warm-700">Citizen Submission</span>
-                            </div>
-                            {receipt?.public_id && (
-                              <p className="text-sm font-mono font-bold text-primary-700 mb-2 bg-white/60 inline-block px-2 py-0.5 rounded">{receipt.public_id}</p>
-                            )}
-                            <p className="text-sm text-surface-800 leading-relaxed mb-2">{receipt?.submission_text}</p>
-                            {receipt?.clause_ref && (
-                              <p className="text-xs font-medium text-warm-700 mt-1 flex items-center gap-1">
-                                <FileText className="h-3.5 w-3.5" /> Clause: {receipt.clause_ref}
-                              </p>
-                            )}
-                            {bill && <p className="text-xs text-surface-600 mt-1">Bill: {bill.title}</p>}
-                          </div>
-                          <div className="bg-gradient-to-br from-primary-50 to-primary-100/60 rounded-xl p-4 border border-primary-100">
-                            <div className="flex items-center gap-2 mb-2">
-                              <FileText className="h-4 w-4 text-primary-600" />
-                              <span className="text-xs font-black uppercase tracking-[0.15em] text-primary-700">Report Entry</span>
-                            </div>
-                            <p className="text-sm text-surface-800 leading-relaxed mb-2">{entry?.extracted_summary}</p>
-                            {entry?.clause_ref && (
-                              <p className="text-xs font-medium text-primary-700 mt-1 flex items-center gap-1">
-                                <FileText className="h-3.5 w-3.5" /> Clause: {entry.clause_ref}
-                              </p>
-                            )}
-                            <p className="text-xs text-surface-600 mt-1">Committee outcome: <span className="font-semibold">{entry?.treatment || 'not classified'}</span></p>
-                            <p className="text-xs text-surface-500 mt-1">Confirm = adopted. Reject with a reason = rejected with reasons. Use the treatment editor for an explicit amendment or not-addressed outcome.</p>
-                          </div>
-                        </div>
-
-                        <InfoBox className="!p-5 mb-5">
-                          <div className="flex items-start gap-3">
-                            <Sparkles className="h-5 w-5 mt-0.5 flex-shrink-0 text-accent-600" />
-                            <div className="pl-0">
-                              <p className="text-xs font-black uppercase tracking-[0.15em] text-accent-700 mb-1.5">Match Explanation</p>
-                              <p className="text-sm text-surface-800 leading-relaxed">{match.explanation}</p>
-                            </div>
-                          </div>
-                        </InfoBox>
-
-                        {canModerate && entry && <ReportTreatmentEditor entry={entry} />}
-
-                        <div className="flex flex-wrap gap-3">
-                          <button
-                            type="button"
-                            onClick={() => handleDecision(match.id, 'confirmed')}
-                            disabled={!state.currentUser || decisionMatchId !== null}
-                            className="btn-primary inline-flex min-h-11 items-center justify-center gap-2 !bg-gradient-to-r !from-green-600 !to-emerald-700 !border-green-700 hover:!from-green-700 hover:!to-emerald-800 disabled:cursor-not-allowed disabled:opacity-60"
-                          >
-                            <CheckCircle2 className="h-4 w-4" /> {decisionMatchId === match.id ? 'Saving…' : 'Confirm Match'}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleDecision(match.id, 'rejected')}
-                            disabled={!state.currentUser || decisionMatchId !== null}
-                            className="btn-danger inline-flex min-h-11 items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-60"
-                          >
-                            <XCircle className="h-4 w-4" /> Reject with reason
-                          </button>
-                        </div>
-                      </div>
-                    </Card>
-                  </motion.div>
-                );
-              })}
-            </div>
+          <label className="sr-only" htmlFor="queue-bill">Bill</label>
+          <select id="queue-bill" className="input-field" value={billFilter} onChange={e => { setBillFilter(e.target.value); setPage(1); }}>
+            <option value="all">All bills ({billsInTab.length})</option>
+            {billsInTab.map(bill => <option key={bill.id} value={bill.id}>{bill.title}</option>)}
+          </select>
+          {tab === 'awaiting' && (
+            <select aria-label="AI score" className="input-field" value={band} onChange={e => { setBand(e.target.value as typeof band); setPage(1); }}>
+              <option value="all">Any AI score</option><option value="high">High (75%+)</option><option value="moderate">Moderate (50–74%)</option><option value="low">Low (under 50%)</option>
+            </select>
           )}
+          {tab === 'triage' && (
+            <select aria-label="Why there is no proposal" className="input-field" value={triageFilter} onChange={e => { setTriageFilter(e.target.value as typeof triageFilter); setPage(1); }}>
+              <option value="all">Any reason</option>
+              {(Object.keys(TRIAGE_LABELS) as TriageReason[]).map(key => <option key={key} value={key}>{TRIAGE_LABELS[key]} ({triageCounts[key] || 0})</option>)}
+            </select>
+          )}
+          {tab === 'completed' && (
+            <select aria-label="Decision" className="input-field" value={decisionFilter} onChange={e => { setDecisionFilter(e.target.value as typeof decisionFilter); setPage(1); }}>
+              <option value="all">Confirmed and rejected</option><option value="confirmed">Confirmed only</option><option value="rejected">Rejected only</option>
+            </select>
+          )}
+          <select aria-label="Sort" className="input-field" value={sort} onChange={e => setSort(e.target.value as typeof sort)}>
+            {tab === 'awaiting' && <option value="priority">Flagged first, then highest score</option>}
+            {tab !== 'awaiting' && <option value="priority">{tab === 'triage' ? 'Oldest first' : 'Newest first'}</option>}
+            <option value="oldest">Oldest first</option>
+            <option value="newest">Newest first</option>
+          </select>
         </div>
-      </Card>
-
-      <Card className="!p-7 md:!p-8 relative overflow-hidden mb-8">
-        <div className="inline-flex items-center gap-3 mb-5">
-          <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-warm-500 to-orange-600 flex items-center justify-center text-white shadow-md">
-            <Users className="h-5 w-5" />
-          </div>
-          <div>
-            <div className="text-xs font-black uppercase tracking-[0.18em] text-warm-700 mb-1">Submission Triage</div>
-            <h2 className="text-2xl font-black text-surface-900 tracking-tight">Submissions Without a Proposal ({unmatchedReceipts.length})</h2>
-          </div>
-        </div>
-        {unmatchedReceipts.length === 0 ? (
-          <p className="text-sm text-surface-500">Every visible submission has a match proposal or a recorded moderation decision.</p>
-        ) : (
-          <div className="space-y-3">
-            {unmatchedReceipts.map(receipt => {
-              const bill = state.bills.find(item => item.id === receipt.legislative_item_id);
-              const billReports = state.reports.filter(report => report.bill_ref === receipt.legislative_item_id);
-              const reportAvailable = billReports.length > 0;
-              const reportNeedingExtraction = billReports.find(report => report.source_url && !state.reportEntries.some(entry => entry.report_ref === report.id));
-              const houseKey = (value?: string) => value?.toLowerCase().includes('senate') ? 'senate' : value?.toLowerCase().includes('national assembly') || value?.toLowerCase() === 'na' ? 'na' : value?.toLowerCase();
-              const reportReferenceMismatch = billReports.some(report =>
-                (report.bill_year != null && bill?.bill_year != null && report.bill_year !== bill.bill_year) ||
-                (report.bill_number != null && bill?.bill_number != null && report.bill_number !== bill.bill_number) ||
-                (report.bill_house && bill?.bill_house && houseKey(report.bill_house) !== houseKey(bill.bill_house))
-              );
-              const reportEntriesAvailable = !reportReferenceMismatch && state.reportEntries.some(entry => billReports.some(report => report.id === entry.report_ref));
-              return (
-                <div key={receipt.id} className="rounded-xl border border-surface-200 bg-white p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-                  <div className="min-w-0">
-                    <p className="font-mono text-xs font-bold text-primary-700 mb-1">{receipt.public_id || receipt.id}</p>
-                    <p className="text-sm text-surface-800 leading-relaxed">{receipt.submission_text}</p>
-                    <p className="text-xs text-surface-500 mt-2">Bill: {bill?.title || 'Bill information unavailable'} · {reportReferenceMismatch ? 'The official report house/number/year conflicts with this bill; verify the report link before matching.' : !reportAvailable ? 'No linked committee report yet; awaiting report and triage follow-up.' : !reportEntriesAvailable ? 'A report is linked, but its contents have not been extracted into reviewable entries.' : 'Report entries are available; no proposal is currently recorded.'}</p>
-                  </div>
-                  {!reportReferenceMismatch && reportNeedingExtraction && canModerate && (
-                    <button type="button" onClick={() => retryExtractionForReceipt(receipt.id, reportNeedingExtraction.id)} disabled={extractingReportId !== null} className="btn-secondary inline-flex min-h-10 shrink-0 items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-60">
-                      <FileText className="h-4 w-4" /> {extractingReportId === reportNeedingExtraction.id ? 'Extracting PDF…' : 'Retry PDF extraction'}
-                    </button>
-                  )}
-                  {reportEntriesAvailable && bill && canModerate && (
-                    <button type="button" onClick={() => generateForReceipt(receipt.id, bill.id)} disabled={generatingBillId !== null} className="btn-secondary inline-flex min-h-10 shrink-0 items-center justify-center gap-2 disabled:cursor-not-allowed disabled:opacity-60">
-                      <Sparkles className="h-4 w-4" /> {generatingBillId === bill.id ? 'Scoring…' : 'Generate AI proposal'}
-                    </button>
-                  )}
-                  {generationFeedback[receipt.id] && <p role="status" className="w-full text-sm font-semibold text-primary-700">{generationFeedback[receipt.id]}</p>}
-                </div>
-              );
-            })}
+        {tab === 'awaiting' && (
+          <label className="flex items-center gap-2 text-sm font-semibold text-surface-700">
+            <input type="checkbox" checked={flaggedOnly} onChange={e => { setFlaggedOnly(e.target.checked); setPage(1); }} className="h-4 w-4 accent-[#a52d29]" />
+            Only show submissions flagged for possible AI manipulation ({pendingMatches.filter(m => isFlagged(m.explanation)).length})
+          </label>
+        )}
+        {tab === 'triage' && canModerate && readyBillIds.length > 0 && (
+          <div className="flex flex-wrap items-center gap-3">
+            <button type="button" className="action-button is-secondary" disabled={generatingBillId !== null} onClick={() => scoreAllReady(readyBillIds)}>
+              <Sparkles aria-hidden="true" /> Score all {triageCounts.ready || 0} ready submissions ({readyBillIds.length} bill{readyBillIds.length === 1 ? '' : 's'})
+            </button>
+            {bulkProgress && <span role="status" className="text-sm font-semibold text-surface-700">{bulkProgress}</span>}
           </div>
         )}
-      </Card>
+      </section>
 
-      {recentGeneratedMatches.length > 0 && (
-        <Card className="!p-7 md:!p-8 relative overflow-hidden mb-8 border border-accent-200">
-          <div className="inline-flex items-center gap-3 mb-5">
-            <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-accent-500 to-primary-600 flex items-center justify-center text-white shadow-md"><Sparkles className="h-5 w-5" /></div>
-            <div><div className="text-xs font-black uppercase tracking-[0.18em] text-accent-700 mb-1">Scoring Feedback</div><h2 className="text-2xl font-black text-surface-900 tracking-tight">New proposals ({recentGeneratedMatches.length})</h2></div>
-          </div>
-          <div className="space-y-4">
-            {recentGeneratedMatches.map(match => {
-              const receipt = state.receipts.find(item => item.id === match.receipt_ref);
-              const entry = state.reportEntries.find(item => item.id === match.report_entry_ref);
-              const bill = receipt && state.bills.find(item => item.id === receipt.legislative_item_id);
-              const score = Math.round(match.confidence_score * 100);
-              return <div key={match.id} className="rounded-xl border border-surface-200 bg-white p-4 md:p-5">
-                <div className="flex flex-wrap items-center gap-3 mb-3"><Badge variant="blue">{match.match_method}</Badge><span className="text-sm font-black text-primary-800">Proposal score: {score}%</span><span className="text-xs font-semibold text-surface-500">{bill?.title || 'Bill'}</span></div>
-                <div className="mb-3 h-2.5 w-full overflow-hidden rounded-full bg-surface-100"><div className={`h-full rounded-full ${confidenceBarClass(match.confidence_score)}`} style={{ width: `${score}%` }} /></div>
-                <p className="text-sm font-semibold text-surface-700 mb-1">Report entry: {entry?.clause_ref || 'Entry'}{entry?.treatment && entry.treatment !== 'unclassified' ? ` · ${entry.treatment}` : entry?.treatment === 'unclassified' ? ' · Treatment unclassified' : ''}</p>
-                <p className="text-sm text-surface-700 leading-relaxed mb-2">{entry?.extracted_summary || 'Report entry details are loading.'}</p>
-                <p className="text-xs text-surface-600 leading-relaxed mb-4">{match.explanation}</p>
-                {canModerate && entry && <ReportTreatmentEditor entry={entry} />}
-                <div className="flex flex-wrap gap-3">
-                  <button type="button" onClick={() => handleDecision(match.id, 'confirmed')} disabled={!canModerate || decisionMatchId !== null} className="btn-primary inline-flex min-h-10 items-center gap-2 !bg-gradient-to-r !from-green-600 !to-emerald-700 disabled:opacity-60"><CheckCircle2 className="h-4 w-4" />{decisionMatchId === match.id ? 'Saving…' : 'Confirm Match'}</button>
-                  <button type="button" onClick={() => handleDecision(match.id, 'rejected')} disabled={!canModerate || decisionMatchId !== null} className="btn-danger inline-flex min-h-10 items-center gap-2 disabled:opacity-60"><XCircle className="h-4 w-4" />Reject Match</button>
-                </div>
-              </div>;
-            })}
-          </div>
-        </Card>
+      <p className="text-sm font-semibold text-surface-600 m-0" role="status">{rowsForTab} {rowsForTab === 1 ? 'item' : 'items'}{needle || billFilter !== 'all' ? ' match these filters' : ''}</p>
+
+      {tab === 'awaiting' && (
+        <div className="submissions-table-wrap">
+          <table className="submissions-table">
+            <thead><tr><th>Receipt</th><th>Bill</th><th>Proposed response</th><th>AI score</th><th><span className="sr-only">Open</span></th></tr></thead>
+            <tbody>
+              {slice(awaitingRows).map(match => {
+                const receipt = receiptById.get(match.receipt_ref);
+                const bill = receipt ? billById.get(receipt.legislative_item_id) : undefined;
+                const entry = entryById.get(match.report_entry_ref);
+                const open = () => setOpenMatchId(match.id);
+                return (
+                  <tr key={match.id} tabIndex={0} onClick={open} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } }}>
+                    <td><span className="receipt-id">{receipt?.public_id || '—'}</span>{isFlagged(match.explanation) && <span className="flag-chip">Flagged</span>}</td>
+                    <td><div className="excerpt">{bill?.title || '—'}</div></td>
+                    <td><div className="excerpt">{entry?.clause_ref ? `${entry.clause_ref}: ` : ''}{entry?.extracted_summary || '—'}</div></td>
+                    <td><span className={`rounded-full border px-2.5 py-1 text-xs font-black whitespace-nowrap ${confidenceClasses(match.confidence_score)}`}>{Math.round(match.confidence_score * 100)}%</span></td>
+                    <td className="chevron">›</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          {!awaitingRows.length && <p className="empty-note">{pendingMatches.length ? 'Nothing matches these filters.' : 'All caught up — no proposals are waiting for a decision.'}</p>}
+          <Pager page={currentPage} count={awaitingRows.length} onPage={setPage} />
+        </div>
       )}
 
-      <Card className="!p-7 md:!p-8 relative overflow-hidden">
-        <div className="absolute -top-24 -right-24 w-56 h-56 rounded-full bg-accent-100/50 blur-3xl pointer-events-none" />
-        <div className="absolute -bottom-24 -left-24 w-56 h-56 rounded-full bg-primary-100/40 blur-3xl pointer-events-none" />
-        <div className="relative">
-          <div className="inline-flex items-center gap-3 mb-6">
-            <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-accent-500 to-primary-600 flex items-center justify-center text-white shadow-md shadow-accent-500/30">
-              <Gavel className="h-5.5 w-5.5" />
-            </div>
-            <div>
-              <div className="text-xs font-black uppercase tracking-[0.18em] text-primary-600 mb-1">Completed</div>
-              <h2 className="text-2xl font-black text-surface-900 tracking-tight">Reviewed ({reviewedMatches.length})</h2>
-            </div>
-          </div>
-
-          <div className="space-y-3">
-            {reviewedMatches.map((match, i) => {
-              const receipt = state.receipts.find(r => r.id === match.receipt_ref);
-              const entry = state.reportEntries.find(e => e.id === match.report_entry_ref);
-              const isConfirmed = match.reviewer_decision === 'confirmed';
-
-              return (
-                <motion.div
-                  key={match.id}
-                  initial={{ opacity: 0, y: 14 }}
-                  whileInView={{ opacity: 1, y: 0 }}
-                  viewport={{ once: true }}
-                  transition={{ duration: 0.35, delay: i * 0.04 }}
-                >
-                  <Card className="!p-0 relative overflow-hidden">
-                    <div className={`absolute inset-y-0 left-0 w-1 rounded-l-2xl bg-gradient-to-b ${isConfirmed ? 'from-green-400 to-emerald-600' : 'from-red-400 to-rose-600'}`} />
-                    <div className="p-4 md:p-5">
-                      <div className="flex flex-wrap items-center justify-between gap-3 mb-2">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="font-mono text-sm font-bold text-primary-700 bg-primary-50 px-2 py-0.5 rounded">{receipt?.public_id}</span>
-                          <span className="text-surface-400 font-bold">→</span>
-                          <span className="text-sm font-semibold text-surface-700 bg-surface-50 px-2 py-0.5 rounded">{entry?.clause_ref}</span>
-                          <Badge variant="blue" className="ml-1">{match.match_method}</Badge>
-                        </div>
-                        <Badge variant={isConfirmed ? 'green' : 'red'} showIcon>
-                          {match.reviewer_decision}
-                        </Badge>
-                      </div>
-                      <p className="text-xs text-surface-500 font-medium flex items-center gap-2">
-                        <Clock className="h-3.5 w-3.5" />
-                        Reviewed: {new Date(match.timestamp).toLocaleDateString()} · Confidence: {Math.round(match.confidence_score * 100)}%
-                      </p>
-                      <p className="text-xs text-surface-600 font-semibold mt-2">
-                        {isConfirmed
-                          ? `Submission outcome: ${entry?.treatment && !['unclassified', 'awaiting committee report'].includes(entry.treatment) ? entry.treatment : 'adopted'}`
-                          : 'Submission outcome: rejected with reasons'}
-                      </p>
-                      {!isConfirmed && match.reviewer_reason && <p className="text-xs text-surface-600 font-semibold mt-2">Reviewer reason: {match.reviewer_reason}</p>}
-                      {canModerate && isConfirmed && entry && <ReportTreatmentEditor entry={entry} />}
-                    </div>
-                  </Card>
-                </motion.div>
-              );
-            })}
-          </div>
+      {tab === 'triage' && (
+        <div className="submissions-table-wrap">
+          <table className="submissions-table">
+            <thead><tr><th>Receipt</th><th>Bill</th><th>Submission</th><th>Why there is no proposal</th><th>Action</th></tr></thead>
+            <tbody>
+              {slice(triageRows).map(({ receipt, reason, reportToExtract }) => {
+                const bill = billById.get(receipt.legislative_item_id);
+                return (
+                  <tr key={receipt.id} className="!cursor-default">
+                    <td><span className="receipt-id">{receipt.public_id}</span></td>
+                    <td><div className="excerpt">{bill?.title || '—'}</div></td>
+                    <td><div className="excerpt" title={receipt.submission_text}>{receipt.submission_text}</div></td>
+                    <td><span className={`triage-chip is-${reason}`}>{TRIAGE_LABELS[reason]}</span>{generationFeedback[receipt.id] && <small className="block mt-1 text-xs text-surface-600 whitespace-normal">{generationFeedback[receipt.id]}</small>}</td>
+                    <td>
+                      {canModerate && reason === 'ready' && bill && <button type="button" className="action-button is-secondary !min-h-9 !py-1.5 !px-3 !text-sm" disabled={generatingBillId !== null} onClick={() => scoreBill(bill.id, receipt.id).then(refreshQueue).catch(error => setGenerationFeedback(p => ({ ...p, [receipt.id]: error instanceof Error ? error.message : 'Scoring failed.' })))}>{generatingBillId === bill.id ? 'Scoring…' : 'Score'}</button>}
+                      {canModerate && reason === 'extract' && reportToExtract && <button type="button" className="action-button is-secondary !min-h-9 !py-1.5 !px-3 !text-sm" disabled={extractingReportId !== null} onClick={() => retryExtraction(receipt.id, reportToExtract)}>{extractingReportId === reportToExtract ? 'Reading…' : 'Read report'}</button>}
+                      {(reason === 'no_report' || reason === 'mismatch') && <span className="text-xs text-surface-500">{reason === 'no_report' ? 'Waits for the report' : 'Check the report link'}</span>}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          {!triageRows.length && <p className="empty-note">{unmatchedReceipts.length ? 'Nothing matches these filters.' : 'Every submission has a proposal or a decision.'}</p>}
+          <Pager page={currentPage} count={triageRows.length} onPage={setPage} />
         </div>
-      </Card>
+      )}
+
+      {tab === 'completed' && (
+        <div className="submissions-table-wrap">
+          <table className="submissions-table">
+            <thead><tr><th>Receipt</th><th>Bill</th><th>Decision</th><th>Submission outcome</th><th>Decided</th><th><span className="sr-only">Open</span></th></tr></thead>
+            <tbody>
+              {slice(completedRows).map(match => {
+                const receipt = receiptById.get(match.receipt_ref);
+                const bill = receipt ? billById.get(receipt.legislative_item_id) : undefined;
+                const entry = entryById.get(match.report_entry_ref);
+                const confirmed = match.reviewer_decision === 'confirmed';
+                const open = () => setOpenMatchId(match.id);
+                return (
+                  <tr key={match.id} tabIndex={0} onClick={open} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } }}>
+                    <td><span className="receipt-id">{receipt?.public_id || '—'}</span></td>
+                    <td><div className="excerpt">{bill?.title || '—'}</div></td>
+                    <td><Badge variant={confirmed ? 'green' : 'red'} showIcon>{confirmed ? 'Confirmed' : 'Rejected'}</Badge></td>
+                    <td><StatusBadge status={confirmed ? treatmentStage(entry?.treatment) : 'not_addressed'} /></td>
+                    <td className="whitespace-nowrap">{match.timestamp ? new Date(match.timestamp).toLocaleDateString('en-KE') : '—'}</td>
+                    <td className="chevron">›</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          {!completedRows.length && <p className="empty-note">{reviewedMatches.length ? 'Nothing matches these filters.' : 'No decisions yet.'}</p>}
+          <Pager page={currentPage} count={completedRows.length} onPage={setPage} />
+        </div>
+      )}
+
+      <Dialog open={Boolean(openMatch)} onClose={closePanel} fullWidth maxWidth="lg" scroll="paper" aria-labelledby="review-title">
+        {openMatch && (() => {
+          const receipt = receiptById.get(openMatch.receipt_ref);
+          const bill = receipt ? billById.get(receipt.legislative_item_id) : undefined;
+          const entry = entryById.get(openMatch.report_entry_ref);
+          const pending = openMatch.reviewer_decision === 'pending';
+          return (
+            <>
+              <DialogTitle id="review-title" sx={{ pr: 7 }}>
+                <span className="block text-xs font-black uppercase tracking-[0.16em] text-primary-600">{pending ? `Proposal ${openIndex + 1} of ${awaitingRows.length}` : openMatch.reviewer_decision === 'confirmed' ? 'Confirmed match' : 'Rejected match'}</span>
+                <span className="block text-lg font-black text-surface-900 mt-1">{bill?.title || 'Bill'}</span>
+                <IconButton onClick={closePanel} aria-label="Close" sx={{ position: 'absolute', right: 12, top: 12 }}><XCircle size={20} /></IconButton>
+              </DialogTitle>
+              <DialogContent dividers sx={{ display: 'grid', gap: 2 }}>
+                {isFlagged(openMatch.explanation) && <p role="alert" className="notice-box is-error !m-0"><strong>Possible attempt to manipulate the AI.</strong> This submission contains text that reads like instructions to the matcher. Decide from the two texts yourself.</p>}
+                <div className="review-compare">
+                  <section>
+                    <h3>Citizen's view <span className="font-mono">{receipt?.public_id}</span></h3>
+                    {receipt?.clause_ref && <p className="text-xs font-bold text-surface-600 m-0">Clause: {receipt.clause_ref}</p>}
+                    <p className="submission-detail-text">{receipt?.submission_text || 'Submission text unavailable.'}</p>
+                  </section>
+                  <section>
+                    <h3>Committee report entry</h3>
+                    {entry?.clause_ref && <p className="text-xs font-bold text-surface-600 m-0">Clause: {entry.clause_ref}</p>}
+                    <p className="submission-detail-text">{entry?.extracted_summary || 'Report entry unavailable.'}</p>
+                    <p className="text-xs text-surface-600 m-0">Report records: <strong>{entry?.treatment && entry.treatment !== 'unclassified' ? entry.treatment : 'no explicit treatment (confirming records it as adopted)'}</strong>{entry?.stated_reason ? ` — ${entry.stated_reason}` : ''}</p>
+                  </section>
+                </div>
+                <div className="notice-box is-info !m-0"><strong>Why the AI proposed this ({Math.round(openMatch.confidence_score * 100)}% score):</strong> {openMatch.explanation.replace(/^Warning for moderators:[^.]*\.[^.]*\.\s*/, '')}</div>
+                {!pending && openMatch.reviewer_reason && <p className="notice-box is-closed !m-0"><strong>Reason given:</strong> {openMatch.reviewer_reason}</p>}
+                {canModerate && entry && (pending || openMatch.reviewer_decision === 'confirmed') && <ReportTreatmentEditor entry={entry} />}
+                {pending && rejecting && (
+                  <div>
+                    <label htmlFor="reject-reason" className="field-label">Why does this report entry not answer the view?</label>
+                    <textarea id="reject-reason" autoFocus value={rejectReason} onChange={e => setRejectReason(e.target.value)} rows={3} className="input-field !min-h-24" placeholder="For example: the entry is about licensing fees, the view is about consultation." />
+                    <p className="field-hint">The citizen's submission will show as "Not addressed in the report", with this reason.</p>
+                  </div>
+                )}
+                {decisionError && <p role="alert" className="notice-box is-error !m-0">{decisionError}</p>}
+              </DialogContent>
+              <DialogActions sx={{ px: 3, py: 2, gap: 1, flexWrap: 'wrap', justifyContent: 'space-between' }}>
+                {pending && canModerate ? (
+                  <>
+                    <div className="flex flex-wrap gap-2">
+                      {!rejecting ? (
+                        <>
+                          <button type="button" className="action-button is-go" disabled={decisionMatchId !== null} onClick={() => decideAndAdvance('confirmed')}><CheckCircle2 aria-hidden="true" /> {decisionMatchId ? 'Saving…' : 'Confirm — it answers the view'}</button>
+                          <button type="button" className="action-button is-secondary" disabled={decisionMatchId !== null} onClick={() => setRejecting(true)}><XCircle aria-hidden="true" /> Reject</button>
+                        </>
+                      ) : (
+                        <>
+                          <button type="button" className="action-button is-primary" disabled={decisionMatchId !== null || !rejectReason.trim()} onClick={() => decideAndAdvance('rejected')}>{decisionMatchId ? 'Saving…' : 'Reject with this reason'}</button>
+                          <button type="button" className="action-button is-secondary" onClick={() => { setRejecting(false); setRejectReason(''); }}>Cancel</button>
+                        </>
+                      )}
+                    </div>
+                    <div className="flex gap-2">
+                      <button type="button" className="action-button is-secondary" disabled={openIndex <= 0} onClick={() => { setRejecting(false); setOpenMatchId(awaitingRows[openIndex - 1].id); }}>‹ Previous</button>
+                      <button type="button" className="action-button is-secondary" disabled={openIndex < 0 || openIndex >= awaitingRows.length - 1} onClick={() => { setRejecting(false); setOpenMatchId(awaitingRows[openIndex + 1].id); }}>Skip ›</button>
+                    </div>
+                  </>
+                ) : (
+                  <button type="button" className="action-button is-secondary" onClick={closePanel}>Close</button>
+                )}
+              </DialogActions>
+            </>
+          );
+        })()}
+      </Dialog>
     </div>
   );
 }

@@ -2,7 +2,7 @@
 
 ## Overview
 
-PostgreSQL 15+ with UUID primary keys, full-text search, and append-only enforcement via triggers.
+PostgreSQL 15+ with UUID primary keys and append-only enforcement via triggers. The schema is managed by Alembic (`backend/alembic/versions/`); the SQL below summarises it. Where this summary and a migration differ, the migration is authoritative.
 
 ## Tables
 
@@ -10,15 +10,36 @@ PostgreSQL 15+ with UUID primary keys, full-text search, and append-only enforce
 ```sql
 CREATE TABLE users (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    role VARCHAR(20) NOT NULL CHECK (role IN ('citizen', 'representative', 'committee', 'moderator', 'administrator', 'clerk')),
+    role VARCHAR(20) NOT NULL,  -- citizen | committee_officer | reviewer (moderator) | administrator
     name VARCHAR(255) NOT NULL,
     email VARCHAR(255) UNIQUE NOT NULL,
     password_hash VARCHAR(255) NOT NULL,
     privacy_prefs JSONB DEFAULT '{"show_name_publicly": false}',
-    status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active', 'suspended')),
+    status VARCHAR(20) DEFAULT 'active',  -- active | suspended | pending_approval
+    committee_id UUID REFERENCES committees(id),  -- Clerk's Office accounts: the one committee they may manage
+    auth_version INTEGER NOT NULL DEFAULT 0,
+    recovery_codes_generated_at TIMESTAMPTZ,
     created_date TIMESTAMPTZ DEFAULT NOW()
 );
 ```
+
+A Clerk's Office (`committee_officer`) account signs up for one committee of one legislature and stays `pending_approval` until an administrator approves it. It can only act on bills assigned to that committee.
+
+### committees
+```sql
+CREATE TABLE committees (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name VARCHAR(255) NOT NULL UNIQUE,   -- county committees carry their county, e.g. "Health Services (Nairobi)"
+    institution VARCHAR(100) NOT NULL,   -- National Assembly | Nairobi City County Assembly | Trans Nzoia County Assembly
+    description TEXT,
+    contact_email VARCHAR(255),
+    status VARCHAR(20) DEFAULT 'active',
+    created_by UUID REFERENCES users(id),
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+```
+
+National Assembly committees come from the Parliament sync. County committees are created by `app.committee_assignment.ensure_county_committees` from each assembly's published committee list.
 
 ### representative_profiles
 ```sql
@@ -56,13 +77,13 @@ CREATE TABLE legislative_items (
     source_updated_at DATE,
     source_status VARCHAR(100),
     committee_id UUID REFERENCES committees(id),
-    search_vector tsvector GENERATED ALWAYS AS (
-        to_tsvector('english', coalesce(title, '') || ' ' || coalesce(identifier, ''))
-    ) STORED
+    committee_assignment_source VARCHAR(30)  -- official record | subject matter | administrator
 );
-
-CREATE INDEX idx_legislative_items_search ON legislative_items USING GIN (search_vector);
 ```
+
+`bill_house` is `na`, `senate`, `ncca` (Nairobi City County Assembly) or `tnca` (Trans Nzoia County Assembly). County identifiers look like `NCCA/2025/Bill-004`. `status_history` holds dated stages parsed from the Bills Tracker (Published, First Reading, Second Reading, Committee of the Whole House, Third Reading, Assented) or, for counties, the assembly listing and the Kenya Law Act.
+
+`committee_assignment_source` records where the committee came from: an official source (`official record`), a subject-matter suggestion from the bill title awaiting confirmation (`subject matter`), or an administrator (`administrator`). The sync never overwrites an administrator's choice.
 
 ### participation_receipts (APPEND-ONLY)
 ```sql
@@ -77,28 +98,33 @@ CREATE TABLE participation_receipts (
     timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     hash VARCHAR(64) NOT NULL,
     previous_hash VARCHAR(64) NOT NULL,
-    author_name_public VARCHAR(255)
+    chain_sequence BIGINT NOT NULL UNIQUE,  -- position in the chain
+    author_name_public VARCHAR(255),
+    revision INTEGER NOT NULL DEFAULT 1,     -- 1 for a new submission, 2+ for each edit
+    submission_ref VARCHAR(20),              -- for revision 2+: the citizen's original receipt ID
+    attachment_name VARCHAR(255),            -- optional uploaded memorandum (PDF, .docx, .txt)
+    attachment_mime_type VARCHAR(100),
+    attachment_size_bytes BIGINT,
+    attachment_sha256 VARCHAR(64),           -- included in the receipt hash when present
+    attachment_storage_ref VARCHAR(1000)     -- never sent to the browser
 );
 
--- Append-only enforcement
-REVOKE UPDATE, DELETE ON participation_receipts FROM PUBLIC;
-
-CREATE OR REPLACE FUNCTION prevent_receipt_modification()
-RETURNS TRIGGER AS $$
+-- Append-only enforcement (migration 20261012_integrity_provenance)
+CREATE OR REPLACE FUNCTION prevent_append_only_modification() RETURNS TRIGGER AS $$
 BEGIN
-    RAISE EXCEPTION 'Receipts are append-only and cannot be modified or deleted';
-    RETURN NULL;
+  RAISE EXCEPTION '% rows are append-only and cannot be modified or deleted', TG_TABLE_NAME;
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE TRIGGER trg_prevent_receipt_update
-BEFORE UPDATE ON participation_receipts
-FOR EACH ROW EXECUTE FUNCTION prevent_receipt_modification();
-
-CREATE TRIGGER trg_prevent_receipt_delete
-BEFORE DELETE ON participation_receipts
-FOR EACH ROW EXECUTE FUNCTION prevent_receipt_modification();
+CREATE TRIGGER trg_receipt_prevent_update BEFORE UPDATE ON participation_receipts
+  FOR EACH ROW EXECUTE FUNCTION prevent_append_only_modification();
+CREATE TRIGGER trg_receipt_prevent_delete BEFORE DELETE ON participation_receipts
+  FOR EACH ROW EXECUTE FUNCTION prevent_append_only_modification();
 ```
+
+**Edits never change a row.** A citizen has one submission per bill. Editing it inserts a new row with `public_id = "<ID>-v<n>"`, `submission_ref = "<ID>"` and `revision = n`; the earlier row is untouched. The current version of a submission is the row with the highest revision for `coalesce(submission_ref, public_id)` (see `receipt_service.is_current`). Public pages show the citizen's original ID; earlier versions are looked up as `<ID>-v1`, `<ID>-v2`, and so on.
+
+**Receipt hash input:** receipt ID, author ID, bill ID, clause reference, submission text, timestamp and previous hash, plus `attachment_sha256` when a document is attached. Receipts without a document keep the original hash format.
 
 ### committee_reports
 ```sql
@@ -135,10 +161,11 @@ CREATE TABLE submission_matches (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     receipt_ref UUID NOT NULL REFERENCES participation_receipts(id),
     report_entry_ref UUID NOT NULL REFERENCES report_entries(id),
-    match_method VARCHAR(20) NOT NULL CHECK (match_method IN ('clause', 'text-similarity')),
+    match_method VARCHAR(20) NOT NULL,  -- llm | clause | text-similarity
     confidence_score FLOAT NOT NULL CHECK (confidence_score >= 0 AND confidence_score <= 1),
     explanation TEXT NOT NULL,
-    reviewer_decision VARCHAR(20) DEFAULT 'pending' CHECK (reviewer_decision IN ('confirmed', 'rejected', 'pending')),
+    reviewer_decision VARCHAR(20) DEFAULT 'pending',  -- pending | confirmed | rejected | superseded (the submission was edited)
+    reviewer_reason TEXT,                             -- required when rejecting
     reviewer_id UUID REFERENCES users(id),
     timestamp TIMESTAMPTZ DEFAULT NOW()
 );
@@ -167,7 +194,7 @@ CREATE TABLE notice_records (
 
 `bill_text_accessible` records whether the bill text was available alongside the published notice. When true, the UI links to the bill's Documents section. A document entry may contain a validated external `url`, or uploaded-file metadata such as `storage_ref`, `mime_type`, `sha256`, and `size_bytes`; stored files are served through `GET /api/v1/bills/{bill_id}/documents/{document_index}` rather than exposing filesystem paths.
 
-Notice edits update the existing row through `PUT /api/v1/notices/{notice_id}`; they do not create a duplicate notice record. The API validates that the bill is a live non-simulated legislative item and that the institution belongs to the active platform institution set.
+Notice edits update the existing row through `PUT /api/v1/notices/{notice_id}`; they do not create a duplicate notice record. The API validates that the bill is a live non-simulated legislative item, that the institution belongs to the active platform institution set, and that a Clerk's Office account only records notices for its own committee's bills. A notice's window decides when the bill accepts submissions (`backend/app/participation.py`).
 
 ### moderation_actions
 ```sql
@@ -192,19 +219,12 @@ CREATE TABLE audit_log (
     entity_id UUID NOT NULL,
     action VARCHAR(50) NOT NULL,
     details TEXT NOT NULL,
+    actor_id UUID REFERENCES users(id),
     timestamp TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Append-only enforcement
-REVOKE UPDATE, DELETE ON audit_log FROM PUBLIC;
-
-CREATE TRIGGER trg_prevent_audit_update
-BEFORE UPDATE ON audit_log
-FOR EACH ROW EXECUTE FUNCTION prevent_receipt_modification();
-
-CREATE TRIGGER trg_prevent_audit_delete
-BEFORE DELETE ON audit_log
-FOR EACH ROW EXECUTE FUNCTION prevent_receipt_modification();
+-- Same triggers as participation_receipts:
+-- trg_audit_prevent_update / trg_audit_prevent_delete → prevent_append_only_modification()
 ```
 
 ## Indexes
@@ -230,23 +250,33 @@ CREATE INDEX idx_profiles_status ON representative_profiles (verification_status
 
 | Table | Constraint | Type |
 |---|---|---|
-| participation_receipts | Append-only | REVOKE + TRIGGER |
-| audit_log | Append-only | REVOKE + TRIGGER |
-| submission_matches | confidence_score 0-1 | CHECK |
-| report_entries | treatment enum | CHECK |
-| representative_profiles | verification_status enum | CHECK |
-| users | role enum | CHECK |
+| participation_receipts | Append-only (edits are new rows) | TRIGGER |
+| participation_receipts | Unique `public_id`, unique `chain_sequence` | UNIQUE |
+| audit_log | Append-only | TRIGGER |
+| committees | Unique `name` | UNIQUE |
+| legislative_items | Unique `identifier` | UNIQUE |
 
 ## Migrations
 
-Use Alembic for schema migrations:
+Apply all migrations with `alembic upgrade head`. With Docker Compose, run it inside the backend container, where the database host `postgres` resolves:
 
 ```bash
-cd backend
-alembic init alembic
-alembic revision --autogenerate -m "Initial schema"
-alembic upgrade head
+docker compose exec backend alembic upgrade head
 ```
+
+| Revision | Adds |
+|---|---|
+| `20261005_150300` | Legislation sync tables and bill source fields |
+| `20261012_integrity_provenance` | Report provenance, `chain_sequence`, append-only triggers on receipts and audit log |
+| `20261015_committees_messages` | Committees, messages, role cleanup |
+| `20261017_actor_roles`, `20261017_reviewer_attribution` | Audit actors, reviewer attribution |
+| `20261018_ai_notifications` | Automated bilingual notifications |
+| `20261025_auth_hardening`, `20261025_recovery_codes` | Token versioning, password reset, recovery codes |
+| `20261026_match_reviewer_reason`, `20261026_confirmed_match_lodging` | Rejection reasons, lodging derived from confirmed matches |
+| `20261103_submission_revisions` | Receipt `revision`, `submission_ref` and uploaded-document columns (added without rewriting rows, so the append-only triggers are not fired) |
+| `20261103_committee_source` | `legislative_items.committee_assignment_source`; existing assignments marked `official record` |
+
+A database created by `python -m app.seed` (which calls `create_all`) has the tables but **not** the append-only triggers. Production uses the migrations; for a seeded local database, stamp it (`alembic stamp 20261026_confirmed_match_lodging`), upgrade, and install the triggers from `20261012_integrity_provenance` so local behaviour matches production. The test suite installs the same triggers.
 
 ## Backup Strategy
 

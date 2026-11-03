@@ -102,7 +102,7 @@ async def notify_receipt_event(
     language = "sw" if language == "sw" else "en"
     bill_result = await db.execute(select(LegislativeItem.title).where(LegislativeItem.id == receipt.legislative_item_id))
     bill_title = bill_result.scalar_one_or_none() or "the tracked bill"
-    payload = {"bill_title": _clean(bill_title), "public_id": _clean(receipt.public_id), **(facts or {})}
+    payload = {"bill_title": _clean(bill_title), "public_id": _clean(receipt.submission_ref or receipt.public_id), **(facts or {})}
     payload["bill_title"] = _clean(bill_title)
     template = TEMPLATES[event_type][language]
     try:

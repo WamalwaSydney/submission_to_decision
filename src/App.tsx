@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect } from 'react';
-import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { HashRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { AppProvider, useApp } from './context/AppContext';
 import { Layout } from './components/Layout';
 import { HomePage } from './pages/HomePage';
@@ -17,6 +17,7 @@ import { ResearchExportPage, CommunityRulesPage, MyReceiptsPage } from './pages/
 import { CommitteeDashboardPage, BillFlowPage } from './pages/CommitteePages';
 import { MessagesPage } from './pages/MessagesPage';
 import { api } from './api/endpoints';
+import { ApiError } from './api/client';
 import { getUnsyncedDrafts, markDraftSynced } from './utils/offline';
 
 function OnlineStatusListener() {
@@ -41,8 +42,14 @@ function OnlineStatusListener() {
           lodging_status: 'pending', timestamp: result.timestamp, hash: result.hash,
           previous_hash: result.previous_hash,
         }});
-      } catch {
-        // Keep the draft queued. A later online event or app start retries it.
+      } catch (error) {
+        // 409/422: the bill closed, or the citizen already has a submission on it.
+        // Retrying can never succeed, so drop the draft instead of blocking the queue.
+        if (error instanceof ApiError && (error.status === 409 || error.status === 422)) {
+          await markDraftSynced(draft.id);
+          continue;
+        }
+        // Otherwise keep the draft queued. A later online event or app start retries it.
         break;
       }
     }
@@ -69,7 +76,9 @@ function OnlineStatusListener() {
 
 function CitizenSubmissionRoute() {
   const { state } = useApp();
-  if (!state.currentUser) return <Navigate to="/login" replace />;
+  const location = useLocation();
+  // Remember the bill they were submitting on, so sign-in brings them back here.
+  if (!state.currentUser) return <Navigate to="/login" replace state={{ from: location }} />;
   if (state.currentUser.role !== 'citizen') return <Navigate to="/" replace />;
   return <SubmitViewPage />;
 }

@@ -38,6 +38,19 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
   return body as T;
 }
 
+/** Fetch an authenticated file (for example an uploaded memorandum) as a blob. */
+export async function apiFetchBlob(path: string): Promise<Blob> {
+  const headers = new Headers();
+  const token = localStorage.getItem('access_token');
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+  const response = await fetch(`${getApiUrl()}${path}`, { headers });
+  if (!response.ok) {
+    const contentType = response.headers.get('content-type') || '';
+    throw new ApiError(response.status, contentType.includes('application/json') ? await response.json() : await response.text());
+  }
+  return response.blob();
+}
+
 export async function apiHealth<T = { status: string }>(apiRoot = getApiUrl().replace(/\/api\/v1$/, '')): Promise<T> {
   const response = await fetch(`${apiRoot}/health`);
   if (!response.ok) throw new ApiError(response.status, await response.text());

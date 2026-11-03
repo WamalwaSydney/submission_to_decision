@@ -48,7 +48,7 @@ export function CommitteeDashboardPage() {
     <header className="committee-dashboard-hero">
       <div>
         <span className="committee-dashboard-kicker">Clerk’s Office workspace</span>
-        <h1>Committee dashboard</h1>
+        <h1>Bill ingestion</h1>
         <p>Publish bills and official documents so citizens can follow legislation and its participation trail.</p>
       </div>
       <div className="committee-dashboard-hero-mark" aria-hidden="true"><Gavel size={30} strokeWidth={1.8} /></div>

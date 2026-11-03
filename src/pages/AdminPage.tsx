@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
+import { CommitteeAssignments } from './CommitteeAssignments';
 import { api } from '../api/endpoints';
 import { Shield, Users, Download, Settings, AlertTriangle, Info, Upload, Gauge, ChevronLeft, ChevronRight, Save, UserRound, KeyRound, Copy } from 'lucide-react';
 import { motion } from 'framer-motion';
@@ -7,7 +9,8 @@ import { Badge, DisclaimerBox, InfoBox, Card } from '../components/UI';
 
 export function AdminPage() {
   const { state } = useApp();
-  const [activeTab, setActiveTab] = useState<'roles' | 'committees' | 'export' | 'settings'>('roles');
+  const [searchParams] = useSearchParams();
+  const [activeTab, setActiveTab] = useState<'roles' | 'committees' | 'assignments' | 'export' | 'settings'>(() => (searchParams.get('tab') as any) || 'roles');
   const [adminUsers, setAdminUsers] = useState(state.users);
   const [userPage, setUserPage] = useState(1);
   const [userMessage, setUserMessage] = useState('');
@@ -78,10 +81,11 @@ export function AdminPage() {
   const handleCreateCommittee = async (event: React.FormEvent) => {
     event.preventDefault(); setCommitteeMessage('');
     try {
-      const response = await api.createCommittee(committeeForm);
+      const { account_name, account_email, account_password, ...committee } = committeeForm;
+      const response = await api.createCommittee(account_email ? committeeForm : committee);
       setCommitteeDirectory(previous => [...previous, response.committee]);
       setCommitteeForm({ name: '', institution: 'National Assembly', description: '', contact_email: '', account_name: '', account_email: '', account_password: '' });
-      setCommitteeMessage('Committee and officer account created.');
+      setCommitteeMessage(response.account ? 'Committee and officer account created.' : 'Committee created.');
     } catch (error) { setCommitteeMessage(error instanceof Error ? error.message : 'Unable to create committee.'); }
   };
 
@@ -148,6 +152,7 @@ export function AdminPage() {
         {[
           { key: 'roles', label: 'Role Management', icon: Users },
           { key: 'committees', label: 'Committees', icon: Users },
+          { key: 'assignments', label: 'Committee assignments', icon: Gauge },
           { key: 'export', label: 'Data Export', icon: Download },
           { key: 'settings', label: 'Settings', icon: Settings },
         ].map(tab => (
@@ -261,18 +266,20 @@ export function AdminPage() {
         </div>
       )}
 
+      {activeTab === 'assignments' && <CommitteeAssignments />}
+
       {activeTab === 'committees' && (
         <div className="space-y-6">
-          <Card className="!p-6"><h2 className="text-2xl font-black text-surface-900 mb-2">Create Clerk’s Office access</h2><p className="text-sm text-surface-600 mb-5">Administrators can create a committee record and its first Clerk’s Office account here.</p>
+          <Card className="!p-6"><h2 className="text-2xl font-black text-surface-900 mb-2">Create Clerk’s Office access</h2><p className="text-sm text-surface-600 mb-5">Create a committee record. Add its first Clerk’s Office account now, or leave the account fields empty and add one later.</p>
             <form onSubmit={handleCreateCommittee} className="grid gap-3 md:grid-cols-2">
               <input className="input-field" placeholder="Committee name" value={committeeForm.name} onChange={e => setCommitteeForm({ ...committeeForm, name: e.target.value })} required />
-              <select className="input-field" value={committeeForm.institution} onChange={e => setCommitteeForm({ ...committeeForm, institution: e.target.value })}><option>National Assembly</option><option>Nairobi County Assembly</option><option>Trans Nzoia County Assembly</option></select>
+              <select className="input-field" value={committeeForm.institution} onChange={e => setCommitteeForm({ ...committeeForm, institution: e.target.value })}><option>National Assembly</option><option>Nairobi City County Assembly</option><option>Trans Nzoia County Assembly</option></select>
               <input className="input-field" placeholder="Description" value={committeeForm.description} onChange={e => setCommitteeForm({ ...committeeForm, description: e.target.value })} />
               <input className="input-field" type="email" placeholder="Committee contact email" value={committeeForm.contact_email} onChange={e => setCommitteeForm({ ...committeeForm, contact_email: e.target.value })} />
-              <input className="input-field" placeholder="Officer account name" value={committeeForm.account_name} onChange={e => setCommitteeForm({ ...committeeForm, account_name: e.target.value })} required />
-              <input className="input-field" type="email" placeholder="Officer login email" value={committeeForm.account_email} onChange={e => setCommitteeForm({ ...committeeForm, account_email: e.target.value })} required />
-              <input className="input-field" type="password" minLength={8} placeholder="Officer password (8+ characters)" value={committeeForm.account_password} onChange={e => setCommitteeForm({ ...committeeForm, account_password: e.target.value })} required />
-              <button className="btn-primary" type="submit">Create committee and account</button>
+              <input className="input-field" placeholder="Officer account name (optional)" value={committeeForm.account_name} onChange={e => setCommitteeForm({ ...committeeForm, account_name: e.target.value })} />
+              <input className="input-field" type="email" placeholder="Officer login email (optional)" value={committeeForm.account_email} onChange={e => setCommitteeForm({ ...committeeForm, account_email: e.target.value })} />
+              <input className="input-field" type="password" minLength={12} placeholder="Officer password (12+ characters, optional)" value={committeeForm.account_password} onChange={e => setCommitteeForm({ ...committeeForm, account_password: e.target.value })} />
+              <button className="btn-primary" type="submit">Create committee</button>
             </form>{committeeMessage && <p role="status" className="mt-4 text-sm font-semibold text-primary-700">{committeeMessage}</p>}
           </Card>
           <Card className="!p-6"><h2 className="text-2xl font-black text-surface-900 mb-2">Committee directory</h2><div className="grid gap-3 md:grid-cols-2">{committeeDirectory.map(committee => <div key={committee.id} className="rounded-xl border border-surface-200 bg-white p-4"><div className="font-bold text-surface-900">{committee.name}</div><div className="mt-1 text-xs font-semibold text-surface-500">{committee.institution}</div>{committee.contact_email && <div className="mt-2 text-xs text-surface-600">{committee.contact_email}</div>}</div>)}</div></Card>

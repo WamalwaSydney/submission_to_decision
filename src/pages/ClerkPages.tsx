@@ -7,6 +7,13 @@ import { Card, InfoBox, Badge, Label, InputField, SelectField } from '../compone
 
 const MAX_UPLOAD_MB = 50;
 
+/** Clerk's Office accounts manage only their own committee's bills; administrators manage all. */
+function mayManage(user: { role: string; committee_id?: string } | null, bill: { committee_id?: string }) {
+  if (!user) return false;
+  if (user.role !== 'committee_officer') return true;
+  return Boolean(user.committee_id && bill.committee_id === user.committee_id);
+}
+
 export function CommitteeOfficerIngestionPage() {
   const { state, dispatch } = useApp();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -30,7 +37,8 @@ export function CommitteeOfficerIngestionPage() {
       .then(({ bills }) => {
         if (!cancelled) {
           const validBills = bills.filter(bill => Boolean(bill?.id && bill?.title));
-          setAvailableBills(validBills);
+          const ownBills = validBills.filter(bill => mayManage(state.currentUser, bill));
+          setAvailableBills(ownBills);
           dispatch({ type: 'HYDRATE', payload: { bills: validBills } });
         }
       })
@@ -461,7 +469,7 @@ export function CommitteeOfficerNoticesPage() {
   const { state, dispatch } = useApp();
   const [showForm, setShowForm] = useState(false);
   const [editingNotice, setEditingNotice] = useState<typeof state.notices[number] | null>(null);
-  const [availableBills, setAvailableBills] = useState<typeof state.bills>(() => state.bills.filter(bill => Boolean(bill?.id && bill?.title)));
+  const [availableBills, setAvailableBills] = useState<typeof state.bills>(() => state.bills.filter(bill => Boolean(bill?.id && bill?.title) && mayManage(state.currentUser, bill)));
   const [billSearch, setBillSearch] = useState('');
   const [billsLoading, setBillsLoading] = useState(true);
   const [billsError, setBillsError] = useState<string | null>(null);
@@ -484,7 +492,7 @@ export function CommitteeOfficerNoticesPage() {
         if (cancelled) return;
         if (billsResult.status === 'fulfilled') {
           const validBills = billsResult.value.bills.filter(bill => Boolean(bill?.id && bill?.title));
-          setAvailableBills(validBills);
+          setAvailableBills(validBills.filter(bill => mayManage(state.currentUser, bill)));
           dispatch({ type: 'HYDRATE', payload: { bills: validBills } });
           setBillsError(null);
         } else if (!availableBills.length) {
@@ -772,9 +780,9 @@ export function CommitteeOfficerNoticesPage() {
                       )}
                     </td>
                     <td>
-                      <button type="button" onClick={() => startEditing(n)} className="inline-flex items-center gap-1.5 text-xs font-bold text-primary-700 hover:text-primary-900" aria-label={`Edit notice for ${bill?.title || n.bill_ref}`}>
+                      {bill && mayManage(state.currentUser, bill) ? <button type="button" onClick={() => startEditing(n)} className="inline-flex items-center gap-1.5 text-xs font-bold text-primary-700 hover:text-primary-900" aria-label={`Edit notice for ${bill?.title || n.bill_ref}`}>
                         <Pencil className="h-3.5 w-3.5" /> Edit
-                      </button>
+                      </button> : <span className="text-xs text-surface-500">Another committee</span>}
                     </td>
                   </tr>
                 );

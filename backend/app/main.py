@@ -4,17 +4,23 @@ from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
 from contextlib import asynccontextmanager
+import asyncio
 import os
 
 from app.database import get_db, engine
 from app.auth import get_current_user, require_role
 from app.api.routes import router
+from app.rate_limit import GlobalRateLimitMiddleware
+from app.services import report_worker
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup
+    # Startup: one worker reads pending committee reports, so page views never trigger it.
+    worker = asyncio.create_task(report_worker.run_forever()) if report_worker.enabled() else None
     yield
     # Shutdown
+    if worker:
+        worker.cancel()
     await engine.dispose()
 
 app = FastAPI(
@@ -37,6 +43,8 @@ configured_cors_origins = {
 # Keep the known production sites allowed even if Render has an older
 # CORS_ORIGINS value set; deployments can add additional exact origins there.
 cors_origins = sorted(default_cors_origins | configured_cors_origins)
+
+app.add_middleware(GlobalRateLimitMiddleware)
 
 app.add_middleware(
     CORSMiddleware,

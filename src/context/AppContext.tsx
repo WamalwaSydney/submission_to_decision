@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useReducer, ReactNode } from 'react';
+import React, { createContext, useContext, useEffect, useMemo, useReducer, ReactNode } from 'react';
 import {
   User, LegislativeItem, ParticipationReceipt, CommitteeReport,
   ReportEntry, SubmissionMatch, NoticeRecord, RepresentativeProfile,
@@ -6,6 +6,7 @@ import {
   RepresentativeStatus, ReviewerDecision, LodgingStatus, Committee
 } from '../types';
 import { api } from '../api/endpoints';
+import { STAGE_ORDER, SubmissionStage, submissionStage } from '../utils/submissionStage';
 
 interface AppState {
   users: User[];
@@ -29,6 +30,7 @@ type Action =
   | { type: 'HYDRATE'; payload: Partial<AppState> }
   | { type: 'SET_API_ERROR'; payload: string }
   | { type: 'ADD_RECEIPT'; payload: ParticipationReceipt }
+  | { type: 'REPLACE_RECEIPT'; payload: { previousId: string; receipt: ParticipationReceipt } }
   | { type: 'ADD_AUDIT_LOG'; payload: AuditLogEntry }
   | { type: 'ADD_REPORT'; payload: CommitteeReport }
   | { type: 'ADD_REPORT_ENTRIES'; payload: ReportEntry[] }
@@ -68,7 +70,8 @@ const initialState: AppState = {
 function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
     case 'HYDRATE':
-      return { ...state, ...action.payload, isLoading: false, apiError: undefined };
+      // Partial refreshes (e.g. one bill's reports) must not end the initial load.
+      return { ...state, ...action.payload, isLoading: action.payload.bills ? false : state.isLoading, apiError: undefined };
     case 'SET_API_ERROR':
       return {
         ...state,
@@ -76,7 +79,14 @@ function reducer(state: AppState, action: Action): AppState {
         apiError: action.payload,
       };
     case 'ADD_RECEIPT':
-      return { ...state, receipts: [...state.receipts, action.payload] };
+      return { ...state, receipts: [...state.receipts.filter(r => r.id !== action.payload.id), action.payload] };
+    case 'REPLACE_RECEIPT':
+      // An edit supersedes the earlier version; only the current one is shown.
+      return {
+        ...state,
+        receipts: [...state.receipts.filter(r => r.id !== action.payload.previousId && r.id !== action.payload.receipt.id), action.payload.receipt],
+        matches: state.matches.filter(m => m.receipt_ref !== action.payload.previousId || m.reviewer_decision !== 'pending'),
+      };
     case 'ADD_AUDIT_LOG':
       return { ...state, auditLog: [...state.auditLog, action.payload] };
     case 'ADD_REPORT':
@@ -167,16 +177,43 @@ function reducer(state: AppState, action: Action): AppState {
 interface AppContextType {
   state: AppState;
   dispatch: React.Dispatch<Action>;
-  getSubmissionStatus: (receiptId: string) => SubmissionStatus;
+  getSubmissionStatus: (receiptId: string) => SubmissionStage;
   getSubmissionReviewDecision: (receiptId: string) => ReviewerDecision | null;
   getSubmissionLodgingStatus: (receiptId: string) => LodgingStatus;
-  getBillOutcomes: (billId: string) => { status: SubmissionStatus; count: number }[];
+  getBillOutcomes: (billId: string) => { status: SubmissionStage; count: number }[];
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
+/**
+ * Clerk's Office accounts only see their own committee's records: its bills,
+ * their reports and report entries, calls for views, submissions and matches.
+ * Every page reads this scoped view, so none can show another committee's work.
+ */
+function scopeToCommittee(state: AppState): AppState {
+  const user = state.currentUser;
+  if (!user || user.role !== 'committee_officer') return state;
+  const ownBills = state.bills.filter(bill => Boolean(user.committee_id) && bill.committee_id === user.committee_id);
+  const billIds = new Set(ownBills.map(bill => bill.id));
+  const reports = state.reports.filter(report => billIds.has(report.bill_ref));
+  const reportIds = new Set(reports.map(report => report.id));
+  const receipts = state.receipts.filter(receipt => billIds.has(receipt.legislative_item_id));
+  const receiptIds = new Set(receipts.map(receipt => receipt.id));
+  return {
+    ...state,
+    bills: ownBills,
+    reports,
+    reportEntries: state.reportEntries.filter(entry => reportIds.has(entry.report_ref)),
+    receipts,
+    matches: state.matches.filter(match => receiptIds.has(match.receipt_ref)),
+    notices: state.notices.filter(notice => billIds.has(notice.bill_ref)),
+    committees: state.committees.filter(committee => committee.id === user.committee_id),
+  };
+}
+
 export function AppProvider({ children }: { children: ReactNode }) {
-  const [state, dispatch] = useReducer(reducer, initialState);
+  const [fullState, dispatch] = useReducer(reducer, initialState);
+  const state = useMemo(() => scopeToCommittee(fullState), [fullState]);
 
   useEffect(() => {
     let cancelled = false;
@@ -202,19 +239,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return () => { cancelled = true; };
   }, []);
 
-  const getSubmissionStatus = (receiptId: string): SubmissionStatus => {
-    const confirmedMatch = state.matches.find(
-      m => m.receipt_ref === receiptId && m.reviewer_decision === 'confirmed'
-    );
-    if (!confirmedMatch) {
-      const rejectedMatch = state.matches.find(m => m.receipt_ref === receiptId && m.reviewer_decision === 'rejected');
-      return rejectedMatch ? 'rejected with reasons' : 'awaiting committee report';
-    }
-    const entry = state.reportEntries.find(e => e.id === confirmedMatch.report_entry_ref);
-    // In this workflow, accepting a match means the submission was adopted.
-    // An explicit committee treatment still takes precedence when available.
-    if (!entry || entry.treatment === 'unclassified' || entry.treatment === 'awaiting committee report') return 'adopted';
-    return entry.treatment;
+  // Where each submission is in its journey: received → with the committee →
+  // report published → response under review → outcome.
+  const getSubmissionStatus = (receiptId: string): SubmissionStage => {
+    const receipt = state.receipts.find(r => r.id === receiptId);
+    const bill = receipt ? state.bills.find(b => b.id === receipt.legislative_item_id) : undefined;
+    return submissionStage({
+      receiptId,
+      matches: state.matches,
+      entries: state.reportEntries,
+      reportPublished: Boolean(bill && state.reports.some(report => report.bill_ref === bill.id)),
+      acceptingViews: bill?.participation?.accepting ?? true,
+    });
   };
 
   const getSubmissionReviewDecision = (receiptId: string): ReviewerDecision | null => {
@@ -233,13 +269,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return state.receipts.find(receipt => receipt.id === receiptId)?.lodging_status || 'pending';
   };
 
-  const getBillOutcomes = (billId: string): { status: SubmissionStatus; count: number }[] => {
+  const getBillOutcomes = (billId: string): { status: SubmissionStage; count: number }[] => {
     const billReceipts = state.receipts.filter(r => r.legislative_item_id === billId);
-    const statuses: SubmissionStatus[] = [
-      'awaiting committee report', 'adopted', 'amended', 'rejected with reasons', 'not addressed', 'unclassified'
-    ];
-    
-    return statuses.map(status => ({
+    return STAGE_ORDER.map(status => ({
       status,
       count: billReceipts.filter(r => getSubmissionStatus(r.id) === status).length,
     }));

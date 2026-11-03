@@ -73,7 +73,9 @@ BILL_REF_RE = re.compile(
 )
 GENERIC_BILL_REF_RE = re.compile(r"\bbill\s*(?:no\.?\s*)?(\d+)\s*(?:of\s+)?(?:[A-Za-z]+\s+){0,3}(20\d{2})\b", re.I)
 TRACKER_BILL_HEAD_RE = re.compile(r"\b(?P<house>national\s+assembly|na|senate)\s*bill\s*(?:no\.?\s*)?(?P<number>\d+)\b", re.I)
-BILL_TRACKER_REF_RE = re.compile(r"\b(?P<house>national\s+assembly|na|senate)\s+bills?\s+no\.?\s*(?P<number>\d+)\s+of\s+(?P<year>20\d{2})\b", re.I)
+# The official Bills Tracker writes references as "NA. Bill No. 8 of 2024" and
+# "Sen. Bill No. 4 of 2022"; the house abbreviation may carry a full stop.
+BILL_TRACKER_REF_RE = re.compile(r"\b(?P<house>national\s+assembly|na|senate|sen)\.?\s+bills?\s+no\.?\s*(?P<number>\d+)\s+of\s+(?P<year>20\d{2})\b", re.I)
 YEAR_RE = re.compile(r"\b(20\d{2})\b")
 DATE_RE = re.compile(
     r"\b(\d{1,2})\s*(?:st|nd|rd|th)?\s+"
@@ -127,8 +129,8 @@ def canonical_title(value: str) -> str:
 def canonical_house(value: str | None) -> str | None:
     if not value:
         return None
-    value = value.lower()
-    if "senate" in value:
+    value = value.lower().strip(" .")
+    if "senate" in value or value == "sen":
         return "senate"
     if value in {"na", "national assembly"} or "national assembly" in value:
         return "na"
@@ -146,7 +148,7 @@ def extract_stage(joined_row: str) -> str:
 CURRENT_BILL_STAGE_PATTERNS = (
     ("Assented", re.compile(r"\bbill\s+(?:has\s+been\s+)?assented\s+to\b", re.I)),
     ("Withdrawn", re.compile(r"\bbill\s+(?:was\s+)?withdrawn\b|\bwithdrawn\s+by\s+the\s+mover\b", re.I)),
-    ("Defeated at Second Reading", re.compile(r"\bbill\s+(?:was\s+)?(?:defeated|rejected)\s+at\s+the\s+second\s+reading\s+stage\b", re.I)),
+    ("Defeated at Second Reading", re.compile(r"\bbill\s+(?:was\s+)?(?:defeated|rejected)\s+at\s+the\s+second\s+reading\s+stage\b|\bbill\s+(?:was\s+)?lost\s+at\s+(?:the\s+)?(?:2nd|second)\s+reading\b", re.I)),
     ("Defeated", re.compile(r"\bbill\s+(?:was\s+)?defeated\b|\bbill\s+(?:was\s+)?rejected(?:\s+by\b|\s+at\b)", re.I)),
     ("Consideration Stayed", re.compile(r"\bconsideration\s+of\s+the\s+bill\s+(?:was\s+)?stayed\b", re.I)),
     ("Lapsed", re.compile(r"\bbill\s+(?:has\s+)?lapsed\b", re.I)),
@@ -164,6 +166,9 @@ CURRENT_BILL_STAGE_PATTERNS = (
     ("Referred to Senate", re.compile(r"\bbill\b(?:(?!\.).){0,220}\breferred\s+(?:back\s+)?to\s+the\s+senate\b|\bforwarded\s+to\s+the\s+senate\s+for\s+consideration\b", re.I)),
     ("Passed by National Assembly", re.compile(r"\bbill\s+passed\s+by\s+the\s+national\s+assembly\b", re.I)),
     ("Passed by Senate", re.compile(r"\bbill\s+passed\s+by\s+the\s+senate\b", re.I)),
+    # The National Assembly tracker's remarks cell often just says "Passed" or
+    # "Passed with amendments on <date>" once the Third Reading vote is taken.
+    ("Passed by National Assembly", re.compile(r"(?:^|[.;]\s*)passed\b(?!\s+by\s+the\s+senate)", re.I)),
 )
 
 
@@ -181,6 +186,8 @@ def parse_bill_tracker_columns(layout_text: str) -> dict[int, dict[str, str]]:
     """Read National Assembly tracker cells from pdftotext's fixed-width layout."""
     rows: dict[int, dict[str, str]] = {}
     offsets: tuple[int, int, int, int, int, int, int, int] | None = None
+    # Publication ("DATED") and "MATURITY DATE" columns, when the header has them.
+    dated_offsets: tuple[int, int] | None = None
     serial: int | None = None
     columns: dict[str, list[str]] = {}
 
@@ -194,6 +201,8 @@ def parse_bill_tracker_columns(layout_text: str) -> dict[int, dict[str, str]]:
         bill, sponsor, na_sen, first, second, third, remarks, assent = offsets
         columns["title"].append(line[bill:sponsor])
         columns["sponsor"].append(line[sponsor:na_sen])
+        if dated_offsets:
+            columns["published"].append(line[dated_offsets[0]:dated_offsets[1]])
         columns["first_read"].append(line[first:second])
         columns["second_read"].append(line[second:third])
         columns["third_read"].append(line[third:remarks])
@@ -212,6 +221,9 @@ def parse_bill_tracker_columns(layout_text: str) -> dict[int, dict[str, str]]:
             assent = line.find("ASSENT", remarks + len("REMARKS")) - 1
             if min(bill, sponsor, na_sen, first, second, third, remarks, assent) >= 0:
                 offsets = (bill, sponsor, na_sen, first, second, third, remarks, assent)
+                dated = line.find("DATED", na_sen)
+                maturity = line.find("MATURITY", dated)
+                dated_offsets = (dated - 2, maturity - 1) if 0 <= dated < maturity < first else None
             continue
         if any(label in line for label in ("Status as at", "THE NATIONAL ASSEMBLY", "BILLS TRACKER", "S/No/ BILL")):
             continue
@@ -219,7 +231,7 @@ def parse_bill_tracker_columns(layout_text: str) -> dict[int, dict[str, str]]:
         if match:
             save_row()
             serial = int(match.group(1))
-            columns = {name: [] for name in ("title", "sponsor", "first_read", "second_read", "third_read", "remarks", "assent")}
+            columns = {name: [] for name in ("title", "sponsor", "published", "first_read", "second_read", "third_read", "remarks", "assent")}
             append_cells(line)
         elif serial is not None and line.strip():
             append_cells(line)
@@ -240,6 +252,7 @@ class BillRow:
     committee_name: str | None = None
     stage_source_url: str | None = None
     stage_as_at: date | None = None
+    history: tuple[dict, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -436,6 +449,62 @@ def parse_tracker(text_value: str, source_url: str, as_at: date, committee_names
     return list(unique.values())
 
 
+NUMERIC_DATE_PARTS_RE = re.compile(r"\b(\d{1,2})\s*/\s*(\d{1,2})\s*/\s*(20\d{2})\b")
+OFFICIAL_TITLE_RE = re.compile(r"\bbill\s*,?\s*20\d{2}\s*$", re.I)
+COMMITTEE_STAGE_RE = re.compile(r"committee\s+stage", re.I)
+
+
+def tracker_dates(value: str) -> list[date]:
+    """Parse the d/m/yyyy dates the Bills Tracker uses, skipping impossible ones."""
+    found = []
+    for day, month, year in NUMERIC_DATE_PARTS_RE.findall(value or ""):
+        try:
+            found.append(date(int(year), int(month), int(day)))
+        except ValueError:
+            continue
+    return found
+
+
+def build_stage_history(columns: dict[str, str]) -> tuple[dict, ...]:
+    """Turn the dated Bills Tracker columns into the bill's legislative timeline.
+
+    National Assembly procedure: a bill is published in the Kenya Gazette, read a
+    First Time and committed to a departmental committee (which runs public
+    participation), debated at Second Reading, considered clause by clause in the
+    Committee of the Whole House (the tracker's "Committee Stage"), read a Third
+    Time, and finally assented to by the President.
+    """
+    events: list[dict] = []
+
+    def add(when: date, stage: str, note: str) -> None:
+        events.append({"date": when.isoformat(), "stage": stage, "note": note})
+
+    published = tracker_dates(columns.get("published", ""))
+    if published:
+        add(published[0], "Published", "Published in the Kenya Gazette.")
+    first = tracker_dates(columns.get("first_read", ""))
+    if first:
+        add(first[0], "First Reading", "Read a First Time and committed to the relevant departmental committee for public participation and scrutiny.")
+    # The 2nd-reading cell lists Second Reading sittings, then
+    # "Committee Stage: <date>" for the Committee of the Whole House.
+    second_cell = columns.get("second_read", "")
+    split = COMMITTEE_STAGE_RE.split(second_cell, maxsplit=1)
+    second = tracker_dates(split[0])
+    if second:
+        sittings = ", ".join(day.isoformat() for day in second)
+        add(second[0], "Second Reading", f"Second Reading debate (sittings: {sittings}).")
+    committee_whole = tracker_dates(split[1]) if len(split) > 1 else []
+    if committee_whole:
+        add(committee_whole[0], "Committee of the Whole House", "Considered clause by clause in the Committee of the Whole House.")
+    third = tracker_dates(columns.get("third_read", ""))
+    if third:
+        add(third[0], "Third Reading", "Read a Third Time and passed by the National Assembly.")
+    assent = tracker_dates(columns.get("assent", ""))
+    if assent:
+        add(assent[0], "Assented", "Assented to by the President.")
+    return tuple(events)
+
+
 def parse_bill_stage_tracker(
     text_value: str,
     source_url: str,
@@ -495,7 +564,8 @@ def parse_bill_stage_tracker(
             )
             if continuation:
                 title_head = re.split(
-                    r"\b(?:Hon\.|Chairperson\b|Leader of the Majority Party\b|Leader of the Minority Party\b)",
+                    # Senate bills are sponsored by "Sen. ..." (often "Sen. (Prof.) ...").
+                    r"\b(?:Hon\.|Sen\.|Dr\.|Chairperson\b|Leader of the Majority Party\b|Leader of the Minority Party\b)",
                     title_prefix,
                     maxsplit=1,
                     flags=re.I,
@@ -524,6 +594,7 @@ def parse_bill_stage_tracker(
             committee_name=committee_name,
             stage_source_url=source_url,
             stage_as_at=as_at,
+            history=build_stage_history(row_columns),
         )
         if identifier in ambiguous:
             continue
@@ -568,8 +639,15 @@ def merge_bill_stage_rows(bills: list[BillRow], stage_rows: list[BillRow]) -> li
                 merged.append(stage_row)
                 continue
         current = merged[index]
+        exact_match = current.identifier == stage_row.identifier
+        # Proposal-tracker titles are working titles (often with the drafting
+        # year). On an exact house/number/year match, the official bill title
+        # wins when it parsed cleanly as "... Bill, YYYY".
+        title = stage_row.title if exact_match and OFFICIAL_TITLE_RE.search(stage_row.title) else current.title
         merged[index] = replace(
             current,
+            title=title,
+            history=stage_row.history or current.history,
             stage=stage_row.stage,
             committee_name=current.committee_name or stage_row.committee_name,
             stage_source_url=stage_row.stage_source_url,
@@ -774,9 +852,32 @@ def bill_documents(row: BillRow) -> list[dict]:
     if row.stage_source_url:
         date_label = f" as at {row.stage_as_at.strftime('%d %B %Y')}" if row.stage_as_at else ""
         documents.append({"name": f"Official Bills Tracker — current stage{date_label}", "url": row.stage_source_url})
-    elif row.source_url:
-        documents.append({"name": "Legislative Proposals Tracker", "url": row.source_url})
     return documents
+
+
+TRACKER_DOCUMENT_NAMES = re.compile(r"^(legislative proposals tracker|official bills tracker\b)", re.I)
+
+
+def merge_tracker_documents(existing, row: BillRow) -> list[dict]:
+    """Replace tracker links with the current ones; keep bill PDFs and notices."""
+    if isinstance(existing, str):
+        try:
+            existing = json.loads(existing)
+        except json.JSONDecodeError:
+            existing = []
+    kept = [
+        document for document in (existing if isinstance(existing, list) else [])
+        if isinstance(document, dict) and not TRACKER_DOCUMENT_NAMES.search(str(document.get("name", "")))
+    ]
+    merged: list[dict] = []
+    seen: set[str] = set()
+    for document in [*bill_documents(row), *kept]:
+        key = document.get("url") or document.get("storage_ref") or document.get("name", "")
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(document)
+    return merged
 
 
 GENERIC_COMMITTEE_NAMES = {"committee", "national assembly committee", "national assembly"}
@@ -861,15 +962,18 @@ def validate_bill(row: BillRow) -> str | None:
 
 async def _upsert_bill(conn, row: BillRow, as_at: date) -> bool:
     """Insert or update one bill. Returns True if a new row was inserted."""
-    result = await conn.execute(text("SELECT id FROM legislative_items WHERE identifier=:identifier"), {"identifier": row.identifier})
+    result = await conn.execute(text("SELECT id, documents FROM legislative_items WHERE identifier=:identifier"), {"identifier": row.identifier})
     exists = result.first()
     committee_id = await ensure_committee_id(conn, row.committee_name) if row.committee_name else None
+    documents = merge_tracker_documents(exists[1] if exists else [], row)
     params = {
         "title": row.title,
         "identifier": row.identifier,
         "institution": "National Assembly",
         "stage": row.stage,
-        "documents": json.dumps(bill_documents(row)),
+        "documents": json.dumps(documents),
+        "status_history": json.dumps(list(row.history)),
+        "has_history": bool(row.history),
         "bill_house": row.house,
         "bill_number": row.number,
         "bill_year": row.year,
@@ -880,9 +984,11 @@ async def _upsert_bill(conn, row: BillRow, as_at: date) -> bool:
         "committee_id": committee_id,
     }
     if exists:
-        await conn.execute(text("""UPDATE legislative_items SET title=:title, institution=:institution, stage=:stage, documents=CAST(:documents AS jsonb), bill_house=:bill_house, bill_number=:bill_number, bill_year=:bill_year, source_url=:source_url, source_file_ref=:source_file_ref, source_updated_at=:source_updated_at, source_status=:source_status, committee_id=COALESCE(CAST(:committee_id AS uuid),committee_id), is_simulated=false WHERE identifier=:identifier"""), params)
+        await conn.execute(text("""UPDATE legislative_items SET title=:title, institution=:institution, stage=:stage, documents=CAST(:documents AS jsonb), status_history=CASE WHEN :has_history THEN CAST(:status_history AS json) ELSE status_history END, bill_house=:bill_house, bill_number=:bill_number, bill_year=:bill_year, source_url=:source_url, source_file_ref=:source_file_ref, source_updated_at=:source_updated_at, source_status=:source_status, committee_id=CASE WHEN committee_assignment_source='administrator' THEN committee_id ELSE COALESCE(CAST(:committee_id AS uuid),committee_id) END, committee_assignment_source=CASE WHEN committee_assignment_source='administrator' THEN committee_assignment_source WHEN CAST(:committee_id AS uuid) IS NOT NULL THEN 'official record' ELSE committee_assignment_source END, is_simulated=false WHERE identifier=:identifier"""), params)
         return False
-    await conn.execute(text("""INSERT INTO legislative_items (id, title, identifier, institution, stage, documents, status_history, is_simulated, bill_house, bill_number, bill_year, source_url, source_file_ref, source_updated_at, source_status, committee_id) VALUES (:id,:title,:identifier,:institution,:stage,CAST(:documents AS jsonb),'[]'::jsonb,false,:bill_house,:bill_number,:bill_year,:source_url,:source_file_ref,:source_updated_at,:source_status,:committee_id)"""), {**params, "id": uuid.uuid4()})
+    await conn.execute(text("""INSERT INTO legislative_items (id, title, identifier, institution, stage, documents, status_history, is_simulated, bill_house, bill_number, bill_year, source_url, source_file_ref, source_updated_at, source_status, committee_id) VALUES (:id,:title,:identifier,:institution,:stage,CAST(:documents AS jsonb),CAST(:status_history AS json),false,:bill_house,:bill_number,:bill_year,:source_url,:source_file_ref,:source_updated_at,:source_status,:committee_id)"""), {**params, "id": uuid.uuid4()})
+    if committee_id:
+        await conn.execute(text("UPDATE legislative_items SET committee_assignment_source='official record' WHERE identifier=:identifier"), {"identifier": row.identifier})
     return True
 
 
@@ -918,7 +1024,7 @@ async def _upsert_notice(conn, notice: NoticeRow) -> None:
         bill = (await conn.execute(text("SELECT id FROM legislative_items WHERE identifier=:identifier"), {"identifier": identifier})).first()
     if bill and committee_id:
         # Only attach a bill when its official house/number/year reference matched above.
-        await conn.execute(text("UPDATE legislative_items SET committee_id=COALESCE(committee_id,CAST(:committee_id AS uuid)) WHERE id=:id AND is_simulated=false"), {"id": bill[0], "committee_id": committee_id})
+        await conn.execute(text("UPDATE legislative_items SET committee_assignment_source=CASE WHEN committee_id IS NULL OR committee_assignment_source='subject matter' THEN 'official record' ELSE committee_assignment_source END, committee_id=CASE WHEN committee_id IS NULL OR committee_assignment_source='subject matter' THEN CAST(:committee_id AS uuid) ELSE committee_id END WHERE id=:id AND is_simulated=false"), {"id": bill[0], "committee_id": committee_id})
 
     if bill:
         for document_url in notice.document_urls:
@@ -1079,6 +1185,13 @@ async def main() -> int:
             new_bills, skipped_bills = await upsert_bills(conn, bills, date.today())
             notice_count = await upsert_notices(conn, notices)
             new_reports = await upsert_reports(conn, reports)
+            # County assemblies (Nairobi, Trans Nzoia). A county failure is logged, not fatal.
+            from app.scripts.sync_county_bills import sync_counties
+            county_results = await sync_counties(conn)
+            log.info("County sync: %s", {name: result for name, result in county_results.items()})
+            # Committees for bills no official source assigns (see app.committee_assignment).
+            from app.committee_assignment import assign_committees
+            await assign_committees(conn)
             log.info(
                 "Synced %d bills (%d new, %d skipped), %d notice-bill rows, %d reports (%d new), %d/%d committees failed",
                 len(bills), new_bills, skipped_bills, notice_count, len(reports), new_reports, failed, committee_count,

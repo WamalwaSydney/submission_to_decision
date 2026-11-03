@@ -5,6 +5,7 @@ import logging
 from rapidfuzz import fuzz
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from app.services import receipt_service
 from app.models import ParticipationReceipt, ReportEntry, SubmissionMatch, CommitteeReport, LegislativeItem
 from app.audit import record_audit
 from app.services import ingestion_service, llm_matching_service, notification_service
@@ -30,7 +31,10 @@ async def propose_matches(db: AsyncSession, bill_id: str, use_llm: bool = True) 
     bill = bill_result.scalar_one_or_none()
     if bill is None:
         return []
-    receipt_result = await db.execute(select(ParticipationReceipt).where(ParticipationReceipt.legislative_item_id == bill_id))
+    receipt_result = await db.execute(select(ParticipationReceipt).where(
+        ParticipationReceipt.legislative_item_id == bill_id,
+        receipt_service.is_current(),  # earlier versions of edited submissions are not matched
+    ))
     receipts = list(receipt_result.scalars().all())
     entry_result = await db.execute(
         select(ReportEntry, CommitteeReport)

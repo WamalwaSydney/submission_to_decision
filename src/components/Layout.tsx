@@ -46,34 +46,37 @@ import {
   Settings2,
   Database,
   Heart,
-  ChevronRight,
 } from 'lucide-react';
 
-const publicLinks = [
+const SIDEBAR_WIDTH = 280;
+
+type NavLink = { to: string; label: string; icon: any };
+
+const publicLinks: NavLink[] = [
   { to: '/', label: 'Home', icon: Home },
   { to: '/bills', label: 'Bills', icon: Gavel },
-  { to: '/receipt-lookup', label: 'Receipt Lookup', icon: FileSearch },
-  { to: '/receipt-verify', label: 'Verify Chain', icon: Link2 },
-  { to: '/notices', label: 'Notice Adequacy', icon: FileCheck2 },
+  { to: '/receipt-lookup', label: 'Track a Submission', icon: FileSearch },
+  { to: '/receipt-verify', label: 'Verify Hash Chain', icon: Link2 },
+  { to: '/notices', label: 'Calls for Views', icon: FileCheck2 },
   { to: '/community-rules', label: 'Community Rules', icon: BookOpen },
   { to: '/research/export', label: 'Public Data', icon: Database },
 ];
 
-const publicLinksByRole: Record<string, typeof publicLinks> = {
+const publicLinksByRole: Record<string, NavLink[]> = {
   citizen: publicLinks,
   // Officers need to see the public bill record, but not public verification
   // and research tools that are unrelated to their operational workspace.
-  committee_officer: publicLinks.filter(link => ['/','/bills','/notices'].includes(link.to)),
+  committee_officer: publicLinks.filter(link => ['/','/bills'].includes(link.to)),
   reviewer: publicLinks.filter(link => ['/','/bills','/receipt-lookup'].includes(link.to)),
   moderator: publicLinks.filter(link => ['/','/bills','/receipt-lookup'].includes(link.to)),
   administrator: publicLinks.filter(link => ['/','/bills'].includes(link.to)),
 };
 
-const authenticatedLinksMap: Record<string, { to: string; label: string; icon: any }[]> = {
+const authenticatedLinksMap: Record<string, NavLink[]> = {
   citizen: [
-    { to: '/submit', label: 'Submit View', icon: MessageSquarePlus },
-    { to: '/my-receipts', label: 'My Receipts', icon: Receipt },
-    { to: '/messages', label: 'Automated Updates', icon: MessageSquarePlus },
+    { to: '/submit', label: 'Give Your View', icon: MessageSquarePlus },
+    { to: '/my-receipts', label: 'My Submissions', icon: Receipt },
+    { to: '/messages', label: 'Updates', icon: MessageSquarePlus },
   ],
   reviewer: [
     { to: '/reviewer/queue', label: 'Match Review', icon: ClipboardList },
@@ -84,9 +87,9 @@ const authenticatedLinksMap: Record<string, { to: string; label: string; icon: a
     { to: '/reviewer/reports', label: 'Reported Content', icon: Flag },
   ],
   committee_officer: [
-    { to: '/committee', label: 'Committee Dashboard', icon: Database },
-    { to: '/committee/ingestion', label: 'Report Ingestion', icon: FileUp },
-    { to: '/committee/notices', label: 'Notice Records', icon: FolderOpen },
+    { to: '/committee', label: 'Bill Ingestion', icon: Database },
+    { to: '/committee/ingestion', label: 'Upload a Report', icon: FileUp },
+    { to: '/committee/notices', label: 'Calls for Views', icon: FolderOpen },
   ],
   administrator: [
     { to: '/admin', label: 'Administration', icon: Settings2 },
@@ -103,6 +106,13 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const palSecondary = theme.palette.secondary as any;
   const palSaffron = (theme.palette.saffron || theme.palette.warning) as any;
   const displayUserName = state.currentUser?.name === 'Independent Reviewer' ? 'Moderator' : state.currentUser?.name;
+  const roleLabel = !state.currentUser
+    ? ''
+    : state.currentUser.role === 'reviewer'
+      ? 'Moderator'
+      : state.currentUser.role === 'committee_officer'
+        ? 'Clerk’s Office / Committee Secretariat'
+        : state.currentUser.role.replace(/_/g, ' ');
 
   const currentRoleLinks = state.currentUser
     ? authenticatedLinksMap[state.currentUser.role] || []
@@ -111,18 +121,309 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const visiblePublicLinks = state.currentUser
     ? publicLinksByRole[state.currentUser.role] || []
     : publicLinks;
-  const allNavLinks = [
-    ...visiblePublicLinks,
-    ...currentRoleLinks,
-  ];
+
+  const closeMobileMenu = () => setMobileMenuOpen(false);
+
+  const signOut = () => {
+    localStorage.removeItem('access_token');
+    localStorage.removeItem('current_user');
+    dispatch({ type: 'SET_USER', payload: null });
+    closeMobileMenu();
+  };
+
+  const sectionHeadingSx = {
+    color: ink[500],
+    fontSize: 11,
+    fontWeight: 800,
+    letterSpacing: '0.18em',
+    textTransform: 'uppercase',
+  } as const;
+
+  const brand = (
+    <Box
+      component={Link}
+      to="/"
+      onClick={closeMobileMenu}
+      sx={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 1.5,
+        textDecoration: 'none',
+        color: 'inherit',
+        minWidth: 0,
+      }}
+    >
+      <Box sx={{ position: 'relative', width: 46, height: 46, flexShrink: 0 }}>
+        <Box
+          sx={{
+            position: 'absolute',
+            inset: 0,
+            background: `linear-gradient(135deg, ${palPrimary[500]}, ${palSecondary[500]})`,
+            borderRadius: 3,
+            filter: 'blur(8px)',
+            opacity: 0.4,
+            transition: 'opacity 420ms ease',
+            '&:hover': { opacity: 0.75 },
+          }}
+        />
+        <Box
+          sx={{
+            position: 'relative',
+            width: 46,
+            height: 46,
+            borderRadius: 3,
+            background: `linear-gradient(135deg, ${palPrimary[600]} 0%, ${palPrimary[500]} 50%, ${palSecondary[500]} 100%)`,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            boxShadow: `0 10px 24px -8px ${alpha(palPrimary[500], 0.45)}`,
+          }}
+        >
+          <Scale size={24} strokeWidth={2.25} style={{ color: '#fff' }} />
+        </Box>
+      </Box>
+      <Box sx={{ display: 'flex', flexDirection: 'column', lineHeight: 1 }}>
+        <Typography sx={{ fontWeight: 800, fontSize: 17, letterSpacing: '-0.02em', color: ink[900] }}>
+          Participation Trace
+        </Typography>
+        <Typography
+          sx={{
+            fontSize: 10,
+            fontWeight: 700,
+            letterSpacing: '0.18em',
+            textTransform: 'uppercase',
+            color: ink[500],
+            mt: 0.5,
+          }}
+        >
+          Kenya
+        </Typography>
+      </Box>
+    </Box>
+  );
+
+  const signInButton = (
+    <Box
+      component={Link}
+      to="/login"
+      onClick={closeMobileMenu}
+      sx={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 1.25,
+        px: 3,
+        py: 1.4,
+        borderRadius: 3.5,
+        fontSize: 13,
+        fontWeight: 700,
+        color: '#fff',
+        textDecoration: 'none',
+        background: `linear-gradient(135deg, ${palPrimary[600]} 0%, ${palPrimary[500]} 45%, ${palSecondary[600]} 100%)`,
+        backgroundSize: '200% 200%',
+        backgroundPosition: '0% 50%',
+        boxShadow: `0 6px 18px -4px ${alpha(palPrimary[500], 0.45)}, inset 0 1px 0 ${alpha('#fff', 0.18)}`,
+        transition: 'all 280ms cubic-bezier(0.22, 1, 0.36, 1)',
+        '&:hover': {
+          backgroundPosition: '100% 50%',
+          transform: 'translateY(-1px)',
+          boxShadow: `0 14px 30px -8px ${alpha(palPrimary[500], 0.58)}, inset 0 1px 0 ${alpha('#fff', 0.22)}`,
+        },
+        '&:active': { transform: 'translateY(0)' },
+      }}
+    >
+      <LogIn size={15} /> Sign In
+    </Box>
+  );
+
+  const renderNavList = (links: NavLink[]) => (
+    <List sx={{ pt: 0.5 }}>
+      {links.map((link) => {
+        const Icon = link.icon;
+        const active = location.pathname === link.to;
+        return (
+          <ListItemButton
+            key={link.to}
+            component={Link as any}
+            to={link.to}
+            selected={active}
+            aria-current={active ? 'page' : undefined}
+            onClick={closeMobileMenu}
+            sx={{
+              borderRadius: 3, px: 1.5, py: 1.1, gap: 1.5, mb: 0.5,
+              color: ink[700], transition: 'all 180ms ease',
+              '&:hover': { background: alpha(palPrimary[500], 0.07), transform: 'translateX(2px)' },
+              '&.Mui-selected': { color: palPrimary[700], background: `linear-gradient(135deg, ${alpha(palPrimary[500], 0.12)}, ${alpha(palSecondary[500], 0.08)})` },
+              '&.Mui-selected:hover': { background: alpha(palPrimary[500], 0.16) },
+            }}
+          >
+            <ListItemIcon sx={{ minWidth: 0, color: 'inherit' }}>
+              <Box sx={{ width: 34, height: 34, display: 'grid', placeItems: 'center', borderRadius: 2.5, background: active ? alpha(palPrimary[500], 0.12) : alpha('#64748B', 0.08), color: active ? palPrimary[700] : ink[500] }}>
+                <Icon size={17} strokeWidth={2.1} />
+              </Box>
+            </ListItemIcon>
+            <ListItemText
+              primary={
+                <Typography sx={{ fontWeight: 700, fontSize: 14 }}>{link.label}</Typography>
+              }
+            />
+          </ListItemButton>
+        );
+      })}
+    </List>
+  );
+
+  const renderSidebar = (inDrawer: boolean) => (
+    <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <Box sx={{ px: 2.5, py: 2.5, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
+        {brand}
+        {inDrawer && (
+          <IconButton onClick={closeMobileMenu} sx={{ borderRadius: 3 }} aria-label="Close menu">
+            <XIcon size={20} />
+          </IconButton>
+        )}
+      </Box>
+
+      <Divider sx={{ mx: 2.5 }} />
+
+      <Box sx={{ flex: 1, minHeight: 0, overflowY: 'auto', px: 1.5, py: 2 }}>
+        <Typography sx={{ ...sectionHeadingSx, px: 1.5, mb: 0.5 }}>
+          Navigation
+        </Typography>
+        {renderNavList(visiblePublicLinks)}
+
+        {currentRoleLinks.length > 0 && (
+          <>
+            <Divider sx={{ mx: 1.5, my: 1.5 }} />
+            <Box sx={{ px: 1.5, pb: 0.5, display: 'flex', alignItems: 'center', gap: 1.25 }}>
+              <Sparkles size={15} style={{ color: palPrimary[500] }} />
+              <Typography sx={sectionHeadingSx}>
+                Your Role
+              </Typography>
+            </Box>
+            {renderNavList(currentRoleLinks)}
+          </>
+        )}
+      </Box>
+
+      <Divider />
+
+      <Box sx={{ p: 2, display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+        <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1.25, px: 1 }}>
+          {state.isOnline ? (
+            <>
+              <Box sx={{ position: 'relative', display: 'inline-flex' }}>
+                <Box
+                  sx={{
+                    position: 'absolute',
+                    inset: 0,
+                    borderRadius: '50%',
+                    background: palSecondary[400],
+                    opacity: 0.75,
+                  }}
+                  className="animate-pulse-ring"
+                />
+                <Box
+                  sx={{
+                    position: 'relative',
+                    width: 8,
+                    height: 8,
+                    borderRadius: '50%',
+                    background: palSecondary[500],
+                  }}
+                />
+              </Box>
+              <Typography sx={{ fontWeight: 700, fontSize: 11, color: ink[500] }}>Live connection</Typography>
+            </>
+          ) : (
+            <>
+              <WifiOff size={14} style={{ color: palSaffron[600] }} />
+              <Typography sx={{ fontWeight: 700, fontSize: 11, color: palSaffron[700] }}>Working offline</Typography>
+            </>
+          )}
+        </Box>
+
+        {state.currentUser ? (
+          <Box
+            sx={{
+              p: 1.5,
+              borderRadius: 4,
+              background: `linear-gradient(135deg, ${alpha(palPrimary[500], 0.10)}, ${alpha(palSecondary[500], 0.08)})`,
+              border: `1px solid ${alpha(palPrimary[500], 0.14)}`,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 1.5,
+            }}
+          >
+            <Avatar sx={{ width: 40, height: 40, fontSize: 14, flexShrink: 0 }}>
+              {displayUserName?.charAt(0)}
+            </Avatar>
+            <Box sx={{ minWidth: 0, flex: 1 }}>
+              <Typography noWrap sx={{ fontWeight: 800, fontSize: 14, color: ink[800] }}>
+                {displayUserName}
+              </Typography>
+              <Typography
+                sx={{
+                  fontWeight: 800,
+                  letterSpacing: '0.12em',
+                  textTransform: 'uppercase',
+                  color: palPrimary[600],
+                  fontSize: 9.5,
+                  lineHeight: 1.3,
+                }}
+              >
+                {roleLabel}
+              </Typography>
+            </Box>
+            <Tooltip title="Sign out" placement="top" arrow>
+              <IconButton
+                size="small"
+                onClick={signOut}
+                aria-label="Sign out"
+                sx={{
+                  '&:hover': {
+                    background: alpha('#DC2626', 0.08),
+                    color: '#DC2626',
+                  },
+                }}
+              >
+                <LogOut size={17} />
+              </IconButton>
+            </Tooltip>
+          </Box>
+        ) : (
+          <>
+            {signInButton}
+            <Box
+              component={Link}
+              to="/signup"
+              onClick={closeMobileMenu}
+              sx={{
+                display: 'inline-flex',
+                justifyContent: 'center',
+                px: 1.5,
+                py: 1,
+                borderRadius: 2.5,
+                color: palPrimary[700],
+                fontSize: 12,
+                fontWeight: 800,
+                textDecoration: 'none',
+                '&:hover': { background: alpha(palPrimary[500], 0.08) },
+              }}
+            >
+              Sign Up
+            </Box>
+          </>
+        )}
+      </Box>
+    </Box>
+  );
 
   return (
     <Box
       component="div"
       sx={{
         minHeight: '100vh',
-        display: 'flex',
-        flexDirection: 'column',
         position: 'relative',
         overflowX: 'hidden',
       }}
@@ -167,404 +468,93 @@ export function Layout({ children }: { children: React.ReactNode }) {
         Skip to main content
       </a>
 
-      <AppBar position="sticky" className="app-header-glass" sx={{ zIndex: (t) => t.zIndex.appBar + 1 }}>
-        <Toolbar sx={{ maxWidth: 1280, mx: 'auto', width: '100%' }}>
-          <Box
-            component={Link}
-            to="/"
+      <Box
+        component="nav"
+        aria-label="Primary navigation"
+        sx={{
+          display: { xs: 'none', md: 'block' },
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          bottom: 0,
+          width: SIDEBAR_WIDTH,
+          zIndex: (t) => t.zIndex.appBar + 1,
+          background: alpha('#fff', 0.96),
+          backdropFilter: 'blur(18px)',
+          borderRight: '1px solid #e2ded5',
+          boxShadow: '6px 0 24px -12px rgba(24,32,32,.18)',
+        }}
+      >
+        {renderSidebar(false)}
+      </Box>
+
+      <AppBar
+        position="sticky"
+        className="app-header-glass"
+        sx={{ display: { xs: 'flex', md: 'none' }, zIndex: (t) => t.zIndex.appBar + 1 }}
+      >
+        <Toolbar sx={{ width: '100%', gap: 1.5 }}>
+          {brand}
+          <Box sx={{ flexGrow: 1 }} />
+          {!state.currentUser && (
+            <Box sx={{ display: { xs: 'none', sm: 'block' } }}>{signInButton}</Box>
+          )}
+          <IconButton
+            onClick={() => setMobileMenuOpen((open) => !open)}
+            aria-expanded={mobileMenuOpen}
+            aria-controls="primary-navigation-drawer"
+            aria-label={mobileMenuOpen ? 'Close navigation menu' : 'Open navigation menu'}
             sx={{
-              display: 'flex',
-              order: 1,
-              alignItems: 'center',
-              gap: 1.5,
-              textDecoration: 'none',
-              color: 'inherit',
+              borderRadius: 3,
+              p: 1.25,
+              color: ink[800],
+              border: `1px solid ${alpha('#E2E8F0', 0.9)}`,
+              background: alpha('#fff', 0.7),
+              transition: 'all 180ms ease',
+              '&:hover': { background: alpha(palPrimary[500], 0.08), color: palPrimary[700] },
             }}
           >
-            <Box sx={{ position: 'relative', width: 46, height: 46 }}>
-              <Box
-                sx={{
-                  position: 'absolute',
-                  inset: 0,
-                  background: `linear-gradient(135deg, ${palPrimary[500]}, ${palSecondary[500]})`,
-                  borderRadius: 3,
-                  filter: 'blur(8px)',
-                  opacity: 0.4,
-                  transition: 'opacity 420ms ease',
-                  '&:hover': { opacity: 0.75 },
-                }}
-              />
-              <Box
-                sx={{
-                  position: 'relative',
-                  width: 46,
-                  height: 46,
-                  borderRadius: 3,
-                  background: `linear-gradient(135deg, ${palPrimary[600]} 0%, ${palPrimary[500]} 50%, ${palSecondary[500]} 100%)`,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  boxShadow: `0 10px 24px -8px ${alpha(palPrimary[500], 0.45)}`,
-                }}
-              >
-                <Scale size={24} strokeWidth={2.25} style={{ color: '#fff' }} />
-              </Box>
-            </Box>
-            <Box sx={{ display: 'flex', flexDirection: 'column', lineHeight: 1 }}>
-              <Typography
-                sx={{
-                  fontWeight: 800,
-                  fontSize: 17,
-                  letterSpacing: '-0.02em',
-                  color: ink[900],
-                  display: { xs: 'none', sm: 'block' },
-                }}
-              >
-                Participation Trace
-              </Typography>
-              <Typography
-                sx={{
-                  fontWeight: 800,
-                  fontSize: 17,
-                  letterSpacing: '-0.02em',
-                  color: ink[900],
-                  display: { xs: 'block', sm: 'none' },
-                }}
-              >
-                PT
-              </Typography>
-              <Typography
-                sx={{
-                  fontSize: 10,
-                  fontWeight: 700,
-                  letterSpacing: '0.18em',
-                  textTransform: 'uppercase',
-                  color: ink[500],
-                  display: { xs: 'none', sm: 'block' },
-                  mt: 0.5,
-                }}
-              >
-                Kenya
-              </Typography>
-            </Box>
-
-          </Box>
-
-
-          <Box sx={{ flexGrow: 1, order: 2 }} />
-
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, order: 3 }}>
-            <Tooltip title={state.isOnline ? 'Live connection' : 'Working offline'} placement="bottom" arrow>
-              <Box
-                sx={{
-                  display: { xs: 'none', sm: 'inline-flex' },
-                  alignItems: 'center',
-                  gap: 1.25,
-                  px: 2,
-                  py: 1,
-                  borderRadius: 999,
-                  border: `1px solid ${alpha('#E2E8F0', 0.85)}`,
-                  background: alpha('#fff', 0.65),
-                  backdropFilter: 'blur(10px)',
-                }}
-              >
-                {state.isOnline ? (
-                  <>
-                    <Box sx={{ position: 'relative', display: 'inline-flex' }}>
-                      <Box
-                        sx={{
-                          position: 'absolute',
-                          inset: 0,
-                          borderRadius: '50%',
-                          background: palSecondary[400],
-                          opacity: 0.75,
-                        }}
-                        className="animate-pulse-ring"
-                      />
-                      <Box
-                        sx={{
-                          position: 'relative',
-                          width: 8,
-                          height: 8,
-                          borderRadius: '50%',
-                          background: palSecondary[500],
-                        }}
-                      />
-                    </Box>
-                    <Typography sx={{ fontWeight: 700, fontSize: 11, color: ink[500] }}>Live</Typography>
-                  </>
-                ) : (
-                  <>
-                    <WifiOff size={14} style={{ color: palSaffron[600] }} />
-                    <Typography sx={{ fontWeight: 700, fontSize: 11, color: palSaffron[700] }}>Offline</Typography>
-                  </>
-                )}
-              </Box>
-            </Tooltip>
-
-            {!state.currentUser ? (
-              <Box
-                component={Link}
-                to="/login"
-                sx={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 1.25,
-                  px: 3,
-                  py: 1.4,
-                  borderRadius: 3.5,
-                  fontSize: 13,
-                  fontWeight: 700,
-                  color: '#fff',
-                  textDecoration: 'none',
-                  background: `linear-gradient(135deg, ${palPrimary[600]} 0%, ${palPrimary[500]} 45%, ${palSecondary[600]} 100%)`,
-                  backgroundSize: '200% 200%',
-                  backgroundPosition: '0% 50%',
-                  boxShadow: `0 6px 18px -4px ${alpha(palPrimary[500], 0.45)}, inset 0 1px 0 ${alpha('#fff', 0.18)}`,
-                  transition: 'all 280ms cubic-bezier(0.22, 1, 0.36, 1)',
-                  '&:hover': {
-                    backgroundPosition: '100% 50%',
-                    transform: 'translateY(-1px)',
-                    boxShadow: `0 14px 30px -8px ${alpha(palPrimary[500], 0.58)}, inset 0 1px 0 ${alpha('#fff', 0.22)}`,
-                  },
-                  '&:active': { transform: 'translateY(0)' },
-                }}
-              >
-                <LogIn size={15} /> Sign In
-              </Box>
-            ) : (
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.75 }}>
-                <Box sx={{ display: { xs: 'none', md: 'flex' }, flexDirection: 'column', alignItems: 'flex-end', lineHeight: 1.1 }}>
-                  <Typography sx={{ fontWeight: 700, fontSize: 14, color: ink[800] }}>
-                    {displayUserName}
-                  </Typography>
-                  <Typography
-                    sx={{
-                      fontWeight: 800,
-                      letterSpacing: '0.14em',
-                      textTransform: 'uppercase',
-                      color: palPrimary[600],
-                      fontSize: 10,
-                    }}
-                  >
-                    {state.currentUser.role === 'reviewer' ? 'Moderator' : state.currentUser.role === 'committee_officer' ? 'Clerk’s Office / Committee Secretariat' : state.currentUser.role.replace(/_/g, ' ')}
-                  </Typography>
-                </Box>
-                <Avatar sx={{ width: 40, height: 40, fontSize: 14 }}>
-                  {displayUserName?.charAt(0)}
-                </Avatar>
-                <Tooltip title="Sign out" placement="bottom" arrow>
-                  <IconButton
-                    size="small"
-                    onClick={() => { localStorage.removeItem('access_token'); localStorage.removeItem('current_user'); dispatch({ type: 'SET_USER', payload: null }); }}
-                    aria-label="Sign out"
-                    sx={{
-                      '&:hover': {
-                        background: alpha('#DC2626', 0.08),
-                        color: '#DC2626',
-                      },
-                    }}
-                  >
-                    <LogOut size={17} />
-                  </IconButton>
-            </Tooltip>
-
-              </Box>
-            )}
-
-            {!state.currentUser && (
-              <Box
-                component={Link}
-                to="/signup"
-                sx={{
-                  display: { xs: 'none', sm: 'inline-flex' },
-                  alignItems: 'center',
-                  px: 1.5,
-                  py: 1,
-                  borderRadius: 2.5,
-                  color: palPrimary[700],
-                  fontSize: 12,
-                  fontWeight: 800,
-                  textDecoration: 'none',
-                  '&:hover': { background: alpha(palPrimary[500], 0.08) },
-                }}
-              >
-                Sign Up
-              </Box>
-            )}
-
-            <IconButton
-              onClick={() => setMobileMenuOpen((open) => !open)}
-              aria-expanded={mobileMenuOpen}
-              aria-controls="primary-navigation-drawer"
-              aria-label={mobileMenuOpen ? 'Close navigation menu' : 'Open navigation menu'}
-              sx={{
-                borderRadius: 3,
-                p: 1.25,
-                color: ink[800],
-                border: `1px solid ${alpha('#E2E8F0', 0.9)}`,
-                background: alpha('#fff', 0.7),
-                transition: 'all 180ms ease',
-                '&:hover': { background: alpha(palPrimary[500], 0.08), color: palPrimary[700] },
-              }}
-            >
-              {mobileMenuOpen ? <XIcon size={20} strokeWidth={2.2} /> : <MenuIcon size={20} strokeWidth={2.2} />}
-            </IconButton>
-          </Box>
+            {mobileMenuOpen ? <XIcon size={20} strokeWidth={2.2} /> : <MenuIcon size={20} strokeWidth={2.2} />}
+          </IconButton>
         </Toolbar>
       </AppBar>
 
-      <Box className="kenya-flag" role="img" aria-label="Flag of Kenya">
-        <img src="/kenya-flag-shield.svg" alt="" aria-hidden="true" />
-      </Box>
-
       <Drawer
         id="primary-navigation-drawer"
-        anchor="right"
+        anchor="left"
         open={mobileMenuOpen}
-        onClose={() => setMobileMenuOpen(false)}
+        onClose={closeMobileMenu}
+        sx={{ display: { md: 'none' } }}
         slotProps={{
           paper: {
             sx: {
-              width: { xs: '86%', sm: 360 },
+              width: { xs: '86%', sm: SIDEBAR_WIDTH },
               maxWidth: '100vw',
               background: `linear-gradient(180deg, ${alpha('#fff', 0.98)} 0%, ${alpha('#F8FAFC', 0.95)} 100%)`,
               backdropFilter: 'blur(26px) saturate(1.2)',
-              borderLeft: `1px solid ${alpha('#fff', 0.6)}`,
-              borderTopLeftRadius: 5,
-              borderBottomLeftRadius: 5,
+              borderRight: `1px solid ${alpha('#fff', 0.6)}`,
+              borderTopRightRadius: 20,
+              borderBottomRightRadius: 20,
               boxShadow: `0 48px 96px -16px ${alpha('#0F172A', 0.22)}`,
             },
           },
         }}
       >
-        <Box sx={{ display: 'flex', justifyContent: 'flex-end', p: 2 }}>
-          <IconButton onClick={() => setMobileMenuOpen(false)} sx={{ borderRadius: 3 }} aria-label="Close menu">
-            <XIcon size={20} />
-          </IconButton>
-        </Box>
-
-        {state.currentUser && (
-          <Box sx={{ px: 3, pb: 2 }}>
-            <Box
-              sx={{
-                p: 3,
-                borderRadius: 5,
-                background: `linear-gradient(135deg, ${alpha(palPrimary[500], 0.10)}, ${alpha(palSecondary[500], 0.08)})`,
-                border: `1px solid ${alpha(palPrimary[500], 0.14)}`,
-                display: 'flex',
-                alignItems: 'center',
-                gap: 2.5,
-              }}
-            >
-              <Avatar sx={{ width: 48, height: 48, fontSize: 17 }}>
-                {displayUserName?.charAt(0)}
-              </Avatar>
-              <Box>
-                <Typography sx={{ fontWeight: 800, fontSize: 15 }}>{displayUserName}</Typography>
-                <Typography
-                  sx={{
-                    fontWeight: 800,
-                    letterSpacing: '0.14em',
-                    textTransform: 'uppercase',
-                    color: palPrimary[600],
-                    fontSize: 10,
-                  }}
-                >
-                  {state.currentUser.role === 'reviewer' ? 'Moderator' : state.currentUser.role === 'committee_officer' ? 'Clerk’s Office / Committee Secretariat' : state.currentUser.role.replace(/_/g, ' ')}
-                </Typography>
-              </Box>
-            </Box>
-          </Box>
-        )}
-
-        <Divider sx={{ mx: 3 }} />
-
-        <Box sx={{ p: 2, pb: 4 }}>
-          <Typography sx={{ px: 2, color: ink[500], fontSize: 11, fontWeight: 800, letterSpacing: '0.18em', textTransform: 'uppercase', mb: 0.5 }}>
-            Navigation
-          </Typography>
-          <List sx={{ pt: 0.5 }}>
-            {visiblePublicLinks.map((link) => {
-              const Icon = link.icon;
-              const active = location.pathname === link.to;
-              return (
-                <ListItemButton
-                  key={link.to}
-                  component={Link as any}
-                  to={link.to}
-                  selected={active}
-                  onClick={() => setMobileMenuOpen(false)}
-                  sx={{
-                    borderRadius: 3, px: 2, py: 1.4, gap: 1.75, mb: 0.5,
-                    color: ink[700], transition: 'all 180ms ease',
-                    '&:hover': { background: alpha(palPrimary[500], 0.07), transform: 'translateX(2px)' },
-                    '&.Mui-selected': { color: palPrimary[700], background: `linear-gradient(135deg, ${alpha(palPrimary[500], 0.12)}, ${alpha(palSecondary[500], 0.08)})` },
-                    '&.Mui-selected:hover': { background: alpha(palPrimary[500], 0.16) },
-                  }}
-                >
-                  <ListItemIcon sx={{ minWidth: 0, color: 'inherit' }}>
-                    <Box sx={{ width: 34, height: 34, display: 'grid', placeItems: 'center', borderRadius: 2.5, background: active ? alpha(palPrimary[500], 0.12) : alpha('#64748B', 0.08), color: active ? palPrimary[700] : ink[500] }}>
-                      <Icon size={17} strokeWidth={2.1} />
-                    </Box>
-                  </ListItemIcon>
-                  <ListItemText
-                    primary={
-                      <Typography sx={{ fontWeight: 700, fontSize: 14 }}>{link.label}</Typography>
-                    }
-                  />
-                  <ChevronRight size={16} style={{ opacity: 0.4 }} />
-                </ListItemButton>
-              );
-            })}
-          </List>
-
-          {currentRoleLinks.length > 0 && (
-            <>
-              <Divider sx={{ mx: 2, my: 2 }} />
-              <Box sx={{ px: 2, pb: 1, display: 'flex', alignItems: 'center', gap: 1.25 }}>
-                <Sparkles size={15} style={{ color: palPrimary[500] }} />
-                <Typography sx={{ color: ink[500], fontSize: 11, fontWeight: 800, letterSpacing: '0.18em', textTransform: 'uppercase' }}>
-                  Your Role · {state.currentUser?.role}
-                </Typography>
-              </Box>
-              <List sx={{ pt: 0.5 }}>
-                {currentRoleLinks.map((link) => {
-                  const Icon = link.icon;
-                  const active = location.pathname === link.to;
-                  return (
-                    <ListItemButton
-                      key={link.to}
-                      component={Link as any}
-                      to={link.to}
-                      selected={active}
-                      onClick={() => setMobileMenuOpen(false)}
-                      sx={{
-                    borderRadius: 3, px: 2, py: 1.4, gap: 1.75, mb: 0.5,
-                    color: ink[700], transition: 'all 180ms ease',
-                    '&:hover': { background: alpha(palPrimary[500], 0.07), transform: 'translateX(2px)' },
-                    '&.Mui-selected': { color: palPrimary[700], background: `linear-gradient(135deg, ${alpha(palPrimary[500], 0.12)}, ${alpha(palSecondary[500], 0.08)})` },
-                    '&.Mui-selected:hover': { background: alpha(palPrimary[500], 0.16) },
-                  }}
-                    >
-                      <ListItemIcon sx={{ minWidth: 0, color: 'inherit' }}>
-                    <Box sx={{ width: 34, height: 34, display: 'grid', placeItems: 'center', borderRadius: 2.5, background: active ? alpha(palPrimary[500], 0.12) : alpha('#64748B', 0.08), color: active ? palPrimary[700] : ink[500] }}>
-                      <Icon size={17} strokeWidth={2.1} />
-                    </Box>
-                  </ListItemIcon>
-                      <ListItemText
-                        primary={
-                          <Typography sx={{ fontWeight: 700, fontSize: 14 }}>{link.label}</Typography>
-                        }
-                      />
-                    </ListItemButton>
-                  );
-                })}
-              </List>
-            </>
-          )}
-        </Box>
+        {renderSidebar(true)}
       </Drawer>
+
+      <Box
+        sx={{
+          ml: { md: `${SIDEBAR_WIDTH}px` },
+          minHeight: '100vh',
+          display: 'flex',
+          flexDirection: 'column',
+          position: 'relative',
+        }}
+      >
+      <Box className="kenya-flag" role="img" aria-label="Flag of Kenya">
+        <img src="/kenya-flag-shield.svg" alt="" aria-hidden="true" />
+      </Box>
 
       <AnimatePresence>
         {!state.isOnline && (
@@ -625,17 +615,17 @@ export function Layout({ children }: { children: React.ReactNode }) {
             py: { xs: 4, md: 5, lg: 6 },
           }}
         >
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={location.pathname}
-              initial={{ opacity: 0, y: 12 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -12 }}
-              transition={{ duration: 0.38, ease: [0.22, 1, 0.36, 1] }}
-            >
-              {children}
-            </motion.div>
-          </AnimatePresence>
+          {/* A keyed fade-in only. The previous exit animation (AnimatePresence
+              mode="wait") rendered each new page twice, so typing in its first
+              moments was lost. */}
+          <motion.div
+            key={location.pathname}
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+          >
+            {children}
+          </motion.div>
         </Box>
       </Box>
 
@@ -725,7 +715,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
               <Shield size={22} style={{ color: '#991B1B', flexShrink: 0, marginTop: 2 }} />
               <Typography sx={{ fontWeight: 500, lineHeight: 1.75, fontSize: 14 }}>
                 <Typography component="strong" sx={{ fontWeight: 800, color: '#991B1B' }}>
-                  Uraia Platform Disclaimer:
+                  Participation Trace Disclaimer:
                 </Typography>{' '}
                 These are platform activity labels only. They are not legal findings, electoral judgments, or allegations of corruption.
                 Non-response by an office is shown as a neutral, observable status derived from the committee report itself.
@@ -856,6 +846,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
             </Typography>
           </Box>
         </Box>
+      </Box>
       </Box>
     </Box>
   );
