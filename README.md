@@ -100,18 +100,131 @@ npm ci
 npm run dev
 ```
 
-Create `.env.local` with `VITE_API_URL=http://localhost:8001/api/v1`. CORS allows `http://localhost:3000` by default; set `CORS_ORIGINS` on the backend for other ports.
+For a production build and type check:
 
-### Demo accounts (seed data, password `password123`)
+```bash
+npm run typecheck
+npm run build
+```
 
-| Account | Role |
-|---|---|
-| `jane@example.com` | Citizen |
-| `mod@example.com` | Moderator |
-| `admin@example.com` | Administrator |
-| `committee@example.com` | Clerk's Office (simulated committee) |
+Point the frontend at a local API by creating `.env.local`:
 
-Never seed demo accounts into a database holding real pilot data.
+```text
+VITE_API_URL=http://localhost:8000/api/v1
+```
+
+### Full stack with Docker Compose
+
+```bash
+docker compose up -d
+```
+
+The local Compose configuration is intended to start:
+
+- PostgreSQL on port 5432
+- FastAPI backend on port 8000
+- React frontend on port 3000
+
+Local development uses the Compose PostgreSQL container, not Neon. Do not point local experiments at the production Neon database.
+
+### Seed data
+
+```bash
+cd backend
+python -m app.seed
+```
+
+The seed set includes three institutions, unclaimed profiles, simulated bills, sample receipts, reports, report entries, matches, notices, and demo accounts. The current bill catalogue is supplied through the Parliament legislation sync; seeded bills are separate local/demo records. Do not use seed data as evidence of real legislative activity.
+
+## Demo accounts
+
+Sign in at `/login` using a simulated account:
+
+- Jane Citizen — citizen
+- Hon. Simulated Rep — representative
+- Mod User — moderator
+- Admin User — administrator
+- Clerk User — clerk
+
+These are demo accounts, not production credentials. Never use real passwords in a demo environment, and do not seed demo accounts into a database that holds real pilot data.
+
+## CI/CD
+
+- **Netlify** builds and deploys the frontend from GitHub on push to the production branch; pull requests can get deploy previews.
+- **Render** builds and deploys the API from GitHub using `backend/Dockerfile`, and uses `/health` as its health check path.
+- **GitHub Actions** (in `.github/workflows/`) should run `npm run typecheck`, `npm run build` and `pytest backend/tests/` on every pull request, and branch protection should require them to pass before merging to the production branch.
+- Keep staging and production data separate (for example separate Neon branches or databases, with separate Render services and Netlify contexts).
+
+## Project structure
+
+```text
+├── README.md
+├── docs/
+│   ├── DECISIONS.md
+│   ├── SYSTEM.md
+│   ├── API.md
+│   ├── DB.md
+│   └── diagrams/
+│       ├── usecase.puml
+│       ├── class.puml
+│       ├── erd.puml
+│       ├── architecture.puml
+│       ├── sequence-submission.puml
+│       └── sequence-profile.puml
+├── src/                         # React frontend (deployed to Netlify)
+│   ├── App.tsx
+│   ├── types.ts
+│   ├── api/
+│   │   ├── client.ts
+│   │   └── endpoints.ts
+│   ├── context/AppContext.tsx
+│   ├── data/seed.ts
+│   ├── utils/hashChain.ts
+│   ├── utils/offline.ts
+│   ├── components/
+│   └── pages/
+├── backend/                     # FastAPI application (deployed to Render)
+│   ├── app/
+│   │   ├── main.py
+│   │   ├── models.py
+│   │   ├── auth.py
+│   │   ├── seed.py
+│   │   ├── api/routes.py
+│   │   └── services/
+│   ├── tests/
+│   ├── requirements.txt
+│   └── Dockerfile
+├── docker-compose.yml
+├── .github/workflows/
+└── package.json
+```
+
+This archive includes the Alembic directory and `.env.example`. Deployment configuration should be supplied by the hosting environment or added before production deployment; do not claim a live deployment unless the frontend/API/database smoke test has been completed against the deployed services.
+
+## Functional requirements (reported status)
+
+| ID | Requirement | Frontend | Backend |
+|---|---|---|---|
+| FR1 | Submit view and issue receipt | Implemented | Implemented |
+| FR2 | Append-only hash chain | Implemented | Implemented |
+| FR3 | Committee-report ingestion (PDF) | UI | Implemented |
+| FR4 | OCR fallback | — | Implemented |
+| FR5 | Match proposals generated after report ingestion | Implemented | Implemented |
+| FR6 | Human review | Implemented | Implemented |
+| FR7 | Receipt lookup and outcome trail | Implemented | Implemented |
+| FR8 | Notice adequacy tracker | Implemented | Implemented |
+| FR9 | Representative profiles | Implemented | Implemented |
+| FR10 | Offline drafts | Implemented; auto-sync added, live API verification pending | — |
+| FR11 | Moderation and appeals | Implemented | Implemented |
+| FR12 | Anonymized export | Implemented | Implemented |
+
+Report upload now generates idempotent match proposals for moderator review. Report entry correction and report verification are server-backed. Before submission, still distinguish working end-to-end behavior from UI-only or simulated behavior and complete a live smoke test if deployment is claimed.
+
+## Status vocabulary
+
+- **Submission/outcome:** awaiting committee report · adopted · amended · rejected with reasons · not addressed
+- **Representative:** unclaimed · verified and active · verified but inactive
+- **Profile labels:** verified · pilot · simulated · unclaimed
 
 ## Testing
 
