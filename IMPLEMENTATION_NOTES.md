@@ -7,7 +7,7 @@
 - Added committee-only bill ingestion and a committee dashboard that lists only the signed-in committee's bills.
 - Added public bill-flow endpoint and screen showing stages, reports, submission outcome status, match percentage, and stated reasons without exposing citizen account IDs.
 - Added citizen-to-committee and committee-to-citizen messages, read tracking, and audit events for sends/views.
-- Added optional free hosted Gemini matching using `gemini-2.5-flash-lite` with strict JSON validation. LLM results are proposal scores expressed as percentages and remain pending until moderator confirmation.
+- Added optional free hosted Gemini matching using `gemini-3.5-flash-lite` with strict JSON validation. LLM results are proposal scores expressed as percentages and remain pending until moderator confirmation.
 - Preserved deterministic clause/text matching when no LLM key is configured or the provider is unavailable.
 - Removed the researcher role from frontend role types, seed data, navigation, and role checks. The migration converts legacy researcher users to citizens and exposes identifier-free public data export to everyone.
 - Added database migration `20261015_committees_messages.py` for committee ownership, messages, indexes, and role constraint cleanup.
@@ -82,3 +82,21 @@ Matching now queues system-origin messages automatically. Citizens receive a mat
 **Migrations:** `20261103_submission_revisions` and `20261103_committee_source`, both adding columns only.
 
 **Validation:** 84 backend tests passed; `npm run typecheck` and `npm run build` passed. Browser checks covered each role. Hosted services still run the previous release.
+
+## Changes — 2026-11-06
+
+- **Sign-in pages:** sign-in, sign-up and password reset now render without the navigation menu (`src/components/AuthShell.tsx`). The menu appears once signed in.
+- **Calls for memoranda:** Parliament's "Submission of Memoranda" listings are stale (2019–2020), so the sync now discovers notices through the site search and the House landing pages.
+  - Result: 54 notice pages found, and 33 notices stored against 1 before.
+  - Parser: reads more deadline wordings, Senate and plural references, and bill names inside prose. It skips notices that name no bill, and handles pages posted after their deadline.
+  - Migration `20261106_notice_per_bill`: notices are unique per page and bill, so a notice covering four bills keeps all four.
+  - Matching: notices without a bill number are matched to a bill by title.
+- **Gemini key leak fixed:** the API key was sent in the URL, so failed requests printed it in errors and in the matcher's fallback log. It is now sent in the `x-goog-api-key` header, errors show Google's message only, and a test guards this. Rotate any key that was configured before this change.
+- **Matcher check:** added `evaluation/evaluate_gemini_matcher.py` (see docs/EVALUATION.md). Run on 6 November 2026 with `gemini-3.5-flash-lite`: 4 of 4 passed (direct clause, paraphrase, unrelated, prompt injection).
+- **Gemini retries and model:** busy responses (429/500/503) are retried three times with a growing wait. The default model is now `gemini-3.5-flash-lite`, since `gemini-2.5-flash-lite` is closed to new users.
+- **Notices table:** status chips (open, upcoming, closed) with counts, search, legislature and mode filters, five sort orders, and 10 notices per page. Exports contain the filtered notices.
+- **Hosted demo-data cleanup (2026-11-07):** backup taken with `pg_dump` first. Removed 10 demo/test accounts, 5 demo bills, 19 receipts, 4 reports (18 entries), 7 matches, 30 messages, 2 moderation actions, 4 notices and 11 demo MP profiles. 10 matches decided by demo moderators went back to pending; 92 audit rows kept with the actor blanked. The 10 remaining receipts were resealed (IDs unchanged, new hashes) and an audit-log `chain_resealed` entry records the old and new heads. Hosted chain: valid, 10 of 10. New administrator and moderator accounts replace the demo ones.
+- **Seed guard:** `python -m app.seed` refuses a non-local database unless `ALLOW_SEED_NON_LOCAL=1`.
+- **Edit from anywhere you view your submission:** the bill-page dialog, the receipt page and My Receipts offer Edit submission. `/receipts/mine/{bill}` and `/receipts/my` return `editable` and `edit_block` ("closed" or "reviewed"), so the button and the server agree.
+- **My Receipts and Updates as tables:** 10 rows per page with a shared `Pager`/`usePaged`, status chips with counts, search, filters and sort; selecting a row opens the full submission or update. Opening an update marks it read; `PUT /messages/read-all` marks all read. `/messages` now includes `receipt_public_id`.
+- **Tests:** 91 passing.

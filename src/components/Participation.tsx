@@ -1,4 +1,5 @@
 import React from 'react';
+import { Link } from 'react-router-dom';
 import { CheckCircle2, CircleDot, CircleSlash, Clock3 } from 'lucide-react';
 import { LegislativeItem, ParticipationWindow } from '../types';
 import { PROGRESS_STEPS, STAGE_META, normalizeStage } from '../utils/submissionStage';
@@ -76,4 +77,22 @@ export function Deadline({ participation }: { participation: ParticipationWindow
   const days = Math.ceil((new Date(`${participation.closes_on}T23:59:59`).getTime() - Date.now()) / 86_400_000);
   const left = days <= 0 ? 'last day' : days === 1 ? '1 day left' : `${days} days left`;
   return <span className={`deadline ${days <= 3 ? 'is-soon' : 'is-later'}`}>Closes {formatDate(participation.closes_on)} · {left}</span>;
+}
+
+export type EditBlock = 'reviewed' | 'closed' | null | undefined;
+
+/**
+ * Edit control for a citizen's own submission. Edits open the submit page for
+ * that bill, which loads the submission and keeps its receipt ID.
+ */
+export function EditSubmissionAction({ billId, editable, editBlock, className = '' }: { billId: string; editable?: boolean; editBlock?: EditBlock; className?: string }) {
+  if (editable) {
+    return <Link to={`/submit?bill=${encodeURIComponent(billId)}`} className={`action-button is-primary ${className}`}>Edit submission</Link>;
+  }
+  if (!editBlock) return null;
+  return (
+    <p className={`text-xs font-semibold text-[#526060] m-0 ${className}`}>
+      {editBlock === 'closed' ? "Editing is closed: the committee's call for views has ended." : 'Editing is closed: a moderator has reviewed this submission.'}
+    </p>
+  );
 }

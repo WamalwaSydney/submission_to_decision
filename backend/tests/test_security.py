@@ -172,3 +172,62 @@ async def test_committee_officer_cannot_read_another_committees_report(client, d
     own_report, _ = reports[own_bill.identifier]
     assert client.get(f"/api/v1/reports/{other_report.id}", headers=bearer(officer)).status_code == 403
     assert client.get(f"/api/v1/reports/{own_report.id}", headers=bearer(officer)).status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_gemini_key_is_sent_in_a_header_and_never_in_errors(monkeypatch):
+    import httpx
+    seen = {}
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def post(self, url, **kwargs):
+            seen["url"], seen["headers"], seen["params"] = url, kwargs.get("headers", {}), kwargs.get("params")
+            return httpx.Response(400, json={"error": {"message": "API key not valid."}}, request=httpx.Request("POST", url))
+
+    monkeypatch.setenv("GEMINI_API_KEY", "secret-key-123")
+    monkeypatch.setattr(llm_matching_service.httpx, "AsyncClient", FakeClient)
+    with pytest.raises(RuntimeError) as error:
+        await llm_matching_service.propose_matches(
+            [{"id": "r1", "clause_ref": None, "submission_text": "x"}], [{"id": "e1", "clause_ref": None, "extracted_summary": "y"}])
+    assert seen["headers"].get("x-goog-api-key") == "secret-key-123"
+    assert not seen["params"] and "secret-key-123" not in seen["url"]
+    assert "secret-key-123" not in str(error.value) and "API key not valid" in str(error.value)
+
+
+@pytest.mark.asyncio
+async def test_gemini_busy_responses_are_retried(monkeypatch):
+    import httpx
+    calls = []
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def post(self, url, **kwargs):
+            calls.append(url)
+            request = httpx.Request("POST", url)
+            if len(calls) < 3:
+                return httpx.Response(503, json={"error": {"message": "high demand"}}, request=request)
+            return httpx.Response(200, json={"candidates": [{"content": {"parts": [{"text": '{"matches": []}'}]}}]}, request=request)
+
+    monkeypatch.setenv("GEMINI_API_KEY", "k")
+    monkeypatch.setattr(llm_matching_service, "RETRY_BASE_SECONDS", 0)
+    monkeypatch.setattr(llm_matching_service.httpx, "AsyncClient", FakeClient)
+    result = await llm_matching_service.propose_matches(
+        [{"id": "r1", "clause_ref": None, "submission_text": "x"}], [{"id": "e1", "clause_ref": None, "extracted_summary": "y"}])
+    assert result == [] and len(calls) == 3

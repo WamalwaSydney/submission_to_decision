@@ -1,6 +1,7 @@
 # Database Seed Script
 
 import asyncio
+import os
 import uuid
 from datetime import datetime, date, timezone
 from sqlalchemy import select
@@ -143,5 +144,17 @@ async def seed():
         print(f"  - {len(notices)} notices")
         print(f"  - {len(audit_entries)} audit log entries")
 
+LOCAL_HOSTS = {"localhost", "127.0.0.1", "postgres", "db"}
+
+
+def ensure_local_database() -> None:
+    """Demo accounts have published passwords, so never seed a hosted database by accident."""
+    host = engine.url.host or "localhost"
+    if host not in LOCAL_HOSTS and os.getenv("ALLOW_SEED_NON_LOCAL") != "1":
+        raise SystemExit(f"Refusing to seed demo data into {host}: it does not look like a local database. "
+                         "Set ALLOW_SEED_NON_LOCAL=1 only for a throwaway database.")
+
+
 if __name__ == "__main__":
+    ensure_local_database()
     asyncio.run(seed())

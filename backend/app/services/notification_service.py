@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import Message, ParticipationReceipt, User, LegislativeItem
 from app.audit import record_audit
 
-MODEL = os.getenv("GEMINI_NOTIFICATION_MODEL", os.getenv("GEMINI_MATCH_MODEL", "gemini-2.5-flash-lite"))
+MODEL = os.getenv("GEMINI_NOTIFICATION_MODEL", os.getenv("GEMINI_MATCH_MODEL", "gemini-3.5-flash-lite"))
 BASE_URL = os.getenv("GEMINI_API_BASE", "https://generativelanguage.googleapis.com/v1beta").rstrip("/")
 
 TEMPLATES: dict[str, dict[str, tuple[str, str]]] = {
@@ -68,7 +68,7 @@ async def _draft(event_type: str, language: str, facts: dict[str, Any], fallback
     body = {"contents": [{"role": "user", "parts": [{"text": prompt}]}], "generationConfig": {"temperature": 0.1, "responseMimeType": "application/json", "maxOutputTokens": 500}}
     try:
         async with httpx.AsyncClient(timeout=20) as client:
-            response = await client.post(f"{BASE_URL}/models/{MODEL}:generateContent", params={"key": key}, json=body)
+            response = await client.post(f"{BASE_URL}/models/{MODEL}:generateContent", headers={"x-goog-api-key": key}, json=body)
             response.raise_for_status()
             payload = response.json()
         parts = payload.get("candidates", [{}])[0].get("content", {}).get("parts", [])

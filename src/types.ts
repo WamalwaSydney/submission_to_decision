@@ -205,6 +205,10 @@ export interface ModerationAction {
   reviewer_id?: string;
   appeal_status: 'none' | 'appealed' | 'resolved';
   timestamp: string;
+  /** What was reported, as the moderator should see it (from the API). */
+  content_label?: string;
+  content_text?: string;
+  bill_id?: string;
 }
 
 export interface AuditLogEntry {

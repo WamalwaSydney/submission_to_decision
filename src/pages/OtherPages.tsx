@@ -1,14 +1,16 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { formatDate } from '../components/Participation';
+import { SubmissionDetailDialog } from './BillsPages';
 import { Link } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
-import { Download, FileText, BarChart3, Shield, AlertTriangle, Users, Eye, Clock, CheckCircle2, XCircle, Sparkles, Lock, Flag, Info, FileCheck2 } from 'lucide-react';
+import { Download, FileText, BarChart3, Shield, AlertTriangle, Users, Eye, Clock, CheckCircle2, XCircle, Sparkles, Lock, Flag, Info, FileCheck2, Search, ChevronRight } from 'lucide-react';
 import { motion } from 'framer-motion';
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   PieChart, Pie, Cell,
 } from 'recharts';
-import { Card, DisclaimerBox, InfoBox, Badge, Label, InputField, StatusBadge } from '../components/UI';
-import { STAGE_META, STAGE_ORDER } from '../utils/submissionStage';
+import { Card, DisclaimerBox, InfoBox, Badge, Label, InputField, StatusBadge, Pager, usePaged } from '../components/UI';
+import { STAGE_META, STAGE_ORDER, SubmissionStage } from '../utils/submissionStage';
 import { api } from '../api/endpoints';
 
 export function ResearchExportPage() {
@@ -533,10 +535,25 @@ export function RepresentativeDashboardPage() {
   );
 }
 
+const RECEIPTS_PER_PAGE = 10;
+type ReceiptGroup = 'all' | 'editable' | 'in_progress' | 'outcome';
+const RECEIPT_GROUPS: { id: ReceiptGroup; label: string; note: string }[] = [
+  { id: 'all', label: 'All', note: 'Every submission you have made' },
+  { id: 'editable', label: 'Can edit', note: 'The committee is still taking views and no moderator has reviewed it' },
+  { id: 'in_progress', label: 'In progress', note: 'Waiting for the committee or its report' },
+  { id: 'outcome', label: 'Outcome recorded', note: "The committee's report has a response, or none" },
+];
+
 export function MyReceiptsPage() {
-  const { state, getSubmissionStatus, getSubmissionLodgingStatus } = useApp();
+  const { state, getSubmissionStatus } = useApp();
   const [accountReceipts, setAccountReceipts] = useState<any[] | null>(null);
   const [receiptsError, setReceiptsError] = useState('');
+  const [group, setGroup] = useState<ReceiptGroup>('all');
+  const [query, setQuery] = useState('');
+  const [stage, setStage] = useState('all');
+  const [legislature, setLegislature] = useState('all');
+  const [sortBy, setSortBy] = useState<'newest' | 'oldest' | 'bill'>('newest');
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!state.currentUser) return;
@@ -552,6 +569,51 @@ export function MyReceiptsPage() {
     return () => { cancelled = true; };
   }, [state.currentUser?.id]);
 
+  const myReceipts: any[] = useMemo(
+    () => accountReceipts ?? state.receipts.filter(r => r.author_id === state.currentUser?.id),
+    [accountReceipts, state.receipts, state.currentUser?.id],
+  );
+  const billsById = useMemo(() => new Map(state.bills.map(b => [b.id, b])), [state.bills]);
+  const stageOf = (receipt: any) => getSubmissionStatus(receipt.id) as SubmissionStage;
+  const groupOf = (receipt: any): 'in_progress' | 'outcome' => ((STAGE_META[stageOf(receipt)]?.step ?? 1) >= 5 ? 'outcome' : 'in_progress');
+  const legislatures = useMemo(
+    () => [...new Set(myReceipts.map(r => billsById.get(r.legislative_item_id)?.institution).filter(Boolean) as string[])].sort(),
+    [myReceipts, billsById],
+  );
+
+  // Every filter except the group chips, so each chip shows what it would leave.
+  const base = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return myReceipts
+      .filter(r => stage === 'all' || stageOf(r) === stage)
+      .filter(r => legislature === 'all' || billsById.get(r.legislative_item_id)?.institution === legislature)
+      .filter(r => !needle || `${r.public_id} ${billsById.get(r.legislative_item_id)?.title || ''} ${r.clause_ref || ''} ${r.submission_text || ''}`.toLowerCase().includes(needle));
+  }, [myReceipts, billsById, query, stage, legislature, state.matches]);
+
+  const counts: Record<ReceiptGroup, number> = {
+    all: base.length,
+    editable: base.filter(r => r.editable).length,
+    in_progress: base.filter(r => groupOf(r) === 'in_progress').length,
+    outcome: base.filter(r => groupOf(r) === 'outcome').length,
+  };
+
+  const receipts = useMemo(() => {
+    const title = (r: any) => billsById.get(r.legislative_item_id)?.title || '';
+    const sorters = {
+      newest: (a: any, b: any) => (b.timestamp || '').localeCompare(a.timestamp || ''),
+      oldest: (a: any, b: any) => (a.timestamp || '').localeCompare(b.timestamp || ''),
+      bill: (a: any, b: any) => title(a).localeCompare(title(b)),
+    };
+    return base
+      .filter(r => group === 'all' || (group === 'editable' ? r.editable : groupOf(r) === group))
+      .sort(sorters[sortBy]);
+  }, [base, group, sortBy, billsById]);
+
+  const paged = usePaged(receipts, RECEIPTS_PER_PAGE, `${group}|${query}|${stage}|${legislature}|${sortBy}`);
+  const selected = myReceipts.find(r => r.id === selectedId) || null;
+  const filtersActive = group !== 'all' || query.trim() !== '' || stage !== 'all' || legislature !== 'all';
+  const clearFilters = () => { setGroup('all'); setQuery(''); setStage('all'); setLegislature('all'); };
+
   if (!state.currentUser) {
     return (
       <div className="text-center py-16">
@@ -564,9 +626,6 @@ export function MyReceiptsPage() {
     );
   }
 
-  const myReceipts = accountReceipts ?? state.receipts.filter(r => r.author_id === state.currentUser?.id);
-
-
   return (
     <div>
       <div className="inline-flex items-center gap-2 mb-4">
@@ -577,81 +636,113 @@ export function MyReceiptsPage() {
         My <span className="gradient-text">Receipts</span>
       </h1>
       <p className="text-lg text-surface-600 leading-relaxed max-w-3xl mb-8">
-        All receipts issued for your submissions.
+        Every submission you have made, where it is, and whether you can still edit it. Select a row to read it in full.
       </p>
 
       {receiptsError && <div role="alert" className="mb-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-800">Your receipts could not be refreshed from the server: {receiptsError}</div>}
 
       {myReceipts.length === 0 ? (
         <Card className="!p-12 relative overflow-hidden text-center">
-          <div className="absolute -top-24 -right-24 w-56 h-56 rounded-full bg-primary-100/50 blur-3xl pointer-events-none" />
-          <div className="relative">
-            <div className="mx-auto w-20 h-20 rounded-full bg-gradient-to-br from-surface-100 to-surface-200 flex items-center justify-center mb-5">
-              <FileCheck2 className="h-10 w-10 text-surface-400" />
-            </div>
-            <p className="text-xl font-bold text-surface-700 mb-2">No submissions yet</p>
-            <p className="text-surface-500 mb-4">
-              You haven&apos;t submitted any views yet.
-            </p>
-            <a href="/submit" className="btn-primary inline-flex items-center gap-2 mt-2">
-              <Sparkles className="h-4 w-4" /> Submit your first view
-            </a>
+          <div className="mx-auto w-20 h-20 rounded-full bg-gradient-to-br from-surface-100 to-surface-200 flex items-center justify-center mb-5">
+            <FileCheck2 className="h-10 w-10 text-surface-400" />
           </div>
+          <p className="text-xl font-bold text-surface-700 mb-2">No submissions yet</p>
+          <p className="text-surface-500 mb-4">You have not submitted any views yet.</p>
+          <Link to="/submit" className="btn-primary inline-flex items-center gap-2 mt-2">Submit your first view</Link>
         </Card>
       ) : (
-        <div className="space-y-4">
-          {myReceipts.map((receipt, i) => {
-            const bill = state.bills.find(b => b.id === receipt.legislative_item_id);
-            const status = getSubmissionStatus(receipt.id);
-            
-            return (
-              <motion.div
-                key={receipt.id}
-                initial={{ opacity: 0, y: 14 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true }}
-                transition={{ duration: 0.35, delay: i * 0.04 }}
-              >
-                <Card className="!p-0 relative overflow-hidden">
-                  <div className="absolute inset-y-0 left-0 w-1 rounded-l-2xl bg-gradient-to-b from-primary-400 to-accent-600" />
-                  <div className="p-5 md:p-6">
-                    <div className="flex flex-wrap items-start justify-between gap-4 mb-4">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex flex-wrap items-center gap-3 mb-2">
-                          <span className="font-mono font-black text-primary-700 bg-gradient-to-r from-primary-50 to-accent-50 px-3 py-1.5 rounded-xl border border-primary-100 text-sm tracking-wide">
-                            {receipt.public_id}
-                          </span>
-                          <StatusBadge status={status} />
-                        </div>
-                        <p className="text-sm font-semibold text-surface-800 mb-1">{bill?.title}</p>
-                        <p className="text-xs text-surface-500 font-medium flex items-center gap-1.5">
-                          <Clock className="h-3.5 w-3.5" />
-                          {new Date(receipt.timestamp).toLocaleString()}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="bg-gradient-to-br from-surface-50/80 to-white rounded-xl p-4 border border-surface-100 mb-4">
-                      <p className="text-sm text-surface-800 leading-relaxed line-clamp-2">{receipt.submission_text}</p>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-3 pt-3 border-t border-surface-100">
-                      <Link
-                        to={`/receipt-lookup?id=${receipt.public_id}`}
-                        className="btn-secondary inline-flex items-center gap-2 text-sm !py-2 !px-4"
-                      >
-                        <Eye className="h-4 w-4" /> View Details
-                      </Link>
-                      <span className="text-xs font-semibold text-surface-500 ml-auto flex items-center gap-1.5">
-                        <FileCheck2 className="h-3.5 w-3.5" />
-                        Lodging: <span className="font-bold text-surface-700">{getSubmissionLodgingStatus(receipt.id)}</span>
-                      </span>
-                    </div>
-                  </div>
-                </Card>
-              </motion.div>
-            );
-          })}
-        </div>
+        <Card className="!p-6 md:!p-7">
+          <section className="bill-filters mb-4" aria-label="Filter your submissions">
+            <div className="bill-filter-chips" role="tablist" aria-label="Submission group">
+              {RECEIPT_GROUPS.map(item => (
+                <button key={item.id} type="button" role="tab" aria-selected={group === item.id} className={`bill-chip ${group === item.id ? 'is-active' : ''}`} onClick={() => setGroup(item.id)} title={item.note}>
+                  {item.label} <span>{counts[item.id]}</span>
+                </button>
+              ))}
+            </div>
+            <div className="bill-filter-row notice-filter-row">
+              <div className="bill-search">
+                <label htmlFor="receipt-search" className="sr-only">Search your submissions</label>
+                <Search className="h-5 w-5" aria-hidden="true" />
+                <input id="receipt-search" type="search" value={query} onChange={e => setQuery(e.target.value)} placeholder="Search receipts" className="input-field" />
+              </div>
+              <label className="sr-only" htmlFor="receipt-stage">Stage</label>
+              <select id="receipt-stage" className="input-field" value={stage} onChange={e => setStage(e.target.value)}>
+                <option value="all">All stages</option>
+                {STAGE_ORDER.map(s => <option key={s} value={s}>{STAGE_META[s].label}</option>)}
+              </select>
+              <label className="sr-only" htmlFor="receipt-legislature">Legislature</label>
+              <select id="receipt-legislature" className="input-field" value={legislature} onChange={e => setLegislature(e.target.value)}>
+                <option value="all">All legislatures</option>
+                {legislatures.map(name => <option key={name} value={name}>{name}</option>)}
+              </select>
+              <label className="sr-only" htmlFor="receipt-sort">Sort</label>
+              <select id="receipt-sort" className="input-field" value={sortBy} onChange={e => setSortBy(e.target.value as typeof sortBy)}>
+                <option value="newest">Newest first</option>
+                <option value="oldest">Oldest first</option>
+                <option value="bill">Bill title A–Z</option>
+              </select>
+            </div>
+          </section>
+
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+            <p className="text-sm font-semibold text-surface-600 m-0" role="status">
+              {receipts.length ? `${paged.summary} ${receipts.length === 1 ? 'submission' : 'submissions'}` : 'No submissions'}
+              {receipts.length !== myReceipts.length ? ` (filtered from ${myReceipts.length})` : ''}
+            </p>
+            {filtersActive && <button type="button" onClick={clearFilters} className="text-sm font-bold text-primary-600 hover:underline">Clear filters</button>}
+          </div>
+
+          {receipts.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-surface-300 p-8 text-center text-sm text-surface-600">
+              <p className="font-bold text-surface-800 mb-1">No submissions match these filters.</p>
+              <p className="m-0">Try another group, stage or search term.</p>
+            </div>
+          ) : (
+            <div className="submissions-table-wrap">
+              <table className="submissions-table">
+                <thead>
+                  <tr><th>Receipt</th><th>Bill</th><th>Submitted</th><th>Stage</th><th>Editing</th><th><span className="sr-only">Open</span></th></tr>
+                </thead>
+                <tbody>
+                  {paged.rows.map(receipt => {
+                    const bill = billsById.get(receipt.legislative_item_id);
+                    const open = () => setSelectedId(receipt.id);
+                    return (
+                      <tr key={receipt.id} tabIndex={0} onClick={open} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } }} aria-label={`Open submission ${receipt.public_id}`}>
+                        <td><span className="receipt-id">{receipt.public_id}</span>{(receipt.revision || 1) > 1 && <span className="yours">Edited</span>}</td>
+                        <td>
+                          <div className="excerpt !max-w-[300px] font-semibold">{bill?.title || 'Bill no longer listed'}</div>
+                          <div className="text-xs text-surface-500">{bill?.institution}{receipt.clause_ref ? ` · ${receipt.clause_ref}` : ''}</div>
+                        </td>
+                        <td className="whitespace-nowrap">{formatDate(receipt.timestamp)}</td>
+                        <td><StatusBadge status={stageOf(receipt)} /></td>
+                        <td className="whitespace-nowrap text-xs font-bold">
+                          {receipt.editable
+                            ? <span className="text-accent-700">Can edit</span>
+                            : <span className="text-surface-500">{receipt.edit_block === 'reviewed' ? 'Reviewed' : 'Closed'}</span>}
+                        </td>
+                        <td className="chevron"><ChevronRight size={18} aria-hidden="true" /></td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <Pager page={paged.page} pageCount={paged.pageCount} onChange={paged.setPage} label="Submission pages" className="mt-4 !border !border-[#e2ded5] !rounded-2xl" />
+        </Card>
       )}
+
+      <SubmissionDetailDialog
+        receipt={selected}
+        open={Boolean(selected)}
+        onClose={() => setSelectedId(null)}
+        isMine
+        canOpenDocument
+        myEdit={selected ? { editable: Boolean(selected.editable), edit_block: selected.edit_block } : null}
+        showBill
+      />
     </div>
   );
 }

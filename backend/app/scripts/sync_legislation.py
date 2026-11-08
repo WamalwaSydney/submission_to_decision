@@ -54,6 +54,14 @@ COMMITTEES_INDEX = f"{BASE}/the-national-assembly/committees"
 TRACKER_INDEX = f"{BASE}/legislative-proposals-tracker"
 BILL_TRACKER_INDEX = f"{BASE}/the-national-assembly/house-business/bill-tracker"
 MEMORANDA_INDEX = f"{BASE}/submission-memoranda"
+# Parliament's "Submission of Memoranda" listings are stale (2019–2020 treaty
+# adverts). Current calls for memoranda are standalone pages, found through the
+# site search and the House landing pages.
+NOTICE_SEARCH_QUERIES = ("invitation to submit memoranda", "public hearings memoranda", "submission of memoranda")
+NOTICE_SEARCH_PAGES = 4
+NOTICE_SEED_PAGES = (f"{BASE}/", f"{BASE}/the-national-assembly", f"{BASE}/the-senate")
+NOTICE_SLUG_RE = re.compile(r"memorand|public-hearing", re.I)
+STALE_NOTICE_PATHS = ("/submission-memoranda", "/submission-memoranda-0")
 HEADERS = {"User-Agent": "UraiaLegislationSync/1.0 (civic-tech research; non-commercial)"}
 CONCURRENCY = 4
 POLITE_DELAY_S = 0.35
@@ -68,7 +76,7 @@ COMMITTEE_KEY_ALIASES = {
     "transport and housing": "transport and infrastructure",
 }
 BILL_REF_RE = re.compile(
-    r"\b(?P<house>national\s+assembly|na|senate)\s*bill\s*(?:no\.?\s*)?(?P<number>\d+)\s*(?:of\s+)?(?:[A-Za-z]+\s+){0,3}(?P<year>20\d{2})\b",
+    r"\b(?P<house>national\s+assembly|na|senate)\s*bills?\s*(?:no\.?\s*)?(?P<number>\d+)\s*(?:of\s+)?(?:[A-Za-z]+\s+){0,3}(?P<year>20\d{2})\b",
     re.I,
 )
 GENERIC_BILL_REF_RE = re.compile(r"\bbill\s*(?:no\.?\s*)?(\d+)\s*(?:of\s+)?(?:[A-Za-z]+\s+){0,3}(20\d{2})\b", re.I)
@@ -79,7 +87,7 @@ BILL_TRACKER_REF_RE = re.compile(r"\b(?P<house>national\s+assembly|na|senate|sen
 YEAR_RE = re.compile(r"\b(20\d{2})\b")
 DATE_RE = re.compile(
     r"\b(\d{1,2})\s*(?:st|nd|rd|th)?\s+"
-    r"(January|February|March|April|May|June|July|August|September|October|November|December)\s+(20\d{2})\b",
+    r"(January|February|March|April|May|June|July|August|September|October|November|December),?\s+(20\d{2})\b",
     re.I,
 )
 NUMERIC_DATE_RE = re.compile(r"\b\d{1,2}\s*/\s*\d{1,2}\s*/\s*20\d{2}\b")
@@ -669,6 +677,103 @@ def discover_notice_urls(html: str) -> list[str]:
     return list(dict.fromkeys(urls))
 
 
+# "to be received on or before Friday, 26 th September, 2025 at 5.00 p.m."
+# "All submissions must be received by 5:00 pm on Thursday, 28th August 2025"
+NOTICE_DEADLINE_RE = re.compile(
+    r"(?:on\s+or\s+before|not\s+later\s+than|received\s+by|deadline\s*:?)\s*"
+    r"(?:[\d.:]+\s*(?:a\.?\s?m\.?|p\.?\s?m\.?)\s*(?:on\s+)?)?"
+    r"(?:(?:mon|tues|wednes|thurs|fri|satur|sun)day\s*,?\s*)?"
+    r"(\d{1,2})\s*(?:st|nd|rd|th)?\s+([A-Za-z]+)\s*,?\s*(20\d{2})",
+    re.I,
+)
+# "THE PLANT PROTECTION BILL, 2025 (NATIONAL ASSEMBLY BILLS NO. 28 OF 2025)"
+NOTICE_FORMAL_BILL_RE = re.compile(
+    r"\bTHE\s+([A-Z][A-Za-z0-9 &'’(),./-]{2,140}?\bBILL)\s*,?\s*(?:20\d{2})?\s*"
+    r"\(\s*(NATIONAL\s+ASSEMBLY|SENATE)\s+BILLS?\s+NO\.?\s*(\d+)\s+OF\s*(20\d{2})\s*\)",
+    re.I,
+)
+# Fragments that the line scan used to mistake for bill titles.
+NOTICE_JUNK_TITLE_RE = re.compile(
+    r"^(?:\(|amendment\)|national\s+assembly\s+bill|senate\s+bill|bill\s+no|it\s+is\s+notified|invitation|notification|"
+    r"submitted\s+by|and\s+whereas|hearings|assembly\s+bill)|\bis\s+a\s+bill\b|\bthe\s+kenyan\s+parliament\s+website\b",
+    re.I,
+)
+
+
+# A bill's name inside prose: capitalised words (and short joining words or a
+# bracketed part such as "(Amendment)") ending in "Bill".
+BILL_NAME_RE = re.compile(
+    r"((?:[A-Z][A-Za-z'’&.-]*|\([A-Za-z0-9 .'’-]{1,40}\))(?:\s+(?:[A-Z][A-Za-z'’&.-]*|\([A-Za-z0-9 .'’-]{1,40}\)|of|and|for|on|in|to|the|OF|AND|FOR|ON|IN|TO|THE))*\s+(?:Bill|BILL))\b"
+)
+PROSE_PREFIX_RE = re.compile(
+    r"^.*?\b(?:consideration\s+by\s+the\s+(?:national\s+assembly|senate)\s+of|memoranda\s+on|views\s+on|submissions\s+on)\s+(?:the\s+)?",
+    re.I,
+)
+
+
+def bill_name_from_text(line: str) -> str | None:
+    """The bill's name from a sentence such as "...invites memoranda on the X Bill (Senate Bills No. 2 of 2026)"."""
+    line = PROSE_PREFIX_RE.sub("", clean(line))
+    for match in BILL_NAME_RE.finditer(line):
+        name = re.sub(r"^(?:The|And|Of|On|In|To)\s+", "", clean(match.group(1)))
+        words = name.split()
+        if 2 <= len(words) <= 16 and not NOTICE_JUNK_TITLE_RE.search(name) and not re.match(r"^(?:Senate|National Assembly|Standing|Committee)\b", name, re.I):
+            return name
+    return None
+
+
+def notice_deadline(text: str) -> date | None:
+    """The closing date for memoranda, or None when the notice does not state one in text."""
+    for match in NOTICE_DEADLINE_RE.finditer(text):
+        month = MONTHS.get(match.group(2).lower())
+        if month:
+            try:
+                return date(int(match.group(3)), month, int(match.group(1)))
+            except ValueError:
+                continue
+    return None
+
+
+def canonical_notice_url(url: str) -> str:
+    parsed = urlparse(url)
+    path = parsed.path.replace("/index.php/", "/").rstrip("/")
+    return f"https://www.parliament.go.ke{path}"
+
+
+def notice_page_links(html: str, page_url: str) -> list[str]:
+    """Links on a Parliament page that point to an individual call for memoranda."""
+    found = []
+    for a in BeautifulSoup(html, "lxml").select("a[href]"):
+        url = urljoin(page_url, a["href"]).split("#")[0]
+        parsed = urlparse(url)
+        host = (parsed.hostname or "").lower()
+        if host not in {"parliament.go.ke", "www.parliament.go.ke"} or PDF_RE.search(url):
+            continue
+        path = parsed.path.replace("/index.php/", "/").rstrip("/")
+        if not NOTICE_SLUG_RE.search(path) or path in STALE_NOTICE_PATHS or path.startswith(("/search", "/intranet", "/user")):
+            continue
+        found.append(canonical_notice_url(url))
+    return list(dict.fromkeys(found))
+
+
+async def discover_notice_pages(client: httpx.AsyncClient) -> list[str]:
+    """Find current calls for memoranda through the House pages and the site search."""
+    urls: list[str] = []
+    pages = list(NOTICE_SEED_PAGES) + [
+        f"{BASE}/search/node?keys={query.replace(' ', '+')}&page={page}"
+        for query in NOTICE_SEARCH_QUERIES for page in range(NOTICE_SEARCH_PAGES)
+    ]
+    for page_url in pages:
+        try:
+            response = await get(client, page_url)
+        except httpx.HTTPError as exc:
+            log.warning("Notice discovery page unavailable %s: %s", page_url, exc)
+            continue
+        urls.extend(notice_page_links(response.text, page_url))
+        await asyncio.sleep(POLITE_DELAY_S)
+    return list(dict.fromkeys(urls))
+
+
 def parse_date_from_text(value: str) -> date | None:
     m = DATE_RE.search(value)
     return date(int(m.group(3)), MONTHS[m.group(2).lower()], int(m.group(1))) if m else None
@@ -683,8 +788,22 @@ def parse_notice_page(html: str, url: str, attachment_text: str = "") -> list[No
     notice_date = parse_date_from_text(published.group(1)) if published else None
     if not notice_date:
         notice_date = parse_date_from_text(text_value)
-    deadline_match = re.search(r"(?:on or before|to be received[^.]{0,50}\bon or before|by)\s+(?:\w+\s*,?\s*)?(\d{1,2})\s*(?:st|nd|rd|th)?\s+(\w+)\s+(20\d{2})", source_text, re.I)
-    deadline = date(int(deadline_match.group(3)), MONTHS[deadline_match.group(2).lower()], int(deadline_match.group(1))) if deadline_match and deadline_match.group(2).lower() in MONTHS else None
+    deadline = notice_deadline(source_text)
+    if deadline is None:
+        deadline_match = re.search(r"(?:on or before|to be received[^.]{0,50}\bon or before|by)\s+(?:\w+\s*,?\s*)?(\d{1,2})\s*(?:st|nd|rd|th)?\s+(\w+)\s+(20\d{2})", source_text, re.I)
+        deadline = date(int(deadline_match.group(3)), MONTHS[deadline_match.group(2).lower()], int(deadline_match.group(1))) if deadline_match and deadline_match.group(2).lower() in MONTHS else None
+    if notice_date and deadline and notice_date > deadline:
+        # Pages are sometimes posted after the deadline; the window opened on the
+        # latest date in the notice that comes before its closing date.
+        earlier = []
+        for match in DATE_RE.finditer(source_text):
+            try:
+                found = date(int(match.group(3)), MONTHS[match.group(2).lower()], int(match.group(1)))
+            except (KeyError, ValueError):
+                continue
+            if found < deadline:
+                earlier.append(found)
+        notice_date = max(earlier) if earlier else None
     if not notice_date or not deadline:
         log.warning("Skipping notice without both publication date and deadline: %s", url)
         return []
@@ -700,35 +819,44 @@ def parse_notice_page(html: str, url: str, attachment_text: str = "") -> list[No
     candidate_refs: dict[str, re.Match[str] | None] = {}
     structured_refs: dict[str, tuple[int, int]] = {}
     formal_text = source_text.split("WHEREAS", 1)[0]
-    formal_pattern = re.compile(r"(?:^|[;(])\s*(?:\(?\d+\)?[.)]\s*)?THE\s+([A-Z][A-Z0-9 &'(),./-]{2,120}?\bBILL)\s*\(\s*NATIONAL\s+ASSEMBLY\s+BILL\s+NO\.?\s*(\d+)\s+OF\s*(20\d{2})")
-    for formal in formal_pattern.finditer(formal_text):
+    structured_houses: dict[str, str] = {}
+    for formal in NOTICE_FORMAL_BILL_RE.finditer(formal_text):
         formal_title = clean(formal.group(1))
         formal_title = re.sub(r"^(?:AND\s+\(\d+\)\s+)?THE\s+", "", formal_title, flags=re.I)
+        # A run of several bills ("...; (2) THE X BILL (...)") keeps only the last title.
+        formal_title = clean(re.split(r"\(\d+\)\s+THE\s+|;\s*", formal_title, flags=re.I)[-1])
+        # Prose ("…invites the public to submit memoranda on the X Bill") keeps only the bill's name.
+        formal_title = bill_name_from_text(formal_title) or (formal_title if len(formal_title.split()) <= 12 else "")
+        if not formal_title:
+            continue
         formal_key = canonical_title(formal_title)
-        if formal_key not in seen_candidate_keys:
+        if formal_key and formal_key not in seen_candidate_keys and not NOTICE_JUNK_TITLE_RE.search(formal_title):
             candidates.append(formal_title)
             seen_candidate_keys.add(formal_key)
-            structured_refs[formal_title] = (int(formal.group(2)), int(formal.group(3)))
+            structured_refs[formal_title] = (int(formal.group(3)), int(formal.group(4)))
+            structured_houses[formal_title] = canonical_house(formal.group(2)) or "na"
     for line in ([] if structured_refs else f"{article.get_text(chr(10), strip=True)}\n{attachment_text}".splitlines()):
         line = clean(line)
         if re.search(r"\bbill\b", line, re.I) and len(line) >= 10:
-            match = re.search(r"(?:^|[;(])\s*(?:\(?\d+\)?[.)]\s*)?(?:the\s+)?([A-Za-z][A-Za-z0-9 &'’(),./-]{2,120}?\bbill)\b", line, re.I)
-            candidate = clean(match.group(1)) if match else line
+            candidate = bill_name_from_text(line)
+            if not candidate:
+                continue
             candidate = re.sub(r"\s*\([^)]*(?:bill\s+no|national assembly)[^)]*\)", "", candidate, flags=re.I)
             candidate = re.sub(r"\s+20\d{2}\s*$", "", candidate)
             candidate_key = canonical_title(candidate)
-            if candidate_key not in seen_candidate_keys and not candidate.lower().startswith(("invitation", "submitted by", "and whereas", "hearings", "assembly bill")):
+            if candidate_key and candidate_key not in seen_candidate_keys and not NOTICE_JUNK_TITLE_RE.search(candidate) and len(candidate.split()) >= 2:
                 candidates.append(candidate)
                 seen_candidate_keys.add(candidate_key)
                 candidate_refs[candidate] = BILL_REF_RE.search(line) or GENERIC_BILL_REF_RE.search(line)
     if not candidates:
-        candidates = [clean(soup.title.get_text(" ", strip=True))]
+        log.info("Notice names no bill; skipping: %s", url)
+        return []
 
     rows = []
     for title in candidates:
         if title in structured_refs:
             number, year = structured_refs[title]
-            house = "na"
+            house = structured_houses.get(title, "na")
             rows.append(NoticeRow(title=text_value[:500], source_url=url, notice_date=notice_date, deadline=deadline, committee_name=committee, bill_title=title, bill_house=house, bill_number=number, bill_year=year, document_urls=document_urls))
             continue
         ref = candidate_refs.get(title)
@@ -741,7 +869,11 @@ def parse_notice_page(html: str, url: str, attachment_text: str = "") -> list[No
         number = int(ref.group("number")) if ref else (int(generic.group(1)) if generic else None)
         year = int(ref.group("year")) if ref else (int(generic.group(2)) if generic else (YEAR_RE.search(title).group(1) if YEAR_RE.search(title) else notice_date.year))
         rows.append(NoticeRow(title=text_value[:500], source_url=url, notice_date=notice_date, deadline=deadline, committee_name=committee, bill_title=title, bill_house=house, bill_number=number, bill_year=int(year), document_urls=document_urls))
-    return rows
+    unique: dict[tuple, NoticeRow] = {}
+    for row in rows:
+        key = (row.bill_house, row.bill_number, row.bill_year) if row.bill_number is not None else ("title", canonical_title(row.bill_title), row.bill_year)
+        unique.setdefault(key, row)
+    return list(unique.values())
 
 
 @dataclass(frozen=True)
@@ -828,7 +960,8 @@ ALTER TABLE committee_reports ADD COLUMN IF NOT EXISTS bill_number INTEGER;
 ALTER TABLE committee_reports ADD COLUMN IF NOT EXISTS bill_year INTEGER;
 ALTER TABLE committee_reports ADD COLUMN IF NOT EXISTS source_url VARCHAR(1000);
 ALTER TABLE committee_reports ALTER COLUMN bill_ref DROP NOT NULL;
-CREATE UNIQUE INDEX IF NOT EXISTS uq_notice_source_url ON notice_records(source_url) WHERE source_url IS NOT NULL;
+DROP INDEX IF EXISTS uq_notice_source_url;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_notice_source_bill ON notice_records(source_url, bill_ref) WHERE source_url IS NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS uq_report_source_committee ON committee_reports(source_url, committee_url) WHERE source_url IS NOT NULL AND committee_url IS NOT NULL;
 CREATE TABLE IF NOT EXISTS legislative_link_reviews (
     id BIGSERIAL PRIMARY KEY,
@@ -1014,9 +1147,22 @@ async def upsert_bills(conn, rows: list[BillRow], as_at: date) -> tuple[int, int
 # --------------------------------------------------------------------------
 # Notices
 # --------------------------------------------------------------------------
-async def _upsert_notice(conn, notice: NoticeRow) -> None:
-    result = await conn.execute(text("SELECT id FROM legislative_items WHERE bill_house=:house AND bill_number IS NOT DISTINCT FROM :number AND bill_year=:year ORDER BY id LIMIT 1"), {"house": notice.bill_house, "number": notice.bill_number, "year": notice.bill_year})
-    bill = result.first()
+async def _notice_bill(conn, notice: NoticeRow):
+    """The bill a notice is about: by official number, or by title when the notice gives no number."""
+    if notice.bill_number is not None:
+        return (await conn.execute(text(
+            "SELECT id FROM legislative_items WHERE bill_house=:house AND bill_number=:number AND bill_year=:year ORDER BY id LIMIT 1"),
+            {"house": notice.bill_house, "number": notice.bill_number, "year": notice.bill_year})).first()
+    wanted = canonical_title(notice.bill_title)
+    rows = (await conn.execute(text(
+        "SELECT id, title FROM legislative_items WHERE bill_house=:house AND bill_year=:year AND is_simulated=false"),
+        {"house": notice.bill_house, "year": notice.bill_year})).fetchall()
+    matches = [row for row in rows if wanted and canonical_title(row[1]) == wanted]
+    return (matches[0][0],) if len(matches) == 1 else None
+
+
+async def _upsert_notice(conn, notice: NoticeRow):
+    bill = await _notice_bill(conn, notice)
     committee_id = await ensure_committee_id(conn, notice.committee_name)
     if not bill:
         identifier = f"{notice.bill_house.upper()}/{notice.bill_year}/Notice-{hashlib.sha1(notice.bill_title.lower().encode()).hexdigest()[:10]}"
@@ -1029,18 +1175,28 @@ async def _upsert_notice(conn, notice: NoticeRow) -> None:
     if bill:
         for document_url in notice.document_urls:
             await merge_bill_document(conn, bill[0], "Official bill document (Parliament PDF)", document_url)
-    await conn.execute(text("""INSERT INTO notice_records (id,bill_ref,institution,notice_date,window_start,window_end,mode,bill_text_accessible,source_url,source_title,committee_name,published_date) VALUES (:id,:bill,'National Assembly',:notice_date,:notice_date,:deadline,:mode,:accessible,:source_url,:title,:committee,:published) ON CONFLICT (source_url) WHERE source_url IS NOT NULL DO UPDATE SET bill_ref=EXCLUDED.bill_ref, notice_date=EXCLUDED.notice_date, window_start=EXCLUDED.window_start, window_end=EXCLUDED.window_end, mode=EXCLUDED.mode, bill_text_accessible=EXCLUDED.bill_text_accessible, source_title=EXCLUDED.source_title, committee_name=EXCLUDED.committee_name, published_date=EXCLUDED.published_date"""), {"id": uuid.uuid4(), "bill": bill[0], "notice_date": notice.notice_date, "deadline": notice.deadline, "mode": "Parliament website notice", "accessible": bool(notice.document_urls), "source_url": notice.source_url, "title": notice.title, "committee": notice.committee_name, "published": notice.notice_date})
+    await conn.execute(text("""INSERT INTO notice_records (id,bill_ref,institution,notice_date,window_start,window_end,mode,bill_text_accessible,source_url,source_title,committee_name,published_date) VALUES (:id,:bill,'National Assembly',:notice_date,:notice_date,:deadline,:mode,:accessible,:source_url,:title,:committee,:published) ON CONFLICT (source_url, bill_ref) WHERE source_url IS NOT NULL DO UPDATE SET notice_date=EXCLUDED.notice_date, window_start=EXCLUDED.window_start, window_end=EXCLUDED.window_end, mode=EXCLUDED.mode, bill_text_accessible=EXCLUDED.bill_text_accessible, source_title=EXCLUDED.source_title, committee_name=EXCLUDED.committee_name, published_date=EXCLUDED.published_date"""), {"id": uuid.uuid4(), "bill": bill[0], "notice_date": notice.notice_date, "deadline": notice.deadline, "mode": "Parliament website notice", "accessible": bool(notice.document_urls), "source_url": notice.source_url, "title": notice.title, "committee": notice.committee_name, "published": notice.notice_date})
+    return bill[0] if bill else None
 
 
 async def upsert_notices(conn, notices: list[NoticeRow]) -> int:
     done = 0
+    bills_by_page: dict[str, list] = {}
     for notice in notices:
         try:
             async with conn.begin_nested():
-                await _upsert_notice(conn, notice)
+                bill_id = await _upsert_notice(conn, notice)
+            if bill_id:
+                bills_by_page.setdefault(notice.source_url, []).append(bill_id)
             done += 1
         except SQLAlchemyError as exc:
             log.error("DB error for notice %s (%r): %s", notice.source_url, notice.bill_title, exc)
+    # A re-parsed page may now name different bills: drop rows for bills it no longer names.
+    for source_url, bill_ids in bills_by_page.items():
+        await conn.execute(
+            text("DELETE FROM notice_records WHERE source_url=:url AND NOT (bill_ref = ANY(:bills))"),
+            {"url": source_url, "bills": bill_ids},
+        )
     return done
 
 
@@ -1139,19 +1295,22 @@ async def fetch_all() -> tuple[list[BillRow], list[NoticeRow], list[dict], int, 
         log.info("Parsed %d explicit bill stages from Parliament Bills Tracker as at %s", len(stage_rows), bill_tracker_date)
         log.info("Applied current-stage data to %d existing platform bills", sum(row.stage_source_url == bill_tracker_url for row in bills))
 
-        notice_index = next((url for url in discover_notice_urls(nav.text) if url.rstrip("/").replace("/index.php", "") == MEMORANDA_INDEX), MEMORANDA_INDEX)
-        notice_listing = await get(client, notice_index)
-        def canonical_notice_url(url: str) -> str:
-            parsed = urlparse(url)
-            path = parsed.path.replace("/index.php/", "/")
-            return f"https://www.parliament.go.ke{path}".rstrip("/")
-        notice_urls = list(dict.fromkeys(canonical_notice_url(url) for url in discover_notice_urls(notice_listing.text) if canonical_notice_url(url) != MEMORANDA_INDEX.rstrip("/")))
+        notice_urls = await discover_notice_pages(client)
+        log.info("Found %d call-for-memoranda pages", len(notice_urls))
         notices: list[NoticeRow] = []
         for url in notice_urls:
-            page = await get(client, url)
+            try:
+                page = await get(client, url)
+            except httpx.HTTPError as exc:
+                log.warning("Notice page unavailable %s: %s", url, exc)
+                continue
             page_soup = BeautifulSoup(page.text, "lxml")
             attachment = next((urljoin(url, a["href"]) for a in page_soup.select("article a[href]") if PDF_RE.search(a["href"])), None)
-            attachment_text = extract_pdf((await get(client, attachment)).content) if attachment else ""
+            try:
+                attachment_text = extract_pdf((await get(client, attachment)).content) if attachment else ""
+            except (httpx.HTTPError, RuntimeError) as exc:
+                log.warning("Notice attachment unreadable %s: %s", attachment, exc)
+                attachment_text = ""
             notices.extend(parse_notice_page(page.text, url, attachment_text))
 
         sem = asyncio.Semaphore(CONCURRENCY)

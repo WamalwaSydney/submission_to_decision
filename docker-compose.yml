@@ -28,8 +28,8 @@ services:
       DB_HOST: postgres
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       GEMINI_API_BASE: ${GEMINI_API_BASE:-https://generativelanguage.googleapis.com/v1beta}
-      GEMINI_MATCH_MODEL: ${GEMINI_MATCH_MODEL:-gemini-2.5-flash-lite}
-      GEMINI_NOTIFICATION_MODEL: ${GEMINI_NOTIFICATION_MODEL:-gemini-2.5-flash-lite}
+      GEMINI_MATCH_MODEL: ${GEMINI_MATCH_MODEL:-gemini-3.5-flash-lite}
+      GEMINI_NOTIFICATION_MODEL: ${GEMINI_NOTIFICATION_MODEL:-gemini-3.5-flash-lite}
     ports:
       - "8001:8000"
     depends_on:

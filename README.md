@@ -264,7 +264,7 @@ Platform notes:
 - **Cold starts:** Render's free tier sleeps when idle, so the first request can take 30+ seconds.
 - **Storage:** uploaded committee reports and memoranda need a persistent disk (`REPORT_STORAGE_DIR`).
 - **Gemini:** set `GEMINI_API_KEY` to enable AI proposals and reworded notifications. Without it, bilingual templates are used and no AI proposals are made.
-- **Production chain:** the production receipt chain currently fails verification because of early seed receipts with placeholder hashes. A decision on an audited checkpoint is pending ([docs/DECISIONS.md](docs/DECISIONS.md)).
+- **Production chain:** demo data was removed from production on 7 November 2026 and the chain resealed under an audit-log entry; it now verifies. The seed script refuses non-local databases.
 
 ## Project structure
 

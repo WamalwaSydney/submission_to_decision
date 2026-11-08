@@ -8,7 +8,7 @@ import {
   FileCheck, Calendar, FileSearch, Gavel, Users, Download, SlidersHorizontal, RotateCcw, Flag
 } from 'lucide-react';
 import { Dialog, DialogActions, DialogContent, DialogTitle, IconButton } from '@mui/material';
-import { Deadline, StagePill, SubmissionProgress, participationFor, formatDate, formatBytes, stageTone } from '../components/Participation';
+import { Deadline, EditSubmissionAction, EditBlock, StagePill, SubmissionProgress, participationFor, formatDate, formatBytes, stageTone } from '../components/Participation';
 import { motion } from 'framer-motion';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, PieChart, Pie, Cell } from 'recharts';
 import {
@@ -262,14 +262,17 @@ function BillStageTracker({ stage, accepting }: { stage: string; accepting: bool
 
 const SUBMISSIONS_PER_PAGE = 10;
 
-function SubmissionDetailDialog({
-  receipt, open, onClose, isMine, canOpenDocument,
+export function SubmissionDetailDialog({
+  receipt, open, onClose, isMine, canOpenDocument, myEdit, showBill = false,
 }: {
   receipt: ParticipationReceipt | null;
   open: boolean;
   onClose: () => void;
   isMine: boolean;
   canOpenDocument: boolean;
+  myEdit?: { editable: boolean; edit_block?: EditBlock } | null;
+  /** Name the bill too, for lists that mix bills (My Receipts). */
+  showBill?: boolean;
 }) {
   const { state, getSubmissionStatus, getSubmissionReviewDecision, getSubmissionLodgingStatus } = useApp();
   const [reporting, setReporting] = useState(false);
@@ -329,6 +332,10 @@ function SubmissionDetailDialog({
       <DialogContent dividers sx={{ display: 'grid', gap: 2.5 }}>
         <SubmissionProgress stage={status} />
         <dl className="submission-detail-meta">
+          {showBill && (() => {
+            const bill = state.bills.find(b => b.id === receipt.legislative_item_id);
+            return <div style={{ gridColumn: "1 / -1" }}><dt>Bill</dt><dd>{bill ? <Link to={`/bills/${bill.id}`} className="underline">{bill.title}</Link> : 'Bill no longer listed'}</dd></div>;
+          })()}
           <div><dt>Submitted</dt><dd>{formatDate(receipt.timestamp)}</dd></div>
           <div><dt>Clause</dt><dd>{receipt.clause_ref || 'Whole bill'}</dd></div>
           <div><dt>Lodging</dt><dd className="capitalize">{getSubmissionLodgingStatus(receipt.id)}</dd></div>
@@ -378,14 +385,15 @@ function SubmissionDetailDialog({
         )}
       </DialogContent>
       <DialogActions sx={{ px: 3, py: 2, gap: 1, flexWrap: 'wrap' }}>
+        {isMine && myEdit && <EditSubmissionAction billId={receipt.legislative_item_id} editable={myEdit.editable} editBlock={myEdit.edit_block} className="mr-auto" />}
         <Link to={`/receipt-lookup?id=${receipt.public_id}`} className="action-button is-secondary">View full receipt</Link>
-        <button type="button" onClick={onClose} className="action-button is-primary">Close</button>
+        <button type="button" onClick={onClose} className={`action-button ${isMine && myEdit?.editable ? 'is-secondary' : 'is-primary'}`}>Close</button>
       </DialogActions>
     </Dialog>
   );
 }
 
-function SubmissionsTable({ receipts, myReceiptId }: { receipts: ParticipationReceipt[]; myReceiptId?: string }) {
+function SubmissionsTable({ receipts, myReceiptId, myEdit }: { receipts: ParticipationReceipt[]; myReceiptId?: string; myEdit?: { editable: boolean; edit_block?: EditBlock } | null }) {
   const { state, getSubmissionStatus, getSubmissionReviewDecision } = useApp();
   const [page, setPage] = useState(1);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -446,6 +454,7 @@ function SubmissionsTable({ receipts, myReceiptId }: { receipts: ParticipationRe
         onClose={() => setSelectedId(null)}
         isMine={Boolean(selected && selected.public_id === myReceiptId)}
         canOpenDocument={Boolean(selected && (selected.public_id === myReceiptId || isStaff))}
+        myEdit={myEdit}
       />
     </>
   );
@@ -454,7 +463,7 @@ function SubmissionsTable({ receipts, myReceiptId }: { receipts: ParticipationRe
 export function BillPage() {
   const { id } = useParams<{ id: string }>();
   const { state, dispatch, getBillOutcomes } = useApp();
-  const [myReceipt, setMyReceipt] = useState<{ public_id: string; editable: boolean } | null>(null);
+  const [myReceipt, setMyReceipt] = useState<{ public_id: string; editable: boolean; edit_block?: EditBlock } | null>(null);
   const bill = state.bills.find(b => b.id === id);
   const isCitizen = state.currentUser?.role === 'citizen';
 
@@ -713,7 +722,7 @@ export function BillPage() {
             ) : <p className="text-sm text-[#687575]">{participation.reason}</p>}
           </div>
         ) : (
-          <SubmissionsTable receipts={billReceipts} myReceiptId={myReceipt?.public_id} />
+          <SubmissionsTable receipts={billReceipts} myReceiptId={myReceipt?.public_id} myEdit={myReceipt} />
         )}
       </Card>
 

@@ -14,7 +14,7 @@ import { Card, Badge, Label, InputField, DisclaimerBox, InfoBox, StatusBadge } f
 import { confidenceClasses, confidenceBarClass, confidenceLabel } from '../utils/confidence';
 import { copyText } from '../utils/clipboard';
 import QRCode from 'qrcode';
-import { SubmissionProgress } from '../components/Participation';
+import { EditBlock, EditSubmissionAction, SubmissionProgress } from '../components/Participation';
 import { STAGE_META, normalizeStage } from '../utils/submissionStage';
 
 function receiptLink(publicId: string) {
@@ -94,6 +94,18 @@ export function ReceiptLookupPage() {
 
   const receipt = remoteReceipt || (query ? state.receipts.find(r => r.public_id === query.toUpperCase()) : null);
   const bill = receipt ? state.bills.find(b => b.id === receipt.legislative_item_id) : null;
+
+  // The public receipt hides its author, so ask the API whether this is the signed-in citizen's own submission.
+  const [mine, setMine] = useState<{ public_id: string; editable: boolean; edit_block?: EditBlock } | null>(null);
+  const receiptBillId = receipt?.legislative_item_id;
+  useEffect(() => {
+    setMine(null);
+    if (!receiptBillId || state.currentUser?.role !== 'citizen') return;
+    let cancelled = false;
+    api.myReceiptForBill(receiptBillId).then(result => { if (!cancelled) setMine(result.receipt); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [receiptBillId, state.currentUser?.id]);
+  const isMine = Boolean(receipt && mine && mine.public_id === receipt.public_id);
   const status = remoteReceipt ? remoteReceipt.status as SubmissionStatus : (receipt ? getSubmissionStatus(receipt.id) : null);
   const reviewDecision = receipt ? (remoteReceipt?.match_decision || getSubmissionReviewDecision(receipt.id)) : null;
   const match = receipt ? state.matches.find(m => m.receipt_ref === receipt.id && m.reviewer_decision === 'confirmed') : null;
@@ -250,6 +262,15 @@ export function ReceiptLookupPage() {
                   <h3 className="text-sm font-black text-surface-900 mb-4">Where this submission is</h3>
                   <SubmissionProgress stage={status || 'received'} />
                 </section>
+                {isMine && !remoteReceipt?.superseded && (
+                  <section className="rounded-2xl p-5 border border-accent-200 bg-accent-50/60 flex flex-wrap items-center justify-between gap-3" aria-label="Edit your submission">
+                    <div>
+                      <h3 className="text-sm font-black text-surface-900 m-0">This is your submission</h3>
+                      <p className="text-sm text-surface-600 m-0">{mine?.editable ? "You can change it until the committee's call for views closes. Your receipt ID stays the same." : 'It is on the record as shown below.'}</p>
+                    </div>
+                    <EditSubmissionAction billId={receipt.legislative_item_id} editable={mine?.editable} editBlock={mine?.edit_block} />
+                  </section>
+                )}
                 <ReceiptActions publicId={receipt.public_id} billTitle={bill.title} />
                 <PrintableReceipt publicId={receipt.public_id} billTitle={bill.title} billIdentifier={bill.identifier}
                   issued={receipt.timestamp} stage={status || 'received'} hash={remoteReceipt?.hash || receipt.hash} />
@@ -404,7 +425,7 @@ export function ReceiptLookupPage() {
             </AnimatePresence>
 
             {/* Citizen-to-citizen submission reporting */}
-            {state.currentUser?.role === 'citizen' && receipt.author_id !== state.currentUser.id && (
+            {state.currentUser?.role === 'citizen' && !isMine && receipt.author_id !== state.currentUser.id && (
               <Card className="!p-5 border-warm-200">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>

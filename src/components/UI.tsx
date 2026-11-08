@@ -698,3 +698,46 @@ export function StatusBadge({ status }: { status: any }) {
     </Badge>
   );
 }
+
+/** Page controls shared by the paginated tables. Hidden when everything fits on one page. */
+export function Pager({ page, pageCount, onChange, label, summary, className = '' }: {
+  page: number;
+  pageCount: number;
+  onChange: (page: number) => void;
+  label: string;
+  summary?: string;
+  className?: string;
+}) {
+  if (pageCount <= 1) return null;
+  const pages = Array.from({ length: pageCount }, (_, i) => i + 1)
+    .filter(n => n === 1 || n === pageCount || Math.abs(n - page) <= 1);
+  return (
+    <nav className={`committee-notice-pagination ${className}`} aria-label={label}>
+      <p>{summary || `Page ${page} of ${pageCount}`}</p>
+      <div className="committee-notice-page-controls">
+        <button type="button" onClick={() => onChange(page - 1)} disabled={page === 1} aria-label="Previous page">‹</button>
+        {pages.map((n, i) => (
+          <React.Fragment key={n}>
+            {i > 0 && n - pages[i - 1] > 1 && <span className="px-1 text-surface-400">…</span>}
+            <button type="button" className={n === page ? 'is-active' : ''} aria-current={n === page ? 'page' : undefined} onClick={() => onChange(n)}>{n}</button>
+          </React.Fragment>
+        ))}
+        <button type="button" onClick={() => onChange(page + 1)} disabled={page === pageCount} aria-label="Next page">›</button>
+      </div>
+    </nav>
+  );
+}
+
+/** Slice a list into pages; the page snaps back into range when the list shrinks. */
+export function usePaged<T>(items: T[], perPage: number, resetKey: unknown) {
+  const [page, setPage] = React.useState(1);
+  React.useEffect(() => { setPage(1); }, [resetKey]);
+  const pageCount = Math.max(1, Math.ceil(items.length / perPage));
+  const current = Math.min(page, pageCount);
+  const start = (current - 1) * perPage;
+  return {
+    page: current, pageCount, setPage,
+    rows: items.slice(start, start + perPage),
+    summary: items.length ? `Showing ${start + 1}–${Math.min(start + perPage, items.length)} of ${items.length}` : '',
+  };
+}

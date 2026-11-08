@@ -145,6 +145,27 @@ async def test_one_submission_per_bill_and_edit_keeps_receipt_id(client, db_sess
 
 
 @pytest.mark.asyncio
+async def test_my_receipts_say_whether_each_can_still_be_edited(client, db_session, citizen):
+    bill = await make_bill(db_session)
+    created = client.post("/api/v1/receipts", headers=headers_for(citizen), data={
+        "legislative_item_id": str(bill.id), "submission_text": "My view on this bill",
+    })
+    assert created.status_code == 200, created.text
+    listed = client.get("/api/v1/receipts/my", headers=headers_for(citizen)).json()["receipts"]
+    assert [(r["editable"], r["edit_block"]) for r in listed] == [(True, None)]
+
+    # The call for views closes: the submission stays viewable but can no longer be edited.
+    bill.stage = "Second Reading"
+    await db_session.commit()
+    mine = client.get(f"/api/v1/receipts/mine/{bill.id}", headers=headers_for(citizen)).json()["receipt"]
+    assert mine["editable"] is False and mine["edit_block"] == "closed"
+    listed = client.get("/api/v1/receipts/my", headers=headers_for(citizen)).json()["receipts"]
+    assert listed[0]["edit_block"] == "closed"
+    refused = client.put(f"/api/v1/receipts/{mine['public_id']}", headers=headers_for(citizen), data={"submission_text": "Too late"})
+    assert refused.status_code == 409
+
+
+@pytest.mark.asyncio
 async def test_other_citizens_cannot_edit(client, db_session, citizen):
     bill = await make_bill(db_session)
     public_id = client.post("/api/v1/receipts", headers=headers_for(citizen), data={
@@ -351,3 +372,53 @@ async def test_receipts_cannot_be_changed_or_deleted_in_the_database(client, db_
     # Editing still works, because an edit only ever adds a row.
     edited = client.put(f"/api/v1/receipts/{public_id}", headers=auth, data={"submission_text": "Changed"})
     assert edited.status_code == 200 and edited.json()["public_id"] == public_id
+
+
+@pytest.mark.asyncio
+async def test_updates_show_the_receipt_id_and_can_all_be_marked_read(client, db_session, citizen):
+    bill = await make_bill(db_session)
+    created = client.post("/api/v1/receipts", headers=headers_for(citizen), data={
+        "legislative_item_id": str(bill.id), "submission_text": "First version of my view",
+    })
+    assert created.status_code == 200, created.text
+    public_id = created.json()["public_id"]
+    edited = client.put(f"/api/v1/receipts/{public_id}", headers=headers_for(citizen), data={"submission_text": "Second version of my view"})
+    assert edited.status_code == 200, edited.text
+
+    messages = client.get("/api/v1/messages", headers=headers_for(citizen)).json()["messages"]
+    assert messages, "submitting should send an update"
+    # Updates name the receipt ID the citizen knows, even for the edited version.
+    assert {m["receipt_public_id"] for m in messages} == {public_id}
+    assert any(not m["is_read"] for m in messages)
+
+    marked = client.put("/api/v1/messages/read-all", headers=headers_for(citizen))
+    assert marked.status_code == 200 and marked.json()["marked"] == len([m for m in messages if not m["is_read"]])
+    after = client.get("/api/v1/messages", headers=headers_for(citizen)).json()["messages"]
+    assert all(m["is_read"] for m in after)
+
+
+@pytest.mark.asyncio
+async def test_moderation_cases_say_what_was_reported(client, db_session, citizen):
+    bill = await make_bill(db_session)
+    created = client.post("/api/v1/receipts", headers=headers_for(citizen), data={
+        "legislative_item_id": str(bill.id), "submission_text": "A view another citizen will report",
+    })
+    assert created.status_code == 200, created.text
+    receipt = created.json()
+
+    other = User(name="Otieno", email=f"other-{uuid.uuid4().hex[:6]}@example.com", role="citizen",
+                 password_hash=get_password_hash("password123"), status="active")
+    reviewer = User(name="Moderator", email=f"mod-{uuid.uuid4().hex[:6]}@example.com", role="reviewer",
+                    password_hash=get_password_hash("password123"), status="active")
+    db_session.add_all([other, reviewer])
+    await db_session.commit()
+    reported = client.post("/api/v1/reports/content", headers=headers_for(other), data={
+        "content_type": "receipt", "content_id": str(receipt["receipt_id"]), "reason": "This looks like spam",
+    })
+    assert reported.status_code in (200, 201), reported.text
+
+    cases = client.get("/api/v1/moderation/cases", headers=headers_for(reviewer)).json()["cases"]
+    case = next(c for c in cases if c["content_id"] == str(receipt["receipt_id"]))
+    assert case["content_label"] == receipt["public_id"]
+    assert case["content_text"] == "A view another citizen will report"
+    assert case["bill_id"] == str(bill.id)

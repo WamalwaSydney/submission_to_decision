@@ -107,5 +107,6 @@ export const api = {
   exportAnonymized: () => apiFetch<any>('/export/anonymized'),
   messages: () => apiFetch<{ messages: any[] }>('/messages'),
   updateNotificationLanguage: (language: 'en' | 'sw') => apiFetch<{ notification_language: 'en' | 'sw' }>('/messages/preferences', { method: 'PUT', body: JSON.stringify({ language }) }),
+  markAllMessagesRead: () => apiFetch<{ marked: number }>('/messages/read-all', { method: 'PUT' }),
   markMessageRead: (messageId: string) => apiFetch<any>(`/messages/${encodeURIComponent(messageId)}/read`, { method: 'PUT' }),
 };

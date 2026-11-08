@@ -1,13 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { Dialog, DialogActions, DialogContent, DialogTitle, IconButton } from '@mui/material';
 import { useApp } from '../context/AppContext';
-import { ReportEntry, ReviewerDecision, SubmissionStatus } from '../types';
+import { ModerationAction, ReportEntry, ReviewerDecision, SubmissionStatus } from '../types';
 import { api } from '../api/endpoints';
 import { v4 as uuidv4 } from 'uuid';
-import { CheckCircle2, XCircle, Clock, AlertTriangle, Flag, Shield, Gavel, Users, FileText, Sparkles, Search } from 'lucide-react';
+import { CheckCircle2, XCircle, Clock, AlertTriangle, Flag, Shield, Gavel, Users, FileText, Sparkles, Search, ChevronRight, X } from 'lucide-react';
 import { motion } from 'framer-motion';
-import { Card, DisclaimerBox, InfoBox, Badge, Label, SelectField, BtnPrimary, BtnSecondary, BtnDanger, StatusBadge } from '../components/UI';
+import { Card, DisclaimerBox, InfoBox, Badge, Label, SelectField, BtnPrimary, BtnSecondary, BtnDanger, StatusBadge, Pager as TablePager, usePaged } from '../components/UI';
 import { treatmentStage } from '../utils/submissionStage';
 import { confidenceClasses, confidenceBarClass, confidenceLabel } from '../utils/confidence';
 
@@ -528,10 +528,28 @@ export function ReviewerQueuePage() {
   );
 }
 
+const CASES_PER_PAGE = 10;
+type CaseFilter = 'pending' | 'upheld' | 'dismissed' | 'all';
+const CASE_FILTERS: { id: CaseFilter; label: string }[] = [
+  { id: 'pending', label: 'Awaiting decision' },
+  { id: 'upheld', label: 'Upheld' },
+  { id: 'dismissed', label: 'Dismissed' },
+  { id: 'all', label: 'All' },
+];
+const CONTENT_TYPE_LABELS: Record<string, string> = { receipt: 'Submission', report_entry: 'Report entry', profile: 'Profile' };
+const contentTypeLabel = (type: string) => CONTENT_TYPE_LABELS[type] || type;
+const decisionVariant = (decision: string) => (decision === 'pending' ? 'yellow' : decision === 'upheld' ? 'red' : 'green');
+const decisionLabel = (decision: string) => (decision === 'pending' ? 'Awaiting decision' : decision === 'upheld' ? 'Upheld' : 'Dismissed');
+
 export function ReportedContentPage() {
   const { state, dispatch } = useApp();
   const [loadError, setLoadError] = useState('');
   const [savingCase, setSavingCase] = useState<string | null>(null);
+  const [filter, setFilter] = useState<CaseFilter>('pending');
+  const [query, setQuery] = useState('');
+  const [contentType, setContentType] = useState('all');
+  const [sortBy, setSortBy] = useState<'newest' | 'oldest'>('newest');
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!state.currentUser || !['reviewer', 'moderator'].includes(state.currentUser.role)) return;
@@ -548,12 +566,59 @@ export function ReportedContentPage() {
     try {
       const result = await api.decideModerationCase(id, decision);
       dispatch({ type: 'UPDATE_MODERATION', payload: { id, decision: result.action.decision, reviewerId: result.action.reviewer_id } });
+      setSelectedId(null);
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : 'Unable to save moderation decision.');
     } finally {
       setSavingCase(null);
     }
   };
+
+  const cases = state.moderationActions;
+  const receiptsById = useMemo(() => new Map(state.receipts.map(r => [r.id, r])), [state.receipts]);
+  const billTitles = useMemo(() => new Map(state.bills.map(b => [b.id, b.title])), [state.bills]);
+  // The API names what was reported; fall back to loaded receipts for older responses.
+  const describe = (action: ModerationAction) => {
+    const receipt = action.content_type === 'receipt' ? receiptsById.get(action.content_id) : undefined;
+    const billId = action.bill_id || receipt?.legislative_item_id;
+    return {
+      label: action.content_label || receipt?.public_id || `${action.content_id.slice(0, 8)}…`,
+      text: action.content_text ?? receipt?.submission_text ?? '',
+      billId,
+      billTitle: billId ? billTitles.get(billId) : undefined,
+    };
+  };
+  const contentTypes = useMemo(() => [...new Set(cases.map(c => c.content_type))].sort(), [cases]);
+
+  // Every filter except the decision chips, so each chip shows what it would leave.
+  const base = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return cases
+      .filter(c => contentType === 'all' || c.content_type === contentType)
+      .filter(c => {
+        if (!needle) return true;
+        const d = describe(c);
+        return `${c.reason} ${d.label} ${d.text} ${d.billTitle || ''}`.toLowerCase().includes(needle);
+      });
+  }, [cases, contentType, query, receiptsById, billTitles]);
+
+  const counts: Record<CaseFilter, number> = {
+    pending: base.filter(c => c.decision === 'pending').length,
+    upheld: base.filter(c => c.decision === 'upheld').length,
+    dismissed: base.filter(c => c.decision === 'dismissed').length,
+    all: base.length,
+  };
+
+  const visible = useMemo(() => base
+    .filter(c => filter === 'all' || c.decision === filter)
+    .sort((a, b) => (sortBy === 'newest' ? -1 : 1) * (a.timestamp || '').localeCompare(b.timestamp || '')),
+  [base, filter, sortBy]);
+
+  const paged = usePaged(visible, CASES_PER_PAGE, `${filter}|${query}|${contentType}|${sortBy}`);
+  const selected = cases.find(c => c.id === selectedId) || null;
+  const selectedInfo = selected ? describe(selected) : null;
+  const filtersActive = filter !== 'pending' || query.trim() !== '' || contentType !== 'all';
+  const clearFilters = () => { setFilter('pending'); setQuery(''); setContentType('all'); };
 
   return (
     <div>
@@ -569,103 +634,146 @@ export function ReportedContentPage() {
       </p>
 
       {loadError && <p role="alert" className="mb-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-800">{loadError}</p>}
-      <Card className="!p-7 md:!p-8 relative overflow-hidden">
-        <div className="absolute -top-24 -right-24 w-56 h-56 rounded-full bg-red-100/50 blur-3xl pointer-events-none" />
-        <div className="absolute -bottom-24 -left-24 w-56 h-56 rounded-full bg-primary-100/40 blur-3xl pointer-events-none" />
-        <div className="relative">
-          <div className="inline-flex items-center gap-3 mb-6">
-            <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-red-500 to-rose-600 flex items-center justify-center text-white shadow-md shadow-red-500/30">
-              <Flag className="h-5.5 w-5.5" />
-            </div>
-            <div>
-              <div className="text-xs font-black uppercase tracking-[0.18em] text-red-600 mb-1">Case Queue</div>
-              <h2 className="text-2xl font-black text-surface-900 tracking-tight">Moderation Cases ({state.moderationActions.length})</h2>
-            </div>
+      <Card className="!p-6 md:!p-7">
+        <div className="inline-flex items-center gap-3 mb-5">
+          <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-red-500 to-rose-600 flex items-center justify-center text-white shadow-md shadow-red-500/30">
+            <Flag className="h-5 w-5" />
           </div>
-
-          <div className="space-y-4">
-            {state.moderationActions.map((action, i) => {
-              const decisionBadge =
-                action.decision === 'pending' ? 'yellow' :
-                action.decision === 'upheld' ? 'red' : 'green';
-
-              return (
-                <motion.div
-                  key={action.id}
-                  initial={{ opacity: 0, y: 14 }}
-                  whileInView={{ opacity: 1, y: 0 }}
-                  viewport={{ once: true }}
-                  transition={{ duration: 0.35, delay: i * 0.04 }}
-                >
-                  <Card className="!p-0 relative overflow-hidden">
-                    <div className="absolute inset-y-0 left-0 w-1 rounded-l-2xl bg-gradient-to-b from-red-400 to-rose-600" />
-                    <div className="p-5 md:p-6">
-                      <div className="flex flex-wrap items-start justify-between gap-3 mb-3">
-                        <div className="flex flex-wrap items-center gap-3">
-                          <Badge variant="red" showIcon>{action.content_type}</Badge>
-                          <span className="text-sm text-surface-600 font-mono font-semibold bg-surface-50 px-2.5 py-1 rounded-lg">
-                            ID: {action.content_id}
-                          </span>
-                        </div>
-                        <Badge variant={decisionBadge as any} showIcon>
-                          {action.decision}
-                        </Badge>
-                      </div>
-
-                      <div className="bg-gradient-to-br from-red-50/80 to-surface-50 rounded-xl p-4 border border-red-100/80 mb-4">
-                        <div className="text-xs font-black uppercase tracking-[0.15em] text-red-700 mb-1.5 flex items-center gap-2">
-                          <AlertTriangle className="h-3.5 w-3.5" /> Report Reason
-                        </div>
-                        <p className="text-sm text-surface-800 font-medium leading-relaxed">{action.reason}</p>
-                      </div>
-
-                      <p className="text-xs text-surface-500 font-medium mb-4 flex flex-wrap items-center gap-4">
-                        <span className="flex items-center gap-1.5">
-                          <Clock className="h-3.5 w-3.5" />
-                          Reported: {new Date(action.timestamp).toLocaleDateString()}
-                        </span>
-                        <span className="flex items-center gap-1.5">
-                          <Gavel className="h-3.5 w-3.5" />
-                          Appeal: <span className="font-bold text-surface-700">{action.appeal_status}</span>
-                        </span>
-                      </p>
-
-                      {action.decision === 'pending' && state.currentUser && (
-                        <div className="flex flex-wrap gap-3 pt-2 border-t border-surface-100">
-                          <button
-                            onClick={() => void handleDecision(action.id, 'upheld')}
-                            disabled={savingCase === action.id}
-                            className="btn-danger inline-flex items-center gap-2 text-sm disabled:opacity-50"
-                          >
-                            <XCircle className="h-4 w-4" /> Uphold Report
-                          </button>
-                          <button
-                            onClick={() => void handleDecision(action.id, 'dismissed')}
-                            disabled={savingCase === action.id}
-                            className="btn-secondary inline-flex items-center gap-2 text-sm disabled:opacity-50"
-                          >
-                            <CheckCircle2 className="h-4 w-4" /> Dismiss Report
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  </Card>
-                </motion.div>
-              );
-            })}
-
-            {state.moderationActions.length === 0 && (
-              <div className="text-center py-12">
-                <div className="mx-auto w-20 h-20 rounded-full bg-gradient-to-br from-surface-100 to-surface-200 flex items-center justify-center mb-4">
-                  <Shield className="h-10 w-10 text-surface-400" />
-                </div>
-                <p className="text-lg font-semibold text-surface-700 mb-1">All clear</p>
-                <p className="text-surface-500">No reported content cases.</p>
-              </div>
-            )}
+          <div>
+            <div className="text-xs font-black uppercase tracking-[0.18em] text-red-600 mb-1">Case Queue</div>
+            <h2 className="text-2xl font-black text-surface-900 tracking-tight">Moderation Cases ({cases.length})</h2>
           </div>
         </div>
+
+        {cases.length === 0 ? (
+          <div className="text-center py-12">
+            <div className="mx-auto w-20 h-20 rounded-full bg-gradient-to-br from-surface-100 to-surface-200 flex items-center justify-center mb-4">
+              <Shield className="h-10 w-10 text-surface-400" />
+            </div>
+            <p className="text-lg font-semibold text-surface-700 mb-1">All clear</p>
+            <p className="text-surface-500">No reported content cases.</p>
+          </div>
+        ) : (
+          <>
+            <section className="bill-filters mb-4" aria-label="Filter moderation cases">
+              <div className="bill-filter-chips" role="tablist" aria-label="Decision">
+                {CASE_FILTERS.map(item => (
+                  <button key={item.id} type="button" role="tab" aria-selected={filter === item.id} className={`bill-chip ${filter === item.id ? 'is-active' : ''}`} onClick={() => setFilter(item.id)}>
+                    {item.label} <span>{counts[item.id]}</span>
+                  </button>
+                ))}
+              </div>
+              <div className="bill-filter-row case-filter-row">
+                <div className="bill-search">
+                  <label htmlFor="case-search" className="sr-only">Search cases</label>
+                  <Search className="h-5 w-5" aria-hidden="true" />
+                  <input id="case-search" type="search" value={query} onChange={e => setQuery(e.target.value)} placeholder="Search reason, receipt or text" className="input-field" />
+                </div>
+                <label className="sr-only" htmlFor="case-type">Content type</label>
+                <select id="case-type" className="input-field" value={contentType} onChange={e => setContentType(e.target.value)}>
+                  <option value="all">All content</option>
+                  {contentTypes.map(t => <option key={t} value={t}>{contentTypeLabel(t)}</option>)}
+                </select>
+                <label className="sr-only" htmlFor="case-sort">Sort</label>
+                <select id="case-sort" className="input-field" value={sortBy} onChange={e => setSortBy(e.target.value as typeof sortBy)}>
+                  <option value="newest">Newest first</option>
+                  <option value="oldest">Oldest first</option>
+                </select>
+              </div>
+            </section>
+
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+              <p className="text-sm font-semibold text-surface-600 m-0" role="status">
+                {visible.length ? `${paged.summary} ${visible.length === 1 ? 'case' : 'cases'}` : 'No cases'}
+                {visible.length !== cases.length ? ` (filtered from ${cases.length})` : ''}
+              </p>
+              {filtersActive && <button type="button" onClick={clearFilters} className="text-sm font-bold text-primary-600 hover:underline">Show all pending</button>}
+            </div>
+
+            {visible.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-surface-300 p-8 text-center text-sm text-surface-600">
+                <p className="font-bold text-surface-800 mb-1">{filter === 'pending' && !query && contentType === 'all' ? 'No cases are awaiting a decision.' : 'No cases match these filters.'}</p>
+                <p className="m-0">Use the tabs above to see decided cases.</p>
+              </div>
+            ) : (
+              <div className="submissions-table-wrap">
+                <table className="submissions-table">
+                  <thead>
+                    <tr><th>Reported content</th><th>Reason</th><th>Reported</th><th>Decision</th><th>Appeal</th><th><span className="sr-only">Open</span></th></tr>
+                  </thead>
+                  <tbody>
+                    {paged.rows.map(action => {
+                      const info = describe(action);
+                      const open = () => setSelectedId(action.id);
+                      return (
+                        <tr key={action.id} tabIndex={0} onClick={open} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } }} aria-label={`Open case about ${info.label}`}>
+                          <td>
+                            <span className="receipt-id">{info.label}</span>
+                            <div className="text-xs text-surface-500">{contentTypeLabel(action.content_type)}</div>
+                          </td>
+                          <td><div className="excerpt !max-w-[340px]">{action.reason}</div></td>
+                          <td className="whitespace-nowrap">{new Date(action.timestamp).toLocaleDateString(undefined, { dateStyle: 'medium' })}</td>
+                          <td><Badge variant={decisionVariant(action.decision) as any}>{decisionLabel(action.decision)}</Badge></td>
+                          <td className="whitespace-nowrap text-xs font-semibold capitalize">{action.appeal_status === 'none' ? '—' : action.appeal_status}</td>
+                          <td className="chevron"><ChevronRight size={18} aria-hidden="true" /></td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <TablePager page={paged.page} pageCount={paged.pageCount} onChange={paged.setPage} label="Case pages" className="mt-4 !border !border-[#e2ded5] !rounded-2xl" />
+          </>
+        )}
       </Card>
+
+      <Dialog open={Boolean(selected)} onClose={() => setSelectedId(null)} fullWidth maxWidth="md" scroll="paper" aria-labelledby="case-dialog-title">
+        {selected && selectedInfo && (
+          <>
+            <DialogTitle id="case-dialog-title" sx={{ pr: 7, pb: 1 }}>
+              <span className="block text-xs font-black uppercase tracking-[0.16em] text-[#a52d29]">Moderation case · {contentTypeLabel(selected.content_type)}</span>
+              <span className="block font-mono text-2xl font-black text-[#11521f] mt-1">{selectedInfo.label}</span>
+              <IconButton onClick={() => setSelectedId(null)} aria-label="Close" sx={{ position: 'absolute', right: 12, top: 12 }}><X size={20} /></IconButton>
+            </DialogTitle>
+            <DialogContent dividers sx={{ display: 'grid', gap: 2.5 }}>
+              <dl className="submission-detail-meta">
+                <div><dt>Reported</dt><dd>{new Date(selected.timestamp).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}</dd></div>
+                <div><dt>Decision</dt><dd>{decisionLabel(selected.decision)}</dd></div>
+                <div><dt>Appeal</dt><dd className="capitalize">{selected.appeal_status === 'none' ? 'None' : selected.appeal_status}</dd></div>
+                {selectedInfo.billId && (
+                  <div style={{ gridColumn: '1 / -1' }}><dt>Bill</dt><dd>{selectedInfo.billTitle ? <Link to={`/bills/${selectedInfo.billId}`} className="underline">{selectedInfo.billTitle}</Link> : 'Bill no longer listed'}</dd></div>
+                )}
+              </dl>
+              <div>
+                <h3 className="text-sm font-black text-[#182020] mb-2 flex items-center gap-2"><AlertTriangle className="h-4 w-4 text-red-600" aria-hidden="true" /> Why it was reported</h3>
+                <p className="submission-detail-text whitespace-pre-wrap">{selected.reason}</p>
+              </div>
+              <div>
+                <h3 className="text-sm font-black text-[#182020] mb-2">Reported content</h3>
+                {selectedInfo.text
+                  ? <p className="submission-detail-text whitespace-pre-wrap">{selectedInfo.text}</p>
+                  : <p className="notice-box is-closed !m-0">The reported content's text is not available here.</p>}
+              </div>
+            </DialogContent>
+            <DialogActions sx={{ px: 3, py: 2, gap: 1, flexWrap: 'wrap' }}>
+              {selected.content_type === 'receipt' && selectedInfo.label && !selectedInfo.label.endsWith('…') && (
+                <Link to={`/receipt-lookup?id=${selectedInfo.label}`} className="action-button is-secondary mr-auto">View receipt</Link>
+              )}
+              {selected.decision === 'pending' && state.currentUser ? (
+                <>
+                  <button type="button" onClick={() => void handleDecision(selected.id, 'dismissed')} disabled={savingCase === selected.id} className="action-button is-secondary">Dismiss report</button>
+                  <button type="button" onClick={() => void handleDecision(selected.id, 'upheld')} disabled={savingCase === selected.id} className="btn-danger inline-flex items-center gap-2 text-sm disabled:opacity-50">
+                    {savingCase === selected.id ? 'Saving…' : 'Uphold report'}
+                  </button>
+                </>
+              ) : (
+                <button type="button" onClick={() => setSelectedId(null)} className="action-button is-primary">Close</button>
+              )}
+            </DialogActions>
+          </>
+        )}
+      </Dialog>
     </div>
   );
 }

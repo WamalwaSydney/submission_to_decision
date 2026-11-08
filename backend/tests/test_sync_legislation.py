@@ -385,3 +385,75 @@ def test_proposal_only_bill_lists_its_tracker_once_and_keeps_bill_pdfs():
         {"name": "Legislative Proposals Tracker", "url": "https://parliament.go.ke/lp.pdf"},
         {"name": "Official bill document (Parliament PDF)", "url": "https://parliament.go.ke/bill.pdf"},
     ]
+
+
+# ---- Calls for memoranda (wording from live parliament.go.ke notice pages) ----
+
+def _notice_html(heading: str, body: str, submitted: str = "Submitted by clerk on 8 August 2025") -> str:
+    return f"<html><head><title>{heading} | The Kenyan Parliament Website</title></head><body><article><h1>{heading}</h1><p>{submitted}</p><p>{body}</p></article></body></html>"
+
+
+def test_notice_deadline_wordings():
+    from app.scripts.sync_legislation import notice_deadline
+    assert notice_deadline("All submissions must be received by 5:00 pm on Thursday, 28th August 2025.") == date(2025, 8, 28)
+    assert notice_deadline("to be received on or before Friday, 26 th September, 2025 at 5.00 p.m.") == date(2025, 9, 26)
+    assert notice_deadline("not later than 31st August 2026") == date(2026, 8, 31)
+    assert notice_deadline("Submissions are welcome.") is None
+
+
+def test_senate_notice_with_plural_reference():
+    from app.scripts.sync_legislation import parse_notice_page
+    html = _notice_html(
+        "INVITATION FOR SUBMISSION OF MEMORANDA AND PUBLIC HEARINGS :- THE CONSTITUTION OF KENYA ( AMENDMENT) BILL, 2025 ( SENATE BILLS NO. 13 of 2025)",
+        "Memoranda may be emailed, to be received on or before Friday, 26 th September, 2025 at 5.00 p.m.",
+        "Submitted by clerk on 2 September 2025",
+    )
+    rows = parse_notice_page(html, "https://www.parliament.go.ke/invitation-x")
+    assert len(rows) == 1
+    row = rows[0]
+    assert (row.bill_house, row.bill_number, row.bill_year) == ("senate", 13, 2025)
+    assert row.deadline == date(2025, 9, 26) and row.notice_date == date(2025, 9, 2)
+    assert "CONSTITUTION OF KENYA" in row.bill_title.upper()
+
+
+def test_prose_notice_keeps_only_the_bill_name():
+    from app.scripts.sync_legislation import parse_notice_page
+    html = _notice_html(
+        "INVITATION FOR SUBMISSION OF MEMORANDA",
+        "The Senate Standing Committee on Health invites the public to submit memoranda on the Assisted Reproductive Technology Bill "
+        "(National Assembly Bills No. 61 of 2022). All submissions must be received by 5:00 pm on Friday, 23rd January 2026.",
+        "Submitted by clerk on 20 December 2025",
+    )
+    rows = parse_notice_page(html, "https://www.parliament.go.ke/invitation-y")
+    assert [(r.bill_title, r.bill_number, r.bill_year) for r in rows] == [("Assisted Reproductive Technology Bill", 61, 2022)]
+
+
+def test_notice_without_a_bill_is_skipped():
+    from app.scripts.sync_legislation import parse_notice_page
+    html = _notice_html("NOTIFICATION OF APPROVAL HEARINGS", "Nominees will appear on or before 10th March 2026.", "Submitted by clerk on 1 March 2026")
+    assert parse_notice_page(html, "https://www.parliament.go.ke/approval-hearing") == []
+
+
+def test_notice_discovery_ignores_stale_listing_and_other_sites():
+    from app.scripts.sync_legislation import notice_page_links
+    html = """
+      <a href="/submission-memoranda">Submission of Memoranda</a>
+      <a href="https://www.parliament.go.ke/submission-memoranda-0">Submission of Memoranda</a>
+      <a href="/index.php/invitation-submit-memoranda-judges-retirement-benefits-bill">Judges</a>
+      <a href="https://example.com/invitation-submit-memoranda">elsewhere</a>
+      <a href="/sites/default/files/2026-06/memoranda.pdf">PDF</a>
+      <a href="/search/node?keys=memoranda">search</a>"""
+    assert notice_page_links(html, "https://www.parliament.go.ke/search/node?keys=memoranda") == [
+        "https://www.parliament.go.ke/invitation-submit-memoranda-judges-retirement-benefits-bill",
+    ]
+
+
+def test_notice_posted_after_its_deadline_opens_on_an_earlier_date():
+    from app.scripts.sync_legislation import parse_notice_page
+    html = _notice_html(
+        "INVITATION FOR SUBMISSION OF MEMORANDA :- THE CONSTITUTION OF KENYA ( AMENDMENT) BILL, 2025 ( SENATE BILLS NO. 13 of 2025)",
+        "Published on 22nd July 2025. Memoranda to be received on or before Friday, 26 th September, 2025 at 5.00 p.m.",
+        "Submitted by clerk on 2 October 2025",
+    )
+    row = parse_notice_page(html, "https://www.parliament.go.ke/invitation-z")[0]
+    assert row.notice_date == date(2025, 7, 22) and row.deadline == date(2025, 9, 26)

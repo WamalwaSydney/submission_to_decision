@@ -25,6 +25,7 @@ type ExistingSubmission = {
   submission_text: string;
   show_name_publicly?: boolean;
   editable: boolean;
+  edit_block?: 'reviewed' | 'closed' | null;
   has_document?: boolean;
   attachment_name?: string | null;
   attachment_size_bytes?: number | null;
@@ -399,7 +400,7 @@ export function SubmitViewPage() {
             {existing.editable ? (
               <><strong>You already made a submission on this bill</strong> (receipt <Link to={`/receipt-lookup?id=${existing.public_id}`} className="font-mono font-bold underline">{existing.public_id}</Link>). Your changes replace it, and the receipt ID stays the same. The earlier version stays on the tamper-evident record.</>
             ) : (
-              <><strong>Your submission {existing.public_id} can no longer be edited.</strong> A moderator has already reviewed it against the committee report.</>
+              <><strong>Your submission {existing.public_id} can no longer be edited.</strong> {existing.edit_block === 'closed' ? "The committee's call for views on this bill has closed." : 'A moderator has already reviewed it against the committee report.'}</>
             )}
           </p>
         )}
@@ -426,7 +427,7 @@ export function SubmitViewPage() {
             {existing.editable ? (
               <><strong>You already made a submission on this bill</strong> (receipt <Link to={`/receipt-lookup?id=${existing.public_id}`} className="font-mono font-bold underline">{existing.public_id}</Link>). Your changes replace it, and the receipt ID stays the same. The earlier version stays on the tamper-evident record.</>
             ) : (
-              <><strong>Your submission {existing.public_id} can no longer be edited.</strong> A moderator has already reviewed it against the committee report.</>
+              <><strong>Your submission {existing.public_id} can no longer be edited.</strong> {existing.edit_block === 'closed' ? "The committee's call for views on this bill has closed." : 'A moderator has already reviewed it against the committee report.'}</>
             )}
           </p>
         )}

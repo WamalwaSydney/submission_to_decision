@@ -1,17 +1,85 @@
-import React from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { getDaysOfNotice, getWindowLength } from '../utils/noticeDates';
 import { Link } from 'react-router-dom';
-import { Clock, Download, AlertTriangle, Info, FileText } from 'lucide-react';
+import { Download, AlertTriangle, Info, FileText, Search } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { Badge, DisclaimerBox, InfoBox, Card } from '../components/UI';
+import type { NoticeRecord } from '../types';
+
+type NoticeStatus = 'all' | 'open' | 'upcoming' | 'closed';
+type NoticeSort = 'newest' | 'oldest' | 'closing' | 'longest' | 'title';
+
+const STATUS_FILTERS: { id: NoticeStatus; label: string; note: string }[] = [
+  { id: 'all', label: 'All notices', note: 'Every notice on record' },
+  { id: 'open', label: 'Open now', note: 'The window includes today' },
+  { id: 'upcoming', label: 'Upcoming', note: 'The window has not started' },
+  { id: 'closed', label: 'Closed', note: 'The window has ended' },
+];
+
+const NOTICES_PER_PAGE = 10;
+
+const today = () =>new Date().toISOString().slice(0, 10);
+
+function noticeStatus(notice: NoticeRecord, on = today()): Exclude<NoticeStatus, 'all'> {
+  if (notice.window_start && on < notice.window_start) return 'upcoming';
+  if (notice.window_end && on > notice.window_end) return 'closed';
+  return 'open';
+}
 
 export function NoticesPage() {
   const { state } = useApp();
+  const [status, setStatus] = useState<NoticeStatus>('all');
+  const [query, setQuery] = useState('');
+  const [institution, setInstitution] = useState('all');
+  const [mode, setMode] = useState('all');
+  const [sortBy, setSortBy] = useState<NoticeSort>('newest');
 
+  const titles = useMemo(() => new Map(state.bills.map(b => [b.id, b.title])), [state.bills]);
+  const billTitle = (notice: NoticeRecord) => titles.get(notice.bill_ref) || notice.bill_ref;
+  const institutions = useMemo(() => [...new Set(state.notices.map(n => n.institution).filter(Boolean))].sort(), [state.notices]);
+  const modes = useMemo(() => [...new Set(state.notices.map(n => n.mode).filter(Boolean))].sort(), [state.notices]);
+
+  // Every filter except status, so each status chip can show how many notices it would leave.
+  const baseNotices = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return state.notices
+      .filter(n => institution === 'all' || n.institution === institution)
+      .filter(n => mode === 'all' || n.mode === mode)
+      .filter(n => !needle || `${billTitle(n)} ${n.bill_ref} ${n.institution}`.toLowerCase().includes(needle));
+  }, [state.notices, titles, query, institution, mode]);
+
+  const counts = useMemo(() => {
+    const result: Record<NoticeStatus, number> = { all: baseNotices.length, open: 0, upcoming: 0, closed: 0 };
+    baseNotices.forEach(n => { result[noticeStatus(n)] += 1; });
+    return result;
+  }, [baseNotices]);
+
+  const notices = useMemo(() => {
+    const sorters: Record<NoticeSort, (a: NoticeRecord, b: NoticeRecord) => number> = {
+      newest: (a, b) => (b.notice_date || '').localeCompare(a.notice_date || ''),
+      oldest: (a, b) => (a.notice_date || '').localeCompare(b.notice_date || ''),
+      closing: (a, b) => (a.window_end || '9999').localeCompare(b.window_end || '9999'),
+      longest: (a, b) => getWindowLength(b) - getWindowLength(a),
+      title: (a, b) => billTitle(a).localeCompare(billTitle(b)),
+    };
+    return baseNotices.filter(n => status === 'all' || noticeStatus(n) === status).sort(sorters[sortBy]);
+  }, [baseNotices, status, sortBy, titles]);
+
+  const [page, setPage] = useState(1);
+  useEffect(() => { setPage(1); }, [status, query, institution, mode, sortBy]);
+  const pageCount = Math.max(1, Math.ceil(notices.length / NOTICES_PER_PAGE));
+  const currentPage = Math.min(page, pageCount);
+  const pageStart = (currentPage - 1) * NOTICES_PER_PAGE;
+  const pageNotices = notices.slice(pageStart, pageStart + NOTICES_PER_PAGE);
+
+  const filtersActive =status !== 'all' || query.trim() !== '' || institution !== 'all' || mode !== 'all';
+  const clearFilters = () => { setStatus('all'); setQuery(''); setInstitution('all'); setMode('all'); };
+
+  // Exports contain what the filters currently show.
   const exportCSV = () => {
     const headers = ['Bill', 'Institution', 'Notice Date', 'Window Start', 'Window End', 'Window Length (days)', 'Days of Notice', 'Mode', 'Bill Text Accessible'];
-    const rows = state.notices.map(n => {
+    const rows = notices.map(n => {
       const bill = state.bills.find(b => b.id === n.bill_ref);
       return [
         bill?.title || n.bill_ref,
@@ -36,7 +104,7 @@ export function NoticesPage() {
   };
 
   const exportJSON = () => {
-    const data = state.notices.map(n => {
+    const data = notices.map(n => {
       const bill = state.bills.find(b => b.id === n.bill_ref);
       return {
         bill_title: bill?.title || n.bill_ref,
@@ -109,6 +177,56 @@ export function NoticesPage() {
             </div>
           </div>
 
+          <section className="bill-filters mb-4" aria-label="Filter notices">
+            <div className="bill-filter-chips" role="tablist" aria-label="Notice status">
+              {STATUS_FILTERS.map(item => (
+                <button key={item.id} type="button" role="tab" aria-selected={status === item.id} className={`bill-chip ${status === item.id ? 'is-active' : ''}`} onClick={() => setStatus(item.id)} title={item.note}>
+                  {item.label} <span>{counts[item.id]}</span>
+                </button>
+              ))}
+            </div>
+            <div className="bill-filter-row notice-filter-row">
+              <div className="bill-search">
+                <label htmlFor="notice-search" className="sr-only">Search notices</label>
+                <Search className="h-5 w-5" aria-hidden="true" />
+                <input id="notice-search" type="search" value={query} onChange={e => setQuery(e.target.value)} placeholder="Search bills" className="input-field" />
+              </div>
+              <label className="sr-only" htmlFor="notice-institution">Legislature</label>
+              <select id="notice-institution" className="input-field" value={institution} onChange={e => setInstitution(e.target.value)}>
+                <option value="all">All legislatures</option>
+                {institutions.map(name => <option key={name} value={name}>{name}</option>)}
+              </select>
+              <label className="sr-only" htmlFor="notice-mode">Mode</label>
+              <select id="notice-mode" className="input-field" value={mode} onChange={e => setMode(e.target.value)}>
+                <option value="all">All modes</option>
+                {modes.map(m => <option key={m} value={m}>{m}</option>)}
+              </select>
+              <label className="sr-only" htmlFor="notice-sort">Sort</label>
+              <select id="notice-sort" className="input-field" value={sortBy} onChange={e => setSortBy(e.target.value as NoticeSort)}>
+                <option value="newest">Newest notice first</option>
+                <option value="oldest">Oldest notice first</option>
+                <option value="closing">Closing soonest</option>
+                <option value="longest">Longest window</option>
+                <option value="title">Bill title A–Z</option>
+              </select>
+            </div>
+          </section>
+
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+            <p className="text-sm font-semibold text-surface-600 m-0" role="status">
+              {notices.length === 0
+                ? `Showing 0 of ${state.notices.length} notices`
+                : `Showing ${pageStart + 1}–${pageStart + pageNotices.length} of ${notices.length} ${notices.length === 1 ? 'notice' : 'notices'}${notices.length !== state.notices.length ? ` (filtered from ${state.notices.length})` : ''}`}
+            </p>
+            {filtersActive && <button type="button" onClick={clearFilters} className="text-sm font-bold text-primary-600 hover:underline">Clear filters</button>}
+          </div>
+
+          {notices.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-surface-300 p-8 text-center text-sm text-surface-600">
+              <p className="font-bold text-surface-800 mb-1">No notices match these filters.</p>
+              <p className="m-0">Try another status, legislature or search term.</p>
+            </div>
+          ) : (
           <div className="table-container">
             <table className="data-table">
               <thead>
@@ -124,7 +242,7 @@ export function NoticesPage() {
                 </tr>
               </thead>
               <tbody>
-                {state.notices.map((notice, idx) => {
+                {pageNotices.map((notice, idx) => {
                   const bill = state.bills.find(b => b.id === notice.bill_ref);
                   return (
                     <motion.tr
@@ -132,7 +250,7 @@ export function NoticesPage() {
                       initial={{ opacity: 0, y: 16 }}
                       whileInView={{ opacity: 1, y: 0 }}
                       viewport={{ once: true }}
-                      transition={{ duration: 0.4, delay: idx * 0.04 }}
+                      transition={{ duration: 0.3, delay: Math.min(idx, 10) * 0.03 }}
                     >
                       <td>
                         <Link to={`/bills/${notice.bill_ref}`} className="text-primary-600 hover:underline font-semibold">
@@ -154,6 +272,25 @@ export function NoticesPage() {
               </tbody>
             </table>
           </div>
+          )}
+
+          {pageCount > 1 && (
+            <nav className="committee-notice-pagination !border !border-[#e2ded5] !rounded-2xl mt-4" aria-label="Notice pages">
+              <p>Page {currentPage} of {pageCount}</p>
+              <div className="committee-notice-page-controls">
+                <button type="button" onClick={() => setPage(currentPage - 1)} disabled={currentPage === 1} aria-label="Previous page">‹</button>
+                {Array.from({ length: pageCount }, (_, i) => i + 1)
+                  .filter(n => n === 1 || n === pageCount || Math.abs(n - currentPage) <= 1)
+                  .map((n, i, list) => (
+                    <React.Fragment key={n}>
+                      {i > 0 && n - list[i - 1] > 1 && <span className="px-1 text-surface-400">…</span>}
+                      <button type="button" className={n === currentPage ? 'is-active' : ''} aria-current={n === currentPage ? 'page' : undefined} onClick={() => setPage(n)}>{n}</button>
+                    </React.Fragment>
+                  ))}
+                <button type="button" onClick={() => setPage(currentPage + 1)} disabled={currentPage === pageCount} aria-label="Next page">›</button>
+              </div>
+            </nav>
+          )}
         </div>
       </Card>
 

@@ -497,6 +497,25 @@ async def notices_by_bill(db: AsyncSession, bill_ids=None) -> dict:
     return grouped
 
 
+async def edit_blocks(db: AsyncSession, receipts) -> dict:
+    """Why each of a citizen's receipts cannot be edited: None (editable), "reviewed" or "closed"."""
+    receipts = list(receipts)
+    if not receipts:
+        return {}
+    ids = [r.id for r in receipts]
+    reviewed = set((await db.execute(select(SubmissionMatch.receipt_ref).where(
+        SubmissionMatch.receipt_ref.in_(ids), SubmissionMatch.reviewer_decision.in_(["confirmed", "rejected"])
+    ))).scalars().all())
+    bill_ids = {r.legislative_item_id for r in receipts}
+    bills = {b.id: b for b in (await db.execute(select(LegislativeItem).where(LegislativeItem.id.in_(bill_ids)))).scalars().all()}
+    notices = await notices_by_bill(db, bill_ids)
+    accepting = {bid: participation_window(b.stage, notices.get(bid, []))["accepting"] for bid, b in bills.items()}
+    return {
+        r.id: "reviewed" if r.id in reviewed else (None if accepting.get(r.legislative_item_id) else "closed")
+        for r in receipts
+    }
+
+
 def bill_with_participation(bill_dict: dict, notices) -> dict:
     bill_dict["participation"] = participation_window(bill_dict.get("stage"), notices)
     return bill_dict
@@ -816,8 +835,17 @@ async def list_messages(db: AsyncSession = Depends(get_db), current_user: User =
     if current_user.role != "citizen":
         raise HTTPException(status_code=403, detail="Automated notification inbox is for citizen accounts")
     query = select(Message).where(Message.recipient_user_id == current_user.id)
-    result = await db.execute(query.order_by(Message.created_at.desc()))
-    return {"messages": [to_dict(m) for m in result.scalars().all()]}
+    messages = list((await db.execute(query.order_by(Message.created_at.desc()))).scalars().all())
+    # Show the receipt ID the citizen knows (an edit keeps it), not the internal row ID.
+    receipt_ids = {m.receipt_id for m in messages if m.receipt_id}
+    receipts = (await db.execute(select(ParticipationReceipt).where(ParticipationReceipt.id.in_(receipt_ids)))).scalars().all() if receipt_ids else []
+    public_ids = {r.id: receipt_service.stable_id_of(r) for r in receipts}
+    payload = []
+    for message in messages:
+        item = to_dict(message)
+        item["receipt_public_id"] = public_ids.get(message.receipt_id)
+        payload.append(item)
+    return {"messages": payload}
 
 @router.put("/messages/preferences")
 async def update_message_preferences(
@@ -835,6 +863,19 @@ async def update_message_preferences(
     await db.commit()
     await db.refresh(current_user)
     return {"notification_language": payload.language}
+@router.put("/messages/read-all")
+async def mark_all_messages_read(db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+    if current_user.role != "citizen":
+        raise HTTPException(status_code=403, detail="Automated notification inbox is for citizen accounts")
+    result = await db.execute(
+        update(Message).where(Message.recipient_user_id == current_user.id, Message.is_read.is_(False)).values(is_read=True)
+    )
+    if result.rowcount:
+        await record_audit(db, entity_type="message", entity_id=current_user.id, action="all_viewed", actor_id=current_user.id, details={"count": result.rowcount})
+    await db.commit()
+    return {"marked": result.rowcount}
+
+
 @router.put("/messages/{message_id}/read")
 async def mark_message_read(message_id: UUID, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
     result = await db.execute(select(Message).where(Message.id == message_id))
@@ -1100,15 +1141,11 @@ async def my_receipt_for_bill(
     receipt = await _current_receipt_for(db, current_user.id, bill_id)
     if not receipt:
         return {"receipt": None}
-    reviewed = (await db.execute(
-        select(SubmissionMatch.id).where(
-            SubmissionMatch.receipt_ref == receipt.id,
-            SubmissionMatch.reviewer_decision.in_(["confirmed", "rejected"]),
-        ).limit(1)
-    )).scalar_one_or_none()
+    block = (await edit_blocks(db, [receipt]))[receipt.id]
     data = public_receipt_dict(receipt)
     data["show_name_publicly"] = bool(receipt.author_name_public)
-    data["editable"] = reviewed is None
+    data["editable"] = block is None
+    data["edit_block"] = block
     return {"receipt": data}
 
 
@@ -1164,10 +1201,15 @@ async def my_receipts(
         SubmissionMatch.receipt_ref.in_(receipt_ids), SubmissionMatch.reviewer_decision == "confirmed"
     )) if receipt_ids else None
     confirmed_ids = set(confirmed_result.scalars().all()) if confirmed_result is not None else set()
-    payload = [public_receipt_dict(receipt) for receipt in receipts]
-    for item in payload:
-        if item["id"] in confirmed_ids:
+    blocks = await edit_blocks(db, receipts)
+    payload = []
+    for receipt in receipts:
+        item = public_receipt_dict(receipt)
+        if receipt.id in confirmed_ids:
             item["lodging_status"] = "acknowledged"
+        item["editable"] = blocks[receipt.id] is None
+        item["edit_block"] = blocks[receipt.id]
+        payload.append(item)
     return {"receipts": payload}
 
 
@@ -1822,9 +1864,25 @@ async def list_moderation_cases(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_role("reviewer")),
 ):
-    result = await db.execute(select(ModerationAction))
-    actions = result.scalars().all()
-    return {"cases": [to_dict(a) for a in actions]}
+    actions = list((await db.execute(select(ModerationAction).order_by(ModerationAction.timestamp.desc()))).scalars().all())
+    # Say what was reported, so moderators can judge it without hunting for the ID.
+    receipt_ids = [a.content_id for a in actions if a.content_type == "receipt"]
+    entry_ids = [a.content_id for a in actions if a.content_type == "report_entry"]
+    receipts = {r.id: r for r in (await db.execute(select(ParticipationReceipt).where(ParticipationReceipt.id.in_(receipt_ids)))).scalars().all()} if receipt_ids else {}
+    entries = {e.id: e for e in (await db.execute(select(ReportEntry).where(ReportEntry.id.in_(entry_ids)))).scalars().all()} if entry_ids else {}
+    cases = []
+    for action in actions:
+        item = to_dict(action)
+        receipt, entry = receipts.get(action.content_id), entries.get(action.content_id)
+        if receipt is not None:
+            item["content_label"] = receipt_service.stable_id_of(receipt)
+            item["content_text"] = receipt.submission_text
+            item["bill_id"] = str(receipt.legislative_item_id)
+        elif entry is not None:
+            item["content_label"] = entry.clause_ref or "Report entry"
+            item["content_text"] = entry.extracted_summary
+        cases.append(item)
+    return {"cases": cases}
 
 
 @router.put("/moderation/cases/{case_id}")

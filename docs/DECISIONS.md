@@ -37,7 +37,7 @@ This document records every choice made where the specification was silent on im
 
 | Decision | Choice | Rationale |
 |---|---|---|
-| Proposal generator | Gemini (`gemini-2.5-flash-lite`) with a JSON schema | Understands paraphrase; never decides an outcome |
+| Proposal generator | Gemini (`gemini-3.5-flash-lite`) with a JSON schema | Understands paraphrase; never decides an outcome |
 | Untrusted citizen text | Rules in the system instruction; text passed as data; instruction-like submissions flagged and capped at 0.5; unsupported scores capped at 0.6 | Limits prompt injection; moderators see the warning |
 | Minimum proposal score | 0.5 | Below this, no proposal is created |
 | Explanation requirement | Every match includes method + confidence + human-readable explanation | Spec requirement (FR5) |
@@ -119,7 +119,7 @@ This document records every choice made where the specification was silent on im
 3. **Appeal window duration:** Spec says appeals are supported but doesn't specify duration. Tentatively 14 days.
 4. **Multi-language support timeline:** Notifications are bilingual; the interface is still English-only.
 5. **Scaling beyond pilot:** Two county assemblies are synced. Most assemblies do not publish bill stages or committee reports online, so Clerk's Office accounts must supply them.
-9. **Production chain anchor:** The production database contains early seed receipts with placeholder hashes and one receipt whose stored hash no longer matches its content. Options: publish an audited checkpoint and verify from it, or rebuild every hash (not recommended). Awaiting a decision.
+9. **Production chain anchor (decided 7 November 2026):** Demo receipts with placeholder hashes, and every receipt on demo bills or by demo and test accounts, were removed before public launch. The 10 remaining receipts were resealed (receipt IDs unchanged, new hashes), and an audit-log `chain_resealed` entry records the old and new chain heads, the counts removed and the backup taken. This was acceptable only because no public citizen yet held these receipts; after launch, a checkpoint is the only option.
 6. **Legal standing of receipts:** Courts have not ruled on platform-issued receipts. This is a research question.
 7. **Representative response deadline:** Should there be a time limit for committee response? Not in spec.
 8. **Data retention policy:** How long are audit logs kept? Indefinitely for integrity, but other data needs a schedule.

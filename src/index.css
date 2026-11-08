@@ -348,7 +348,11 @@
   .bill-search { position:relative; }
   .bill-search svg { position:absolute; left:14px; top:50%; transform:translateY(-50%); color:#687575; pointer-events:none; }
   .bill-search .input-field { padding-left:44px; }
-  @media (max-width:760px) { .bill-filter-row { grid-template-columns:1fr; } }
+  /* Notices sit inside a card, so give search its own row when space is tight */
+  .notice-filter-row { grid-template-columns:minmax(220px,1fr) repeat(3,minmax(0,190px)); }
+  @media (max-width:1240px) { .notice-filter-row { grid-template-columns:repeat(3,minmax(0,1fr)); } .notice-filter-row .bill-search { grid-column:1 / -1; } }
+  .case-filter-row { grid-template-columns:minmax(220px,1fr) repeat(2,minmax(0,200px)); }
+  @media (max-width:760px) { .bill-filter-row, .notice-filter-row, .case-filter-row { grid-template-columns:1fr; } }
 }
 
 /* ---- Bill page: where the bill is, and where its submissions are ---- */
@@ -419,4 +423,19 @@
   .review-compare section { display:grid; align-content:start; gap:8px; }
   .review-compare h3 { margin:0; color:#182020; font-size:.9rem; font-weight:850; }
   @media (max-width:760px) { .review-compare { grid-template-columns:1fr; } }
+}
+
+/* ---- Sign-in / sign-up pages (no navigation menu) ---- */
+@layer components {
+  .auth-shell { min-height:100vh; background:#f7f5f0; }
+  .auth-shell-header { display:flex; align-items:center; justify-content:space-between; gap:16px; max-width:1040px; margin:0 auto; padding:18px 20px 0; }
+  .auth-shell-brand { display:inline-flex; align-items:center; gap:10px; color:#182020; text-decoration:none; }
+  .auth-shell-mark { display:grid; flex:0 0 auto; place-items:center; width:42px; height:42px; border-radius:12px; background:linear-gradient(135deg,#a52d29 0%,#c9433d 50%,#23843a 100%); color:#fff; box-shadow:0 10px 24px -8px rgba(201,67,61,.45); }
+  .auth-shell-brand strong, .auth-shell-brand small { display:block; }
+  .auth-shell-brand strong { font-size:1rem; font-weight:850; }
+  .auth-shell-brand small { color:#687575; font-size:.68rem; font-weight:800; letter-spacing:.14em; text-transform:uppercase; }
+  .auth-shell-back { display:inline-flex; align-items:center; gap:6px; color:#105321; font-size:.88rem; font-weight:800; text-decoration:none; }
+  .auth-shell-back:hover { text-decoration:underline; }
+  .auth-shell-main { max-width:1040px; margin:0 auto; padding:28px 20px 48px; }
+  @media (max-width:520px) { .auth-shell-header { padding:14px 16px 0; } .auth-shell-main { padding:20px 16px 40px; } }
 }

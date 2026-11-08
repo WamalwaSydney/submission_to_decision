@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect } from 'react';
-import { HashRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { HashRouter, Routes, Route, Navigate, Outlet, useLocation } from 'react-router-dom';
 import { AppProvider, useApp } from './context/AppContext';
 import { Layout } from './components/Layout';
+import { AuthShell } from './components/AuthShell';
 import { HomePage } from './pages/HomePage';
 import { BillsListPage, BillPage } from './pages/BillsPages';
 import { ReceiptLookupPage, ReceiptVerifyPage } from './pages/ReceiptPages';
@@ -83,10 +84,21 @@ function CitizenSubmissionRoute() {
   return <SubmitViewPage />;
 }
 
+function MenuLayout() {
+  return <Layout><Outlet /></Layout>;
+}
+
 function AppRoutes() {
   return (
-    <Layout>
-      <Routes>
+    <Routes>
+      {/* Account pages have no navigation menu; it appears once signed in. */}
+      <Route element={<AuthShell />}>
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="/signin" element={<LoginPage />} />
+        <Route path="/signup" element={<SignupPage />} />
+        <Route path="/reset-password" element={<ResetPasswordPage />} />
+      </Route>
+      <Route element={<MenuLayout />}>
         <Route path="/" element={<HomePage />} />
         <Route path="/bills" element={<BillsListPage />} />
         <Route path="/bills/:id" element={<BillPage />} />
@@ -94,14 +106,9 @@ function AppRoutes() {
         <Route path="/receipt-lookup" element={<ReceiptLookupPage />} />
         <Route path="/receipt-verify" element={<ReceiptVerifyPage />} />
         <Route path="/submit" element={<CitizenSubmissionRoute />} />
-        <Route path="/login" element={<LoginPage />} />
-        <Route path="/signin" element={<LoginPage />} />
-        <Route path="/signup" element={<SignupPage />} />
-        <Route path="/reset-password" element={<ResetPasswordPage />} />
         <Route path="/account-security" element={<Navigate to="/" replace />} />
         <Route path="/notices" element={<NoticesPage />} />
         <Route path="/my-receipts" element={<MyReceiptsPage />} />
-        
         <Route path="/reviewer/queue" element={<ReviewerQueuePage />} />
         <Route path="/reviewer/reports" element={<ReportedContentPage />} />
         <Route path="/committee/ingestion" element={<CommitteeOfficerIngestionPage />} />
@@ -111,8 +118,8 @@ function AppRoutes() {
         <Route path="/community-rules" element={<CommunityRulesPage />} />
         <Route path="/committee" element={<CommitteeDashboardPage />} />
         <Route path="/messages" element={<MessagesPage />} />
-      </Routes>
-    </Layout>
+      </Route>
+    </Routes>
   );
 }
 
