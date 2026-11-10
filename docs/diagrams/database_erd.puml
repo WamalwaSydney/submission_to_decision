@@ -1,0 +1,292 @@
+@startuml database_erd
+title Participation Trace — Database Design (PostgreSQL)
+skinparam linetype ortho
+skinparam shadowing false
+skinparam entity {
+  BackgroundColor #FFFFFF
+  BorderColor #555555
+}
+hide circle
+hide methods
+
+' PK = primary key, FK = foreign key, UQ = unique, NN = not null
+
+entity users {
+  * id : uuid <<PK>>
+  --
+  * role : varchar(20)
+  * name : varchar(255)
+  * email : varchar(255) <<UQ>>
+  * password_hash : varchar(255)
+  privacy_prefs : json
+  status : varchar(20)
+  committee_id : uuid <<FK>>
+  created_date : timestamptz
+  * auth_version : integer
+  recovery_codes_generated_at : timestamptz
+}
+
+entity committees {
+  * id : uuid <<PK>>
+  --
+  * name : varchar(255) <<UQ>>
+  * institution : varchar(100)
+  description : text
+  contact_email : varchar(255)
+  status : varchar(20)
+  created_by : uuid <<FK>>
+  created_at : timestamptz
+}
+
+entity legislative_items {
+  * id : uuid <<PK>>
+  --
+  * title : varchar(500)
+  * identifier : varchar(100) <<UQ>>
+  * institution : varchar(100)
+  * stage : varchar(100)
+  documents : jsonb
+  status_history : json
+  is_simulated : boolean
+  bill_house : varchar(20)
+  bill_number : integer
+  bill_year : integer
+  source_url : varchar(1000)
+  source_file_ref : varchar(255)
+  source_updated_at : date
+  source_status : varchar(100)
+  committee_id : uuid <<FK>>
+  committee_assignment_source : varchar(30)
+}
+
+entity notice_records {
+  * id : uuid <<PK>>
+  --
+  * bill_ref : uuid <<FK>>
+  * institution : varchar(100)
+  * notice_date : date
+  * window_start : date
+  * window_end : date
+  * mode : varchar(255)
+  bill_text_accessible : boolean
+  source_url : varchar(1000)
+  source_title : varchar(500)
+  committee_name : varchar(255)
+  published_date : date
+  ..
+  UQ (source_url, bill_ref) WHERE source_url IS NOT NULL
+}
+
+entity participation_receipts <<append-only>> {
+  * id : uuid <<PK>>
+  --
+  * public_id : varchar(20) <<UQ>>
+  * author_id : uuid <<FK>>
+  * legislative_item_id : uuid <<FK>>
+  clause_ref : varchar(100)
+  * submission_text : text
+  lodging_status : varchar(20)
+  * timestamp : timestamptz
+  * hash : varchar(64)
+  * previous_hash : varchar(64)
+  * chain_sequence : bigint
+  author_name_public : varchar(255)
+  * revision : integer
+  submission_ref : varchar(20) <<index>>
+  attachment_name : varchar(255)
+  attachment_mime_type : varchar(100)
+  attachment_size_bytes : bigint
+  attachment_sha256 : varchar(64)
+  attachment_storage_ref : varchar(1000)
+  ..
+  triggers: reject UPDATE and DELETE
+}
+
+entity committee_reports {
+  * id : uuid <<PK>>
+  --
+  bill_ref : uuid <<FK>>
+  * institution : varchar(100)
+  * date_tabled : date
+  * source_document_ref : varchar(500)
+  extraction_status : varchar(20)
+  ocr_used : boolean
+  is_simulated : boolean
+  committee_name : varchar(255)
+  committee_url : varchar(1000)
+  title : varchar(1000)
+  bill_house : varchar(20)
+  bill_number : integer
+  bill_year : integer
+  source_url : varchar(1000)
+  source_sha256 : varchar(64)
+  source_mime_type : varchar(100)
+  source_size_bytes : bigint
+  source_storage_ref : varchar(1000)
+  extracted_text : text
+  provenance : json
+  uploaded_by : uuid <<FK>>
+  ..
+  UQ (source_url, committee_url)
+}
+
+entity report_entries {
+  * id : uuid <<PK>>
+  --
+  * report_ref : uuid <<FK>>
+  * clause_ref : varchar(100)
+  * extracted_summary : text
+  * treatment : varchar(30)
+  stated_reason : text
+}
+
+entity submission_matches {
+  * id : uuid <<PK>>
+  --
+  * receipt_ref : uuid <<FK>>
+  * report_entry_ref : uuid <<FK>>
+  * match_method : varchar(20)
+  * actor_type : varchar(30)
+  * confidence_score : float
+  * explanation : text
+  reviewer_decision : varchar(20)
+  reviewer_reason : text
+  reviewer_id : uuid <<FK>>
+  timestamp : timestamptz
+}
+
+entity legislative_link_reviews {
+  * id : bigserial <<PK>>
+  --
+  * report_ref : uuid <<FK>>
+  * candidate_bill_ref : uuid <<FK>>
+  * match_method : varchar(30)
+  * confidence_score : float (0..1)
+  * explanation : text
+  * reviewer_decision : varchar(20)
+  reviewer_id : uuid <<FK>>
+  * created_at : timestamptz
+  ..
+  UQ (report_ref, candidate_bill_ref)
+}
+
+entity messages {
+  * id : uuid <<PK>>
+  --
+  sender_id : uuid <<FK>>
+  recipient_user_id : uuid <<FK>>
+  committee_id : uuid <<FK>>
+  bill_id : uuid <<FK>>
+  receipt_id : uuid <<FK>>
+  * subject : varchar(255)
+  * body : text
+  * message_type : varchar(40)
+  * sender_type : varchar(20)
+  * is_read : boolean
+  event_key : varchar(255) <<UQ>>
+  * language : varchar(2)
+  * generation_source : varchar(20)
+  * source_snapshot : json
+  * delivery_status : varchar(20)
+  created_at : timestamptz
+}
+
+entity moderation_actions {
+  * id : uuid <<PK>>
+  --
+  * reporter_id : uuid <<FK>>
+  * content_type : varchar(20)
+  * content_id : uuid
+  * reason : text
+  decision : varchar(20)
+  reviewer_id : uuid <<FK>>
+  appeal_status : varchar(20)
+  timestamp : timestamptz
+}
+
+entity representative_profiles {
+  * id : uuid <<PK>>
+  --
+  user_id : uuid <<FK>>
+  * office : varchar(255)
+  * jurisdiction : varchar(255)
+  * institution : varchar(100)
+  committee_membership : text[]
+  verification_status : varchar(30)
+  profile_label : varchar(20)
+  verifier_id : uuid <<FK>>
+  contact_channels : json
+  created_date : timestamptz
+}
+
+entity audit_log <<append-only>> {
+  * id : uuid <<PK>>
+  --
+  * entity_type : varchar(50)
+  * entity_id : uuid
+  * action : varchar(50)
+  * details : text
+  actor_id : uuid <<FK>>
+  timestamp : timestamptz
+  ..
+  triggers: reject UPDATE and DELETE
+}
+
+entity password_reset_tokens {
+  * id : uuid <<PK>>
+  --
+  * user_id : uuid <<FK>> ON DELETE CASCADE
+  * token_hash : varchar(64) <<UQ>>
+  * expires_at : timestamptz
+  used_at : timestamptz
+  * created_at : timestamptz
+}
+
+entity password_recovery_codes {
+  * id : uuid <<PK>>
+  --
+  * user_id : uuid <<FK>> ON DELETE CASCADE
+  * code_hash : varchar(64) <<UQ>>
+  used_at : timestamptz
+  * created_at : timestamptz
+}
+
+' ---------------- Relationships (crow's foot) ----------------
+committees            |o--o{ users                    : "committee_id"
+users                 |o--o{ committees               : "created_by"
+committees            |o--o{ legislative_items        : "committee_id"
+legislative_items     ||--o{ notice_records           : "bill_ref"
+legislative_items     ||--o{ participation_receipts   : "legislative_item_id"
+users                 ||--o{ participation_receipts   : "author_id"
+legislative_items     |o--o{ committee_reports        : "bill_ref"
+users                 |o--o{ committee_reports        : "uploaded_by"
+committee_reports     ||--o{ report_entries           : "report_ref"
+participation_receipts ||--o{ submission_matches      : "receipt_ref"
+report_entries        ||--o{ submission_matches       : "report_entry_ref"
+users                 |o--o{ submission_matches       : "reviewer_id"
+committee_reports     ||--o{ legislative_link_reviews : "report_ref"
+legislative_items     ||--o{ legislative_link_reviews : "candidate_bill_ref"
+users                 |o--o{ messages                 : "recipient_user_id / sender_id"
+legislative_items     |o--o{ messages                 : "bill_id"
+participation_receipts |o--o{ messages                : "receipt_id"
+committees            |o--o{ messages                 : "committee_id"
+users                 ||--o{ moderation_actions       : "reporter_id / reviewer_id"
+users                 |o--o{ representative_profiles  : "user_id / verifier_id"
+users                 |o--o{ audit_log                : "actor_id"
+users                 ||--o{ password_reset_tokens    : "user_id"
+users                 ||--o{ password_recovery_codes  : "user_id"
+
+note right of participation_receipts
+  Hash chain: each row's hash =
+  SHA-256(id, author, bill, clause, text,
+  timestamp, previous_hash [, attachment_sha256]).
+  previous_hash = hash of the row before it
+  (by chain_sequence). An edit is a new row
+  "<ID>-v<n>" with submission_ref = "<ID>".
+end note
+
+note bottom of moderation_actions
+  content_id is polymorphic (receipt or
+  report entry), so it has no foreign key.
+end note
+@enduml

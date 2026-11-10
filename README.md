@@ -2,7 +2,7 @@
 
 Participation Trace helps citizens follow their public-participation submissions on bills in Kenya's National Assembly and county assemblies, from the moment they send a view to the committee's recorded response.
 
-> **Deployment status (3 November 2026):** the hosted site (Netlify, Render, Neon) is healthy but runs the previous release. The changes described below — county assemblies, submission stages, edits and document uploads, committee scoping, rate limits and the redesigned pages — are validated locally (84 backend tests, type check and production build) and are **not yet deployed**. See [Deploying this release](#deploying-this-release).
+> **Deployment status (8 November 2026):** the hosted API and database run the 6 November release, and demo data has been removed from the hosted database. Later changes (paginated tables, editing from every view, report ingestion table) are validated locally (201 backend tests in 15 modules with 97% line coverage, type check and production build) and are **not yet deployed**. See [Deploying this release](#deploying-this-release).
 
 ## Project links
 
@@ -239,7 +239,7 @@ docker compose exec -e TEST_DATABASE_URL=postgresql+asyncpg://postgres:postgres@
 
 Create the test database once with `docker compose exec postgres psql -U postgres -c "create database participation_platform_test"`. The tests install the same append-only triggers as production, so code that tries to change a receipt fails in tests too. The `evaluation/` folder is mounted into the backend container for the report-parsing fixtures.
 
-Latest local run (3 November 2026): **84 passed**, 6 warnings (third-party `passlib` deprecations). Coverage includes:
+Latest local run (8 November 2026): **201 passed** across 15 test modules, **97% line coverage** of `app/`. Coverage includes:
 
 - **Receipts and the chain:** tamper detection (edited text, deleted receipt, swapped document), append-only enforcement, edits and versions.
 - **Participation rules:** when a bill accepts views, one submission per bill, document uploads.

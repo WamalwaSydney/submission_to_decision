@@ -1,9 +1,13 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { Dialog, DialogActions, DialogContent, DialogTitle, IconButton } from '@mui/material';
 import { useApp } from '../context/AppContext';
 import { api } from '../api/endpoints';
-import { Upload, FileUp, FileText, CheckCircle2, AlertTriangle, ChevronDown, Plus, Database, FileCheck2, X, Pencil } from 'lucide-react';
+import { Upload, FileUp, FileText, CheckCircle2, AlertTriangle, ChevronDown, Plus, Database, FileCheck2, X, Pencil, Search, ChevronRight } from 'lucide-react';
 import { motion } from 'framer-motion';
-import { Card, InfoBox, Badge, Label, InputField, SelectField } from '../components/UI';
+import { Card, InfoBox, Badge, Label, InputField, SelectField, Pager, usePaged } from '../components/UI';
+import { formatDate } from '../components/Participation';
+import type { CommitteeReport } from '../types';
 
 const MAX_UPLOAD_MB = 50;
 
@@ -12,6 +16,228 @@ function mayManage(user: { role: string; committee_id?: string } | null, bill: {
   if (!user) return false;
   if (user.role !== 'committee_officer') return true;
   return Boolean(user.committee_id && bill.committee_id === user.committee_id);
+}
+
+const REPORTS_PER_PAGE = 10;
+const ENTRIES_PER_PAGE = 10;
+type ReportFilter = 'all' | 'to_check' | 'verified' | 'pending';
+const REPORT_FILTERS: { id: ReportFilter; label: string; note: string }[] = [
+  { id: 'all', label: 'All', note: 'Every report for your committee' },
+  { id: 'to_check', label: 'To check', note: 'Extracted but not yet verified by the Clerk’s Office' },
+  { id: 'verified', label: 'Verified', note: 'Checked and marked verified' },
+  { id: 'pending', label: 'Not yet read', note: 'Waiting for text extraction' },
+];
+const EXTRACTION_LABELS: Record<string, string> = {
+  pending: 'Not yet read',
+  extracting: 'Reading',
+  needs_review: 'Needs review',
+  extracted: 'Extracted',
+  ocr_used: 'Extracted (OCR)',
+  verified: 'Verified',
+};
+const reportGroup = (status: string): Exclude<ReportFilter, 'all'> =>
+  status === 'verified' ? 'verified' : status === 'pending' || status === 'extracting' ? 'pending' : 'to_check';
+const reportName = (report: CommitteeReport) => report.title || report.source_document_ref || 'Committee report';
+const treatmentVariant = (treatment: string) =>
+  treatment === 'adopted' ? 'green' : treatment === 'amended' ? 'blue' : treatment === 'rejected with reasons' ? 'red' : 'gray';
+
+/** Reports read for this committee: a filterable, paginated table; a row opens the report and its entries. */
+function IngestedReports() {
+  const { state, dispatch } = useApp();
+  const [filter, setFilter] = useState<ReportFilter>('all');
+  const [query, setQuery] = useState('');
+  const [sortBy, setSortBy] = useState<'newest' | 'oldest' | 'bill'>('newest');
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [verifying, setVerifying] = useState(false);
+  const [actionError, setActionError] = useState('');
+
+  const billsById = useMemo(() => new Map(state.bills.map(b => [b.id, b])), [state.bills]);
+  const entryCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    state.reportEntries.forEach(e => counts.set(e.report_ref, (counts.get(e.report_ref) || 0) + 1));
+    return counts;
+  }, [state.reportEntries]);
+
+  const base = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return state.reports.filter(r => !needle || `${reportName(r)} ${billsById.get(r.bill_ref)?.title || ''} ${billsById.get(r.bill_ref)?.identifier || ''} ${r.institution}`.toLowerCase().includes(needle));
+  }, [state.reports, billsById, query]);
+
+  const counts: Record<ReportFilter, number> = {
+    all: base.length,
+    to_check: base.filter(r => reportGroup(r.extraction_status) === 'to_check').length,
+    verified: base.filter(r => reportGroup(r.extraction_status) === 'verified').length,
+    pending: base.filter(r => reportGroup(r.extraction_status) === 'pending').length,
+  };
+
+  const reports = useMemo(() => {
+    const title = (r: CommitteeReport) => billsById.get(r.bill_ref)?.title || '';
+    const sorters = {
+      newest: (a: CommitteeReport, b: CommitteeReport) => (b.date_tabled || '').localeCompare(a.date_tabled || ''),
+      oldest: (a: CommitteeReport, b: CommitteeReport) => (a.date_tabled || '').localeCompare(b.date_tabled || ''),
+      bill: (a: CommitteeReport, b: CommitteeReport) => title(a).localeCompare(title(b)),
+    };
+    return base.filter(r => filter === 'all' || reportGroup(r.extraction_status) === filter).sort(sorters[sortBy]);
+  }, [base, filter, sortBy, billsById]);
+
+  const paged = usePaged(reports, REPORTS_PER_PAGE, `${filter}|${query}|${sortBy}`);
+  const selected = state.reports.find(r => r.id === selectedId) || null;
+  const selectedBill = selected ? billsById.get(selected.bill_ref) : undefined;
+  const selectedEntries = useMemo(() => (selected ? state.reportEntries.filter(e => e.report_ref === selected.id) : []), [selected, state.reportEntries]);
+  const entryPages = usePaged(selectedEntries, ENTRIES_PER_PAGE, selectedId);
+
+  const markVerified = async (report: CommitteeReport) => {
+    setVerifying(true);
+    setActionError('');
+    try {
+      await api.verifyReport(report.id);
+      dispatch({ type: 'UPDATE_REPORT_STATUS', payload: { reportId: report.id, status: 'verified' } });
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Could not mark this report as verified.');
+    } finally {
+      setVerifying(false);
+    }
+  };
+
+  return (
+    <Card className="!p-7 md:!p-8 mb-8">
+      <div className="inline-flex items-center gap-3 mb-6">
+        <div className="w-11 h-11 rounded-2xl flex items-center justify-center text-white shadow-md" style={{ background: 'linear-gradient(135deg, #176B2B 0%, #A52D29 100%)', boxShadow: '0 6px 14px rgba(23,107,43,.22)' }}>
+          <Database size={22} strokeWidth={2.25} aria-hidden="true" />
+        </div>
+        <div>
+          <div className="text-xs font-black uppercase tracking-[0.18em] text-accent-600 mb-1">Pipeline</div>
+          <h2 className="text-2xl font-black text-surface-900 tracking-tight">Ingested Reports ({state.reports.length})</h2>
+        </div>
+      </div>
+
+      {state.reports.length === 0 ? (
+        <div className="committee-dashboard-empty">
+          <FileText size={24} aria-hidden="true" />
+          <strong>No reports yet</strong>
+          <span>Reports you upload above, or that the Parliament sync links to your bills, appear here.</span>
+        </div>
+      ) : (
+        <>
+          <section className="bill-filters mb-4" aria-label="Filter reports">
+            <div className="bill-filter-chips" role="tablist" aria-label="Report status">
+              {REPORT_FILTERS.map(item => (
+                <button key={item.id} type="button" role="tab" aria-selected={filter === item.id} className={`bill-chip ${filter === item.id ? 'is-active' : ''}`} onClick={() => setFilter(item.id)} title={item.note}>
+                  {item.label} <span>{counts[item.id]}</span>
+                </button>
+              ))}
+            </div>
+            <div className="bill-filter-row case-filter-row">
+              <div className="bill-search">
+                <label htmlFor="report-search" className="sr-only">Search reports</label>
+                <Search className="h-5 w-5" aria-hidden="true" />
+                <input id="report-search" type="search" value={query} onChange={e => setQuery(e.target.value)} placeholder="Search report or bill" className="input-field" />
+              </div>
+              <label className="sr-only" htmlFor="report-sort">Sort</label>
+              <select id="report-sort" className="input-field" value={sortBy} onChange={e => setSortBy(e.target.value as typeof sortBy)}>
+                <option value="newest">Newest tabled first</option>
+                <option value="oldest">Oldest tabled first</option>
+                <option value="bill">Bill title A–Z</option>
+              </select>
+            </div>
+          </section>
+
+          <p className="text-sm font-semibold text-surface-600 mb-3" role="status">
+            {reports.length ? `${paged.summary} ${reports.length === 1 ? 'report' : 'reports'}` : 'No reports'}
+            {reports.length !== state.reports.length ? ` (filtered from ${state.reports.length})` : ''}
+          </p>
+
+          {reports.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-surface-300 p-8 text-center text-sm text-surface-600">No reports match these filters.</div>
+          ) : (
+            <div className="submissions-table-wrap">
+              <table className="submissions-table">
+                <thead>
+                  <tr><th>Report</th><th>Bill</th><th>Tabled</th><th>Status</th><th>Entries</th><th><span className="sr-only">Open</span></th></tr>
+                </thead>
+                <tbody>
+                  {paged.rows.map(report => {
+                    const bill = billsById.get(report.bill_ref);
+                    const open = () => { setSelectedId(report.id); setActionError(''); };
+                    return (
+                      <tr key={report.id} tabIndex={0} onClick={open} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } }} aria-label={`Open report ${reportName(report)}`}>
+                        <td>
+                          <div className="excerpt !max-w-[220px] font-semibold">{reportName(report)}</div>
+                          <div className="text-xs text-surface-500">{report.source_verification_status === 'verified' ? 'Official Parliament source' : 'Uploaded file'}{report.ocr_used ? ' · OCR' : ''}</div>
+                        </td>
+                        <td>
+                          <div className="excerpt !max-w-[220px]">{bill?.title || 'Bill not listed'}</div>
+                          <div className="text-xs text-surface-500 font-mono">{bill?.identifier}</div>
+                        </td>
+                        <td className="whitespace-nowrap">{formatDate(report.date_tabled)}</td>
+                        <td><Badge variant={(report.extraction_status === 'verified' ? 'green' : reportGroup(report.extraction_status) === 'pending' ? 'gray' : 'yellow') as any}>{EXTRACTION_LABELS[report.extraction_status] || report.extraction_status}</Badge></td>
+                        <td className="font-bold">{entryCounts.get(report.id) || 0}</td>
+                        <td className="chevron"><ChevronRight size={18} aria-hidden="true" /></td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <Pager page={paged.page} pageCount={paged.pageCount} onChange={paged.setPage} label="Report pages" className="mt-4 !border !border-[#e2ded5] !rounded-2xl" />
+        </>
+      )}
+
+      <Dialog open={Boolean(selected)} onClose={() => setSelectedId(null)} fullWidth maxWidth="md" scroll="paper" aria-labelledby="report-dialog-title">
+        {selected && (
+          <>
+            <DialogTitle id="report-dialog-title" sx={{ pr: 7, pb: 1 }}>
+              <span className="block text-xs font-black uppercase tracking-[0.16em] text-[#176b2b]">Committee report · {EXTRACTION_LABELS[selected.extraction_status] || selected.extraction_status}</span>
+              <span className="block text-xl font-black text-[#182020] mt-1">{reportName(selected)}</span>
+              <IconButton onClick={() => setSelectedId(null)} aria-label="Close" sx={{ position: 'absolute', right: 12, top: 12 }}><X size={20} /></IconButton>
+            </DialogTitle>
+            <DialogContent dividers sx={{ display: 'grid', gap: 2.5 }}>
+              <dl className="submission-detail-meta">
+                <div style={{ gridColumn: '1 / -1' }}><dt>Bill</dt><dd>{selectedBill ? <Link to={`/bills/${selectedBill.id}`} className="underline">{selectedBill.title}</Link> : 'Bill not listed'}</dd></div>
+                <div><dt>Tabled</dt><dd>{formatDate(selected.date_tabled)}</dd></div>
+                <div><dt>Legislature</dt><dd>{selected.institution}</dd></div>
+                <div><dt>Source</dt><dd>{selected.source_verification_status === 'verified' ? 'Official Parliament source' : 'Uploaded file'}</dd></div>
+                <div><dt>Text</dt><dd>{selected.ocr_used ? 'Read with OCR' : 'Native PDF text'}</dd></div>
+              </dl>
+              {selected.source_url && (
+                <a href={selected.source_url} target="_blank" rel="noreferrer" className="text-sm font-bold text-accent-700 underline">Open the official PDF</a>
+              )}
+              <div>
+                <h3 className="text-sm font-black text-[#182020] mb-2">Entries the committee recorded ({selectedEntries.length})</h3>
+                {selectedEntries.length === 0 ? (
+                  <p className="notice-box is-closed !m-0">No entries yet. The report has not been read, or no clause-by-clause responses were found in it.</p>
+                ) : (
+                  <div className="grid gap-2.5">
+                    {entryPages.rows.map(entry => (
+                      <div key={entry.id} className="rounded-xl p-4 border border-surface-200 bg-surface-50">
+                        <div className="flex items-start justify-between gap-3">
+                          <span className="text-xs font-black uppercase tracking-[0.12em] text-primary-700 bg-primary-50 px-2 py-0.5 rounded">{entry.clause_ref}</span>
+                          <Badge variant={treatmentVariant(entry.treatment) as any} className="flex-shrink-0">{entry.treatment}</Badge>
+                        </div>
+                        <p className="text-sm text-surface-800 mt-2 mb-0 leading-relaxed">{entry.extracted_summary}</p>
+                        {entry.stated_reason && <p className="text-xs text-surface-600 mt-2 pt-2 mb-0 border-t border-surface-200"><strong>Reason:</strong> {entry.stated_reason}</p>}
+                      </div>
+                    ))}
+                    <Pager page={entryPages.page} pageCount={entryPages.pageCount} onChange={entryPages.setPage} label="Entry pages" summary={`${entryPages.summary} entries`} className="!border !border-[#e2ded5] !rounded-2xl" />
+                  </div>
+                )}
+              </div>
+              {actionError && <p role="alert" className="notice-box is-error !m-0">{actionError}</p>}
+            </DialogContent>
+            <DialogActions sx={{ px: 3, py: 2, gap: 1, flexWrap: 'wrap' }}>
+              {selected.extraction_status !== 'verified' && selectedEntries.length > 0 && (
+                <button type="button" onClick={() => void markVerified(selected)} disabled={verifying} className="action-button is-primary mr-auto">
+                  <CheckCircle2 className="h-4 w-4" aria-hidden="true" /> {verifying ? 'Saving…' : 'Mark entries verified'}
+                </button>
+              )}
+              <button type="button" onClick={() => setSelectedId(null)} className="action-button is-secondary">Close</button>
+            </DialogActions>
+          </>
+        )}
+      </Dialog>
+    </Card>
+  );
 }
 
 export function CommitteeOfficerIngestionPage() {
@@ -24,7 +250,6 @@ export function CommitteeOfficerIngestionPage() {
   const [uploadSuccess, setUploadSuccess] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
-  const [expandedReport, setExpandedReport] = useState<string | null>(null);
   const [availableBills, setAvailableBills] = useState<typeof state.bills>([]);
   const [billsLoading, setBillsLoading] = useState(true);
   const [billsError, setBillsError] = useState<string | null>(null);
@@ -311,143 +536,7 @@ export function CommitteeOfficerIngestionPage() {
         </div>
       </Card>
 
-      <Card className="!p-7 md:!p-8 relative overflow-hidden mb-8">
-        <div className="absolute -top-24 -right-24 w-56 h-56 rounded-full bg-accent-100/50 blur-3xl pointer-events-none" />
-        <div className="absolute -bottom-24 -left-24 w-56 h-56 rounded-full bg-warm-100/40 blur-3xl pointer-events-none" />
-        <div className="relative">
-          <div className="inline-flex items-center gap-3 mb-6">
-            <div className="w-11 h-11 rounded-2xl flex items-center justify-center text-white shadow-md" style={{ background: 'linear-gradient(135deg, #176B2B 0%, #A52D29 100%)', boxShadow: '0 6px 14px rgba(23,107,43,.22)' }}>
-              <Database className="h-5.5 w-5.5" size={22} strokeWidth={2.25} aria-hidden="true" />
-            </div>
-            <div>
-              <div className="text-xs font-black uppercase tracking-[0.18em] text-accent-600 mb-1">Pipeline</div>
-              <h2 className="text-2xl font-black text-surface-900 tracking-tight">Ingested Reports ({state.reports.length})</h2>
-            </div>
-          </div>
-
-          <div className="space-y-4">
-            {state.reports.map((report, i) => {
-              const bill = state.bills.find(b => b.id === report.bill_ref);
-              const entries = state.reportEntries.filter(e => e.report_ref === report.id);
-              const isExpanded = expandedReport === report.id;
-
-              const sourceVerified = report.source_verification_status === 'verified';
-              const extractionLabel: Record<string, string> = {
-                pending: 'Text extraction has not started',
-                extracting: 'Reading PDF for review entries',
-                needs_review: 'Text extraction needs review',
-                extracted: `${entries.length} reviewable entries extracted`,
-                ocr_used: `${entries.length} entries extracted using OCR`,
-                verified: 'Report contents reviewed and verified',
-              };
-              const statusBadge = sourceVerified ? 'green' :
-                report.extraction_status === 'needs_review' ? 'yellow' :
-                report.extraction_status === 'ocr_used' ? 'blue' : 'gray';
-
-              return (
-                <motion.div
-                  key={report.id}
-                  initial={{ opacity: 0, y: 14 }}
-                  whileInView={{ opacity: 1, y: 0 }}
-                  viewport={{ once: true }}
-                  transition={{ duration: 0.35, delay: i * 0.04 }}
-                >
-                  <Card className="!p-0 relative overflow-hidden">
-                    <div className="absolute inset-y-0 left-0 w-1 rounded-l-2xl bg-gradient-to-b from-primary-400 to-accent-600" />
-                    <div className="p-5 md:p-6">
-                      <div
-                        className="flex flex-wrap items-start justify-between gap-3 mb-3 cursor-pointer"
-                        onClick={() => setExpandedReport(isExpanded ? null : report.id)}
-                      >
-                        <div className="flex-1 min-w-0">
-                          <div className="flex flex-wrap items-center gap-2 mb-1.5">
-                            <FileCheck2 className="h-4 w-4 text-primary-600 flex-shrink-0" />
-                            <p className="font-bold text-surface-900 truncate">{report.source_document_ref}</p>
-                          </div>
-                          <p className="text-sm text-surface-600 pl-6">{bill?.title || report.bill_ref}</p>
-                        </div>
-                        <div className="flex items-center gap-3">
-                          <Badge variant={statusBadge as any} showIcon>
-                            {sourceVerified ? 'Official Parliament source · Verified' : 'Source not verified'}
-                          </Badge>
-                          <div className={`p-1.5 rounded-lg transition-transform ${isExpanded ? 'rotate-180 bg-surface-100' : 'bg-surface-50'}`}>
-                            <ChevronDown className="h-4 w-4 text-surface-500" />
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="flex flex-wrap gap-2 pl-6 text-xs font-medium text-surface-600 mb-4">
-                        <span className="px-2.5 py-1 rounded-lg bg-surface-50 border border-surface-100">{report.institution}</span>
-                        <span className="px-2.5 py-1 rounded-lg bg-surface-50 border border-surface-100">Tabled: {report.date_tabled}</span>
-                        <span className="px-2.5 py-1 rounded-lg bg-surface-50 border border-surface-100">{extractionLabel[report.extraction_status] || 'Text extraction in progress'}</span>
-                        {report.ocr_used && <Badge variant="blue" className="!text-[10px]">OCR used</Badge>}
-                        
-                        <span className="px-2.5 py-1 rounded-lg bg-primary-50 text-primary-700 border border-primary-100">{entries.length} entries</span>
-                      </div>
-
-                      {isExpanded && entries.length > 0 && (
-                        <motion.div
-                          initial={{ opacity: 0, height: 0 }}
-                          animate={{ opacity: 1, height: 'auto' }}
-                          className="space-y-3 mb-4 pl-6"
-                        >
-                          {entries.map(entry => {
-                            const treatmentBadge =
-                              entry.treatment === 'adopted' ? 'green' :
-                              entry.treatment === 'amended' ? 'blue' :
-                              entry.treatment === 'rejected with reasons' ? 'red' :
-                              'gray';
-
-                            return (
-                              <div key={entry.id} className="bg-gradient-to-br from-surface-50 to-white rounded-xl p-4 border border-surface-100">
-                                <div className="flex items-start justify-between gap-3 mb-2">
-                                  <div className="flex-1 min-w-0">
-                                    <span className="text-xs font-black uppercase tracking-[0.15em] text-primary-700 bg-primary-50 px-2 py-0.5 rounded">
-                                      {entry.clause_ref}
-                                    </span>
-                                    <p className="text-sm text-surface-800 mt-2 leading-relaxed">{entry.extracted_summary}</p>
-                                  </div>
-                                  <Badge variant={treatmentBadge as any} showIcon className="flex-shrink-0">
-                                    {entry.treatment}
-                                  </Badge>
-                                </div>
-                                {entry.stated_reason && (
-                                  <p className="text-xs text-surface-600 mt-2 pt-2 border-t border-surface-100">
-                                    <span className="font-bold uppercase tracking-wide text-surface-500">Reason:</span> {entry.stated_reason}
-                                  </p>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </motion.div>
-                      )}
-
-                      {report.extraction_status !== 'verified' && (
-                        <div className="flex flex-wrap gap-3 pl-6 pt-3 border-t border-surface-100">
-                          <button
-                            type="button"
-                            onClick={() => dispatch({ type: 'UPDATE_REPORT_STATUS', payload: { reportId: report.id, status: 'verified' } })}
-                            className="btn-primary inline-flex items-center gap-2 text-sm"
-                          >
-                            <CheckCircle2 className="h-4 w-4" /> Mark Verified
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => dispatch({ type: 'UPDATE_REPORT_STATUS', payload: { reportId: report.id, status: 'needs_review' } })}
-                            className="btn-secondary inline-flex items-center gap-2 text-sm"
-                          >
-                            <AlertTriangle className="h-4 w-4" /> Needs Review
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  </Card>
-                </motion.div>
-              );
-            })}
-          </div>
-        </div>
-      </Card>
+      <IngestedReports />
 
       <InfoBox className="!p-5">
         <div className="flex items-start gap-3">

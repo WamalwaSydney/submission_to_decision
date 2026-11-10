@@ -44,6 +44,12 @@ async def db_session():
     except Exception as exc:
         pytest.skip(f"PostgreSQL test database is unavailable: {exc}")
 
+    async with test_engine.connect() as conn:
+        # A connection left "idle in transaction" by an earlier test would hold locks
+        # and make DROP SCHEMA wait forever; close any such leftovers first.
+        await conn.execute(text(
+            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+            "WHERE datname = current_database() AND pid <> pg_backend_pid()"))
     async with test_engine.begin() as conn:
         await conn.execute(text("DROP SCHEMA public CASCADE"))
         await conn.execute(text("CREATE SCHEMA public"))

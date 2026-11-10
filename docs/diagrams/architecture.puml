@@ -1,0 +1,65 @@
+@startuml architecture
+title Participation Trace — System Architecture
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam rectangle {
+  BackgroundColor #FFFFFF
+  BorderColor #555555
+  RoundCorner 12
+}
+skinparam ArrowColor #444444
+top to bottom direction
+
+actor "Citizens, Clerk's Office,\nmoderators, administrators\n(web browser)" as Users
+
+rectangle "1. Client layer: React 18 + TypeScript single-page app (Vite, Netlify)" as Client #F7F5F0 {
+  rectangle "Public and citizen pages\nbills · submit / edit view · my receipts\nupdates · verify hash chain · notices · public data" as PublicPages
+  rectangle "Staff pages\nmatch review · reported content\nbill and report ingestion · administration" as StaffPages
+  rectangle "Service worker + IndexedDB\noffline drafts · cached pages" as Offline
+}
+
+rectangle "2. API and authorisation layer: FastAPI on Python 3.11 (Render, Docker)" as Api #F7F5F0 {
+  rectangle "REST API /api/v1 (57 endpoints)\nPydantic validation · JSON responses" as Rest
+  rectangle "JWT sessions · argon2id passwords\nrole and committee-scope checks\nrate limits · sign-in lockout" as Security
+}
+
+rectangle "3. Domain services" as Services #F2F7F2 {
+  rectangle "Receipt service\nSHA-256 hash chain\nversions, verification" as ReceiptSvc
+  rectangle "Participation rules\nwhen a bill accepts views\nsubmission stages · committee assignment" as Rules
+  rectangle "Notification service\nEnglish / Kiswahili updates" as NotifySvc
+  rectangle "Ingestion service\npdftotext, Tesseract OCR fallback\nentry parser" as IngestSvc
+  rectangle "Linking service\nGemini proposal (text-similarity\nfallback) → human review" as LinkSvc
+  rectangle "Report worker\ninside the API, every 10 min" as Worker
+}
+
+rectangle "4. Data and audit layer" as Data #F7F5F0 {
+  database "PostgreSQL 18 (Neon)\n15 tables · append-only triggers on\nparticipation_receipts and audit_log" as Db
+  storage "File storage (Render disk)\ncommittee reports and memoranda\nstored with SHA-256" as Files
+}
+
+rectangle "Legislation sync scripts\nGitHub Actions, daily 02:00 UTC" as Sync #F5F3FA
+
+cloud "Google Gemini API\nmatch proposals ·\noptional notification wording" as Gemini
+cloud "parliament.go.ke\ncounty assembly sites\nkenyalaw.org" as Sources
+
+Users --> Client
+Client --> Api : HTTPS / JSON
+Api --> Services
+Services --> Data : SQLAlchemy (async)\nAlembic migrations
+
+LinkSvc --> Gemini
+NotifySvc ..> Gemini : optional
+IngestSvc --> Sources : linked report PDFs
+Sync --> Sources : bills, stages,\nnotices, reports
+Sync --> Db : upserts
+
+PublicPages -[hidden]right- StaffPages
+StaffPages -[hidden]right- Offline
+Rest -[hidden]right- Security
+ReceiptSvc -[hidden]right- Rules
+Rules -[hidden]right- NotifySvc
+IngestSvc -[hidden]right- LinkSvc
+LinkSvc -[hidden]right- Worker
+ReceiptSvc -[hidden]down- IngestSvc
+Db -[hidden]right- Files
+@enduml

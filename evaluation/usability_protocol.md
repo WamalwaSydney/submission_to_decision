@@ -1,6 +1,6 @@
 # Bounded usability study protocol
 
-**Status:** instrument ready; data collection not conducted in this repository.
+**Status:** run on 9–10 November 2026 with 35 participants in group sessions. Results and caveats are in `docs/EVALUATION.md`. A next round should use individual sessions, record task times, and fix an answer key for the T4 outcome.
 
 ## Participants
 

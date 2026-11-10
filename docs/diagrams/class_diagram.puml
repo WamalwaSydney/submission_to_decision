@@ -1,0 +1,262 @@
+@startuml class_diagram
+title Participation Trace — Class Diagram
+skinparam classAttributeIconSize 0
+skinparam shadowing false
+skinparam packageStyle rectangle
+skinparam class {
+  BackgroundColor #FFFFFF
+  BorderColor #555555
+  ArrowColor #555555
+}
+hide empty members
+
+' ======================= Domain model (app/models.py) =======================
+package "Domain model" #FDF6F5 {
+
+  class User {
+    +id: UUID
+    +role: Role
+    +name: str
+    +email: str
+    -password_hash: str
+    +privacy_prefs: dict
+    +status: AccountStatus
+    +committee_id: UUID [0..1]
+    +auth_version: int
+    +recovery_codes_generated_at: datetime [0..1]
+  }
+
+  enum Role {
+    citizen
+    committee_officer
+    reviewer
+    administrator
+  }
+
+  enum AccountStatus {
+    active
+    pending_approval
+    suspended
+  }
+
+  class Committee {
+    +id: UUID
+    +name: str {unique}
+    +institution: str
+    +description: str
+    +contact_email: str
+    +status: str
+  }
+
+  class LegislativeItem <<Bill>> {
+    +id: UUID
+    +title: str
+    +identifier: str {unique}
+    +institution: str
+    +stage: str
+    +documents: list
+    +status_history: list
+    +bill_house: str
+    +bill_number: int
+    +bill_year: int
+    +source_url: str
+    +committee_assignment_source: AssignmentSource
+    +is_simulated: bool
+  }
+
+  enum AssignmentSource {
+    official record
+    subject matter
+    administrator
+  }
+
+  class NoticeRecord <<Call for views>> {
+    +id: UUID
+    +institution: str
+    +notice_date: date
+    +window_start: date
+    +window_end: date
+    +mode: str
+    +bill_text_accessible: bool
+    +source_url: str
+    +committee_name: str
+  }
+
+  class ParticipationReceipt <<append-only>> {
+    +id: UUID
+    +public_id: str {unique}
+    +clause_ref: str
+    +submission_text: str
+    +timestamp: datetime
+    +{field} hash: str  -- SHA-256
+    +previous_hash: str
+    +chain_sequence: int
+    +revision: int
+    +submission_ref: str
+    +attachment_sha256: str
+    +lodging_status: str
+  }
+
+  class CommitteeReport {
+    +id: UUID
+    +institution: str
+    +date_tabled: date
+    +title: str
+    +source_url: str
+    +source_sha256: str
+    +extraction_status: ExtractionStatus
+    +ocr_used: bool
+    +bill_house / bill_number / bill_year
+    +extracted_text: str
+  }
+
+  enum ExtractionStatus {
+    pending
+    extracting
+    extracted
+    ocr_used
+    needs_review
+    verified
+  }
+
+  class ReportEntry {
+    +id: UUID
+    +clause_ref: str
+    +extracted_summary: str
+    +treatment: Treatment
+    +stated_reason: str
+  }
+
+  enum Treatment {
+    adopted
+    amended
+    rejected with reasons
+    not addressed
+    unclassified
+  }
+
+  class SubmissionMatch {
+    +id: UUID
+    +{field} match_method: llm or text-similarity
+    +confidence_score: float
+    +explanation: str
+    +reviewer_decision: Decision
+    +reviewer_reason: str
+  }
+
+  enum Decision {
+    pending
+    confirmed
+    rejected
+    superseded
+  }
+
+  class Message <<Notification>> {
+    +id: UUID
+    +subject: str
+    +body: str
+    +message_type: str
+    +language: en | sw
+    +generation_source: template | gemini
+    +event_key: str {unique}
+    +is_read: bool
+  }
+
+  class ModerationAction {
+    +id: UUID
+    +content_type: str
+    +content_id: UUID
+    +reason: str
+    +decision: pending | upheld | dismissed
+    +appeal_status: str
+  }
+
+  class RepresentativeProfile {
+    +id: UUID
+    +office: str
+    +jurisdiction: str
+    +institution: str
+    +verification_status: str
+  }
+
+  class AuditLog <<append-only>> {
+    +id: UUID
+    +entity_type: str
+    +entity_id: UUID
+    +action: str
+    +details: str
+    +timestamp: datetime
+  }
+
+  class PasswordResetToken {
+    +token_hash: str
+    +expires_at: datetime
+    +used_at: datetime
+  }
+
+  class PasswordRecoveryCode {
+    +code_hash: str
+    +used_at: datetime
+  }
+
+  User "0..*" --> "0..1" Committee : belongs to (Clerk's Office)
+  Committee "0..1" <-- "0..*" LegislativeItem : assigned to
+  LegislativeItem "1" *-- "0..*" NoticeRecord : calls for views
+  LegislativeItem "1" <-- "0..*" ParticipationReceipt : about
+  User "1" <-- "0..*" ParticipationReceipt : authored by
+  ParticipationReceipt "0..1" ..> "0..1" ParticipationReceipt : previous_hash\n(chain link)
+  LegislativeItem "0..1" <-- "0..*" CommitteeReport : reports on
+  CommitteeReport "1" *-- "0..*" ReportEntry : contains
+  ParticipationReceipt "1" <-- "0..*" SubmissionMatch : proposes for
+  ReportEntry "1" <-- "0..*" SubmissionMatch : answered by
+  User "0..1" <-- "0..*" SubmissionMatch : decided by (moderator)
+  User "1" <-- "0..*" Message : sent to
+  ParticipationReceipt "0..1" <-- "0..*" Message : about
+  User "1" <-- "0..*" ModerationAction : reported by
+  User "0..1" <-- "0..*" RepresentativeProfile : claimed by
+  User "0..1" <-- "0..*" AuditLog : actor
+  User "1" *-- "0..*" PasswordResetToken
+  User "1" *-- "0..*" PasswordRecoveryCode
+
+  User ..> Role
+  User ..> AccountStatus
+  LegislativeItem ..> AssignmentSource
+  CommitteeReport ..> ExtractionStatus
+  ReportEntry ..> Treatment
+  SubmissionMatch ..> Decision
+}
+
+' ======================= Services (names and links only) =======================
+package "Services and integrations" #F2F7F2 {
+  class APIRoutes <<FastAPI /api/v1>>
+  class ReceiptService <<hash chain>>
+  class Participation <<when views are accepted>>
+  class LinkingService <<match proposals>>
+  class LlmMatchingService <<Gemini matcher>>
+  class IngestionService <<report reading, OCR>>
+  class NotificationService <<citizen updates>>
+  class ReportWorker <<background>>
+  class SyncScripts <<Parliament, counties>>
+  class GeminiAPI <<external>>
+}
+
+APIRoutes --> ReceiptService
+APIRoutes --> Participation
+APIRoutes --> LinkingService
+APIRoutes --> IngestionService
+ReportWorker --> IngestionService
+ReportWorker --> LinkingService
+LinkingService --> LlmMatchingService
+LinkingService --> NotificationService
+LlmMatchingService --> GeminiAPI
+
+ReceiptService ..> ParticipationReceipt : creates, verifies
+Participation ..> NoticeRecord : reads
+IngestionService ..> CommitteeReport : creates
+IngestionService ..> ReportEntry : creates
+LinkingService ..> SubmissionMatch : creates, decides
+NotificationService ..> Message : creates
+SyncScripts ..> LegislativeItem : creates, updates
+SyncScripts ..> NoticeRecord : creates
+SyncScripts ..> Committee : creates
+@enduml

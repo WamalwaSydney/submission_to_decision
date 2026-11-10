@@ -137,7 +137,8 @@ def parse_trans_nzoia_bills(html: str, page_url: str, county: County) -> list[Co
         title = " ".join(w if w.lower() in {"of", "and", "the", "for"} and i else w.capitalize() for i, w in enumerate(title.split()))
         title = re.sub(r"\bBill (\d{4})$", r"Bill, \1", title)
         if not re.search(r"trans\s*nzoia", title, re.I):
-            title = title.replace("The ", "The Trans Nzoia County ", 1)
+            # "The County Roads Bill" becomes "The Trans Nzoia County Roads Bill", not "... County County ..."
+            title = re.sub(r"^The (?:County )?", "The Trans Nzoia County ", title, count=1)
         _, year = title_key(title)
         bills.setdefault(title.lower(), CountyBill(title=title, year=year, number=None, document_url=url))
     return list(bills.values())

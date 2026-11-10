@@ -1,0 +1,14 @@
+[run]
+source = app
+# SQLAlchemy async runs database calls in greenlets and the test client runs the app in a thread;
+# without this, coverage stops tracing after the first database call and under-reports.
+concurrency = thread,greenlet
+
+[report]
+show_missing = True
+skip_empty = True
+# Script entry points and unreachable guards are not run by tests.
+exclude_lines =
+    pragma: no cover
+    if __name__ == .__main__.:
+    raise RuntimeError\("unreachable"\)

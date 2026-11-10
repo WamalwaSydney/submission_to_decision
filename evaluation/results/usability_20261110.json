@@ -1,0 +1,408 @@
+{
+  "source": "usability_sessions.csv",
+  "collected": "2026-11-09 08:00 to 2026-11-10 15:18",
+  "profile": {
+    "county": {
+      "Nairobi City County": 13,
+      "Trans Nzoia County": 10,
+      "Other": 12
+    },
+    "age_group": {
+      "25–34": 9,
+      "35–44": 8,
+      "18–24": 8,
+      "45–54": 5,
+      "55 or older": 5
+    },
+    "device": {
+      "Smartphone": 19,
+      "Laptop or desktop computer": 9,
+      "Tablet": 7
+    },
+    "submitted_views_before": {
+      "Yes": 15,
+      "No": 13,
+      "Not sure": 7
+    }
+  },
+  "all": {
+    "participants": 35,
+    "tasks": {
+      "T1": {
+        "task": "Find a bill and its stage",
+        "on_own": 25,
+        "with_help": 6,
+        "not_completed": 4,
+        "completion_rate": 0.886,
+        "mean_ease": 5.23
+      },
+      "T2": {
+        "task": "Submit a view",
+        "on_own": 23,
+        "with_help": 8,
+        "not_completed": 4,
+        "completion_rate": 0.886,
+        "mean_ease": 5
+      },
+      "T3": {
+        "task": "Find the receipt and say what it proves",
+        "on_own": 24,
+        "with_help": 5,
+        "not_completed": 6,
+        "completion_rate": 0.829,
+        "mean_ease": 4.77
+      },
+      "T4": {
+        "task": "Find the committee outcome",
+        "on_own": 13,
+        "with_help": 8,
+        "not_completed": 14,
+        "completion_rate": 0.6,
+        "mean_ease": 3.6
+      },
+      "T5": {
+        "task": "Read a notice's participation window",
+        "on_own": 22,
+        "with_help": 9,
+        "not_completed": 4,
+        "completion_rate": 0.886,
+        "mean_ease": 5.26
+      },
+      "T6": {
+        "task": "Save a draft offline and send it on reconnect",
+        "on_own": 14,
+        "with_help": 11,
+        "not_completed": 10,
+        "completion_rate": 0.714,
+        "mean_ease": 4.17
+      }
+    },
+    "mean_completion_rate": 0.8,
+    "correct_answers": {
+      "T3_receipt": 23,
+      "T4_not_addressed_meaning": 22
+    },
+    "sus": {
+      "mean": 72.4,
+      "median": 82.5,
+      "sd": 27.1,
+      "min": 5.0,
+      "max": 100.0,
+      "at_or_above_68": 26
+    }
+  },
+  "excluding_flagged": {
+    "participants": 24,
+    "tasks": {
+      "T1": {
+        "task": "Find a bill and its stage",
+        "on_own": 18,
+        "with_help": 4,
+        "not_completed": 2,
+        "completion_rate": 0.917,
+        "mean_ease": 5.29
+      },
+      "T2": {
+        "task": "Submit a view",
+        "on_own": 17,
+        "with_help": 5,
+        "not_completed": 2,
+        "completion_rate": 0.917,
+        "mean_ease": 4.96
+      },
+      "T3": {
+        "task": "Find the receipt and say what it proves",
+        "on_own": 17,
+        "with_help": 3,
+        "not_completed": 4,
+        "completion_rate": 0.833,
+        "mean_ease": 4.83
+      },
+      "T4": {
+        "task": "Find the committee outcome",
+        "on_own": 9,
+        "with_help": 6,
+        "not_completed": 9,
+        "completion_rate": 0.625,
+        "mean_ease": 3.58
+      },
+      "T5": {
+        "task": "Read a notice's participation window",
+        "on_own": 16,
+        "with_help": 6,
+        "not_completed": 2,
+        "completion_rate": 0.917,
+        "mean_ease": 5.25
+      },
+      "T6": {
+        "task": "Save a draft offline and send it on reconnect",
+        "on_own": 9,
+        "with_help": 9,
+        "not_completed": 6,
+        "completion_rate": 0.75,
+        "mean_ease": 4.08
+      }
+    },
+    "mean_completion_rate": 0.827,
+    "correct_answers": {
+      "T3_receipt": 15,
+      "T4_not_addressed_meaning": 16
+    },
+    "sus": {
+      "mean": 71.8,
+      "median": 82.5,
+      "sd": 26.5,
+      "min": 5.0,
+      "max": 95.0,
+      "at_or_above_68": 18
+    }
+  },
+  "data_quality": {
+    "flagged": {
+      "P-146": [
+        "sus_pattern"
+      ],
+      "P-152": [
+        "sus_pattern"
+      ],
+      "P-156": [
+        "sus_pattern"
+      ],
+      "P-210": [
+        "sus_pattern"
+      ],
+      "P-237": [
+        "sus_pattern"
+      ],
+      "P-329": [
+        "sus_pattern"
+      ],
+      "P-332": [
+        "sus_pattern"
+      ],
+      "P-355": [
+        "sus_pattern"
+      ],
+      "P-364": [
+        "sus_pattern"
+      ],
+      "P-374": [
+        "sus_pattern"
+      ],
+      "P-390": [
+        "sus_pattern"
+      ]
+    },
+    "submissions_closer_than_session_length": [
+      "P-136 -> P-146 (6.6 min)",
+      "P-237 -> P-259 (0.9 min)",
+      "P-310 -> P-329 (7.3 min)",
+      "P-363 -> P-364 (9.6 min)"
+    ],
+    "repeated_free_text": {
+      "The wording on the site was a bit complex.": 2,
+      "give us airtime for participating lol": 2,
+      "make the text bigger": 2,
+      "reduce the number of steps": 2,
+      "Nothing": 2,
+      "use swahili not everyone knows english": 2,
+      "The site crashed once.": 2
+    },
+    "answer_spread": {
+      "T1_stage": {
+        "Committee review": 31,
+        "First reading": 2,
+        "Could not find": 2
+      },
+      "T4_outcome": {
+        "Amended": 8,
+        "Adopted": 9,
+        "Not addressed": 4,
+        "I could not find it": 6,
+        "Not yet reviewed": 4,
+        "Rejected with reasons": 4
+      },
+      "T5_days": {
+        "14": 30,
+        "Could not find": 5
+      }
+    }
+  },
+  "comments": [
+    {
+      "participant": "P-114",
+      "confusing": "Nothing was really confusing to be honest",
+      "more_useful": "Add a Swahili language option"
+    },
+    {
+      "participant": "P-117",
+      "confusing": "Finding the actual receipt after submitting",
+      "more_useful": "Send an SMS alert when a bill is open"
+    },
+    {
+      "participant": "P-119",
+      "confusing": "I didn't understand the different bill stages",
+      "more_useful": "Make the buttons bigger on mobile"
+    },
+    {
+      "participant": "P-121",
+      "confusing": "the submit button was hard to find",
+      "more_useful": "make the menu icons bigger"
+    },
+    {
+      "participant": "P-124",
+      "confusing": "The wording on the site was a bit complex.",
+      "more_useful": "give us airtime for participating lol"
+    },
+    {
+      "participant": "P-133",
+      "confusing": "",
+      "more_useful": "Make a simpler version for older people"
+    },
+    {
+      "participant": "P-136",
+      "confusing": "text was small on my screen",
+      "more_useful": "make the text bigger"
+    },
+    {
+      "participant": "P-146",
+      "confusing": "Finding the receipt was a bit hard.",
+      "more_useful": "add a tutorial"
+    },
+    {
+      "participant": "P-152",
+      "confusing": "The steps were too many.",
+      "more_useful": "reduce the number of steps"
+    },
+    {
+      "participant": "P-156",
+      "confusing": "Nothing",
+      "more_useful": "No suggestions it is good"
+    },
+    {
+      "participant": "P-172",
+      "confusing": "Everything was confusing",
+      "more_useful": "start over"
+    },
+    {
+      "participant": "P-177",
+      "confusing": "finding the bill stages",
+      "more_useful": "use swahili not everyone knows english"
+    },
+    {
+      "participant": "P-178",
+      "confusing": "The text is too small for my eyes.",
+      "more_useful": "make a simpler version for older people"
+    },
+    {
+      "participant": "P-201",
+      "confusing": "",
+      "more_useful": "send an email notification when it is reviewed"
+    },
+    {
+      "participant": "P-202",
+      "confusing": "I clicked submit twice by mistake.",
+      "more_useful": "Make it faster"
+    },
+    {
+      "participant": "P-203",
+      "confusing": "The site crashed once.",
+      "more_useful": "optimize the site"
+    },
+    {
+      "participant": "P-210",
+      "confusing": "Nothing was tricky",
+      "more_useful": "It is perfect"
+    },
+    {
+      "participant": "P-212",
+      "confusing": "Hard to navigate",
+      "more_useful": "Make the layout clearer"
+    },
+    {
+      "participant": "P-237",
+      "confusing": "",
+      "more_useful": "make the text bigger"
+    },
+    {
+      "participant": "P-259",
+      "confusing": "I accidentally refreshed and lost my draft.",
+      "more_useful": "Please add a save button"
+    },
+    {
+      "participant": "P-272",
+      "confusing": "",
+      "more_useful": "give us airtime for participating lol"
+    },
+    {
+      "participant": "P-281",
+      "confusing": "I could not find the submit button.",
+      "more_useful": "accesibility features"
+    },
+    {
+      "participant": "P-294",
+      "confusing": "It was crystal clear",
+      "more_useful": "No suggestions"
+    },
+    {
+      "participant": "P-304",
+      "confusing": "The wording on the site was a bit complex.",
+      "more_useful": "Add a video guide"
+    },
+    {
+      "participant": "P-310",
+      "confusing": "",
+      "more_useful": "It is very useful"
+    },
+    {
+      "participant": "P-329",
+      "confusing": "Everything was small",
+      "more_useful": "Make a simpler version"
+    },
+    {
+      "participant": "P-331",
+      "confusing": "",
+      "more_useful": "send an sms when a new bill is open"
+    },
+    {
+      "participant": "P-332",
+      "confusing": "The whole site was confusing",
+      "more_useful": "fix the bugs"
+    },
+    {
+      "participant": "P-355",
+      "confusing": "it was easy to use",
+      "more_useful": "Make it an app"
+    },
+    {
+      "participant": "P-358",
+      "confusing": "Finding the receipt was a bit slow.",
+      "more_useful": "reduce the number of steps"
+    },
+    {
+      "participant": "P-363",
+      "confusing": "The submit button was hard to find.",
+      "more_useful": ""
+    },
+    {
+      "participant": "P-364",
+      "confusing": "",
+      "more_useful": "Add a dark mode"
+    },
+    {
+      "participant": "P-374",
+      "confusing": "The site crashed once.",
+      "more_useful": "pls fix the bugs"
+    },
+    {
+      "participant": "P-376",
+      "confusing": "Nothing",
+      "more_useful": "use swahili not everyone knows english"
+    },
+    {
+      "participant": "P-390",
+      "confusing": "I couldnt figure out the next step.",
+      "more_useful": "darker colored text and themes."
+    }
+  ]
+}

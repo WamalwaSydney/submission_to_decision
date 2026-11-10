@@ -2,14 +2,15 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import { api } from '../api/endpoints';
-import { Card } from '../components/UI';
+import { Card, Pager, usePaged } from '../components/UI';
 import { confidenceClasses, confidenceLabel } from '../utils/confidence';
 import { reportDocumentHref } from '../utils/reportLinks';
-import { ArrowUpRight, CheckCircle2, FileCheck2, FileText, FileUp, Gavel, Loader2, UploadCloud, X } from 'lucide-react';
+import { ArrowUpRight, CheckCircle2, FileCheck2, FileText, FileUp, Gavel, Loader2, Search, UploadCloud, X } from 'lucide-react';
 
 export function CommitteeDashboardPage() {
   const { state } = useApp();
   const [bills, setBills] = useState<any[]>([]);
+  const [billQuery, setBillQuery] = useState('');
   const [form, setForm] = useState({ title: '', identifier: '', stage: 'Introduced', source_url: '' });
   const [billFile, setBillFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
@@ -42,6 +43,10 @@ export function CommitteeDashboardPage() {
     setMessage('');
     setBillFile(file);
   };
+
+  const billNeedle = billQuery.trim().toLowerCase();
+  const filteredBills = bills.filter(bill => !billNeedle || `${bill.title} ${bill.identifier}`.toLowerCase().includes(billNeedle));
+  const billPages = usePaged(filteredBills, 10, billQuery);
 
   if (!isCommittee) return <Card><h1 className="text-2xl font-black">Clerk’s Office area</h1><p className="mt-2">Sign in with a Clerk’s Office / Committee Secretariat account to ingest and manage bills.</p></Card>;
   return <div className="committee-dashboard space-y-7">
@@ -77,7 +82,7 @@ export function CommitteeDashboardPage() {
       <button className="btn-primary md:col-span-2 inline-flex items-center justify-center gap-2" type="submit" disabled={saving || !form.title.trim() || !form.identifier.trim()}>{saving ? <><Loader2 className="h-4 w-4 animate-spin" /> Uploading bill...</> : <><FileUp size={17} /> Upload and publish bill</>}</button>
     </form>{message && <p role="status" className={`mt-4 text-sm font-semibold flex items-center gap-2 ${message.includes('ingested') ? 'text-green-700' : 'text-red-700'}`}>{message.includes('ingested') && <CheckCircle2 className="h-4 w-4" />}{message}</p>}</Card>
 
-    <Card className="committee-dashboard-bills-card"><div className="committee-dashboard-bills-heading"><div><p className="committee-dashboard-section-kicker">Legislation</p><h2>Your bills</h2></div><span>{bills.length} total</span></div><div className="committee-dashboard-bills">{bills.map(bill => <article key={bill.id} className="committee-dashboard-bill-row"><span className="committee-dashboard-bill-mark"><Gavel size={18} /></span><div className="committee-dashboard-bill-info"><p>{bill.title}</p><span>{bill.identifier} <i>·</i> {bill.stage}</span></div><Link className="committee-dashboard-flow-link" to={`/bill-flow/${bill.id}`}>View public flow <ArrowUpRight size={15} /></Link></article>)}{!bills.length && <div className="committee-dashboard-empty"><FileText size={24} /><strong>No bills published yet</strong><span>Use the form to add the first bill to your public flow.</span></div>}</div></Card>
+    <Card className="committee-dashboard-bills-card"><div className="committee-dashboard-bills-heading"><div><p className="committee-dashboard-section-kicker">Legislation</p><h2>Your bills</h2></div><span>{bills.length} total</span></div>{bills.length > 0 && <div className="bill-search mb-3"><label htmlFor="your-bills-search" className="sr-only">Search your bills</label><Search className="h-5 w-5" aria-hidden="true" /><input id="your-bills-search" type="search" className="input-field" placeholder="Search title or number" value={billQuery} onChange={e => setBillQuery(e.target.value)} /></div>}<div className="committee-dashboard-bills">{billPages.rows.map(bill => <article key={bill.id} className="committee-dashboard-bill-row"><span className="committee-dashboard-bill-mark"><Gavel size={18} /></span><div className="committee-dashboard-bill-info"><p>{bill.title}</p><span>{bill.identifier} <i>·</i> {bill.stage}</span></div><Link className="committee-dashboard-flow-link" to={`/bill-flow/${bill.id}`}>View public flow <ArrowUpRight size={15} /></Link></article>)}{!bills.length && <div className="committee-dashboard-empty"><FileText size={24} /><strong>No bills published yet</strong><span>Use the form to add the first bill to your public flow.</span></div>}{bills.length > 0 && !filteredBills.length && <p className="text-sm text-surface-500 text-center py-6 m-0">No bills match “{billQuery.trim()}”.</p>}</div><Pager page={billPages.page} pageCount={billPages.pageCount} onChange={billPages.setPage} label="Your bill pages" summary={billPages.summary} className="mt-3 !border !border-[#e2ded5] !rounded-2xl !px-4 !py-3" /></Card>
     </section>
   </div>;
 }

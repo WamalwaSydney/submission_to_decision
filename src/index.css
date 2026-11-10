@@ -98,8 +98,9 @@
   .committee-dashboard-icon-tile { display:grid; width:48px; height:48px; flex:0 0 auto; place-items:center; border:1px solid rgba(165,45,41,.13); border-radius:15px; background:linear-gradient(135deg,#a52d29 0%,#176b2b 100%); color:#fff; box-shadow:0 7px 15px rgba(165,45,41,.2); }
   .committee-dashboard-section-heading h2,.committee-dashboard-bills-heading h2 { margin:0; color:#182020; font-size:1.25rem; font-weight:800; letter-spacing:-.02em; }
   .committee-dashboard-section-heading p:last-child { margin:4px 0 0; color:#687575; font-size:.82rem; }
-  .committee-dashboard-content { display:grid; grid-template-columns:minmax(0,1.2fr) minmax(320px,.8fr); align-items:start; gap:20px; }
-  .committee-dashboard-form-card,.committee-dashboard-bills-card { min-width:0; height:100%; }
+  .committee-dashboard-content { display:grid; grid-template-columns:minmax(0,1fr); align-items:start; gap:24px; }
+  .committee-dashboard-form-card,.committee-dashboard-bills-card { min-width:0; padding:28px 30px !important; }
+  @media (max-width:640px) { .committee-dashboard-form-card,.committee-dashboard-bills-card { padding:20px 18px !important; } }
   .committee-dashboard-form-card { border-top:3px solid #a52d29 !important; }
   .committee-dashboard-bills-card { border-top:3px solid #176b2b !important; }
   .committee-dashboard-form-card input:focus,.committee-dashboard-form-card select:focus { outline-color:#a52d29; }
@@ -108,8 +109,8 @@
   .committee-dashboard-file-icon { display:grid; width:46px; height:46px; flex:0 0 auto; place-items:center; border-radius:13px; background:#edf7ef; color:#176b2b; }
   .committee-dashboard-bills-heading { display:flex; align-items:center; justify-content:space-between; gap:14px; margin-bottom:18px; }
   .committee-dashboard-bills-heading > span { padding:6px 10px; border:1px solid #e2ded5; border-radius:999px; color:#526060; background:#faf9f6; font-size:.72rem; font-weight:700; }
-  .committee-dashboard-bills { display:grid; gap:10px; }
-  .committee-dashboard-bill-row { display:flex; align-items:center; gap:13px; padding:15px; border:1px solid #eeeae2; border-radius:14px; background:#fff; transition:all .18s ease; }
+  .committee-dashboard-bills { display:grid; grid-template-columns:minmax(0,1fr); gap:10px; }
+  .committee-dashboard-bill-row { display:flex; min-width:0; align-items:center; gap:13px; padding:15px; border:1px solid #eeeae2; border-radius:14px; background:#fff; transition:all .18s ease; }
   .committee-dashboard-bill-row:hover { border-color:#d5e5d7; background:#fbfdfb; }
   .committee-dashboard-bill-mark { display:grid; width:40px; height:40px; flex:0 0 auto; place-items:center; border-radius:12px; color:#a52d29; background:#fff2f1; }
   .committee-dashboard-bill-info { min-width:0; flex:1; }
