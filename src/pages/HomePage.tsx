@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  ArrowRight, ClipboardList, FileUp, FolderOpen, Gavel, Link2, MessageSquarePlus, Receipt, Settings2, ShieldCheck, Users,
+  ArrowRight, BookOpen, ClipboardList, Database, FileSearch, FileUp, FolderOpen, Gavel, Link2, Receipt, Settings2, ShieldCheck, Users,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { api } from '../api/endpoints';
@@ -75,7 +75,7 @@ function OpenBillsList({ limit = 6, submittedBillIds = new Set<string>() }: { li
             </div>
           </Link>
         ))}
-        {!open.length && <p className="empty-note">{state.isLoading ? 'Loading bills…' : 'No bill is open for public participation right now. Committees take views after a bill’s First Reading — check back soon.'}</p>}
+        {!open.length && <p className="empty-note">{state.isLoading ? 'Loading bills…' : 'No bill is open for public participation right now. A bill opens when its committee publishes a call for memoranda — check back soon.'}</p>}
       </div>
     </section>
   );
@@ -134,13 +134,21 @@ function VisitorHome() {
         <Tile tone="red" value={state.isLoading ? '…' : state.receipts.length} label="Views submitted" note="Each one has a tamper-evident receipt." />
         <Tile tone="black" value={state.isLoading ? '…' : responses} label="Committee responses traced" note="Checked by a moderator against the report." />
       </div>
+      <section aria-labelledby="explore-heading">
+        <div className="home-section-head"><div><h2 id="explore-heading">Explore</h2><p>Everything here is open to the public. You only need an account to submit a view.</p></div></div>
+        <div className="quick-actions">
+          <QuickAction to="/bills" icon={Gavel} title="Bills" note="Every bill, its stage, and whether its committee has a call for views open." />
+          <QuickAction to="/receipt-lookup" icon={FileSearch} title="Track a submission" note="Enter a receipt ID to see where a view is and what the committee did." />
+          <QuickAction to="/community-rules" icon={BookOpen} title="Community rules" note="What you can submit, how moderation works, and how to appeal." />
+          <QuickAction to="/research/export" icon={Database} title="Public data" note="Download anonymised submission and outcome data. No names or contact details." />
+          <QuickAction to="/receipt-verify" icon={ShieldCheck} title="Verify hash chain" note="Confirm no submission has been changed since it was sent." />
+        </div>
+      </section>
       <OpenBillsList />
       <HowItWorks />
       <Journey />
       <section className="quick-actions">
         <QuickAction to="/signup" icon={Users} title="Create a free account" note="You need an account to submit, so you can edit your view and get updates." />
-        <QuickAction to="/receipt-verify" icon={ShieldCheck} title="Verify hash chain" note="Confirm no submission has been changed since it was sent." />
-        <QuickAction to="/notices" icon={FolderOpen} title="Calls for views" note="See each committee's published call for memoranda and its deadline." />
       </section>
     </div>
   );
@@ -190,7 +198,6 @@ function CitizenHome({ user }: { user: User }) {
       </section>
       <OpenBillsList limit={5} submittedBillIds={new Set(receipts.map(r => r.legislative_item_id))} />
       <section className="quick-actions">
-        <QuickAction to="/submit" icon={MessageSquarePlus} title="Give your view" note="Type it or upload your memorandum." />
         <QuickAction to="/messages" icon={Receipt} title="Updates" note="Messages when your submission moves to a new stage." />
         <QuickAction to="/receipt-verify" icon={ShieldCheck} title="Verify hash chain" note="Confirm your submission is unchanged." />
       </section>

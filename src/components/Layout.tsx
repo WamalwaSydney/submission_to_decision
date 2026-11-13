@@ -26,13 +26,11 @@ import {
   LogIn,
   LogOut,
   WifiOff,
-  Sparkles,
   Scale,
   Gavel,
   Home,
   FileSearch,
   Link2,
-  FileCheck2,
   Users,
   BookOpen,
   MessageSquarePlus,
@@ -57,13 +55,14 @@ const publicLinks: NavLink[] = [
   { to: '/bills', label: 'Bills', icon: Gavel },
   { to: '/receipt-lookup', label: 'Track a Submission', icon: FileSearch },
   { to: '/receipt-verify', label: 'Verify Hash Chain', icon: Link2 },
-  { to: '/notices', label: 'Calls for Views', icon: FileCheck2 },
   { to: '/community-rules', label: 'Community Rules', icon: BookOpen },
   { to: '/research/export', label: 'Public Data', icon: Database },
 ];
 
 const publicLinksByRole: Record<string, NavLink[]> = {
-  citizen: publicLinks,
+  // Citizens track their own views under My Submissions instead. Community rules
+  // and public data stay in the visitor menu only.
+  citizen: publicLinks.filter(link => !['/receipt-lookup', '/community-rules', '/research/export'].includes(link.to)),
   // Officers need to see the public bill record, but not public verification
   // and research tools that are unrelated to their operational workspace.
   committee_officer: publicLinks.filter(link => ['/','/bills'].includes(link.to)),
@@ -74,7 +73,6 @@ const publicLinksByRole: Record<string, NavLink[]> = {
 
 const authenticatedLinksMap: Record<string, NavLink[]> = {
   citizen: [
-    { to: '/submit', label: 'Give Your View', icon: MessageSquarePlus },
     { to: '/my-receipts', label: 'My Submissions', icon: Receipt },
     { to: '/messages', label: 'Updates', icon: MessageSquarePlus },
   ],
@@ -123,6 +121,8 @@ export function Layout({ children }: { children: React.ReactNode }) {
     : publicLinks;
 
   const closeMobileMenu = () => setMobileMenuOpen(false);
+  // Visitors on the home page get no menu: the home page itself is the way in.
+  const bareHome = !state.currentUser && location.pathname === '/';
 
   const signOut = () => {
     localStorage.removeItem('access_token');
@@ -292,18 +292,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
         </Typography>
         {renderNavList(visiblePublicLinks)}
 
-        {currentRoleLinks.length > 0 && (
-          <>
-            <Divider sx={{ mx: 1.5, my: 1.5 }} />
-            <Box sx={{ px: 1.5, pb: 0.5, display: 'flex', alignItems: 'center', gap: 1.25 }}>
-              <Sparkles size={15} style={{ color: palPrimary[500] }} />
-              <Typography sx={sectionHeadingSx}>
-                Your Role
-              </Typography>
-            </Box>
-            {renderNavList(currentRoleLinks)}
-          </>
-        )}
+        {renderNavList(currentRoleLinks)}
       </Box>
 
       <Divider />
@@ -472,7 +461,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
         component="nav"
         aria-label="Primary navigation"
         sx={{
-          display: { xs: 'none', md: 'block' },
+          display: { xs: 'none', md: bareHome ? 'none' : 'block' },
           position: 'fixed',
           top: 0,
           left: 0,
@@ -491,15 +480,20 @@ export function Layout({ children }: { children: React.ReactNode }) {
       <AppBar
         position="sticky"
         className="app-header-glass"
-        sx={{ display: { xs: 'flex', md: 'none' }, zIndex: (t) => t.zIndex.appBar + 1 }}
+        sx={{ display: { xs: 'flex', md: bareHome ? 'flex' : 'none' }, zIndex: (t) => t.zIndex.appBar + 1 }}
       >
-        <Toolbar sx={{ width: '100%', gap: 1.5 }}>
+        <Toolbar sx={{ width: '100%', gap: 1.5, maxWidth: bareHome ? 1280 : undefined, mx: 'auto' }}>
           {brand}
           <Box sx={{ flexGrow: 1 }} />
-          {!state.currentUser && (
-            <Box sx={{ display: { xs: 'none', sm: 'block' } }}>{signInButton}</Box>
+          {bareHome && (
+            <Box component={Link} to="/signup" sx={{ display: { xs: 'none', sm: 'inline-flex' }, px: 1.5, py: 1, borderRadius: 2.5, color: palPrimary[700], fontSize: 13, fontWeight: 800, textDecoration: 'none', '&:hover': { background: alpha(palPrimary[500], 0.08) } }}>
+              Sign Up
+            </Box>
           )}
-          <IconButton
+          {!state.currentUser && (
+            <Box sx={{ display: { xs: bareHome ? 'block' : 'none', sm: 'block' } }}>{signInButton}</Box>
+          )}
+          {!bareHome && <IconButton
             onClick={() => setMobileMenuOpen((open) => !open)}
             aria-expanded={mobileMenuOpen}
             aria-controls="primary-navigation-drawer"
@@ -515,14 +509,14 @@ export function Layout({ children }: { children: React.ReactNode }) {
             }}
           >
             {mobileMenuOpen ? <XIcon size={20} strokeWidth={2.2} /> : <MenuIcon size={20} strokeWidth={2.2} />}
-          </IconButton>
+          </IconButton>}
         </Toolbar>
       </AppBar>
 
       <Drawer
         id="primary-navigation-drawer"
         anchor="left"
-        open={mobileMenuOpen}
+        open={mobileMenuOpen && !bareHome}
         onClose={closeMobileMenu}
         sx={{ display: { md: 'none' } }}
         slotProps={{
@@ -545,7 +539,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
 
       <Box
         sx={{
-          ml: { md: `${SIDEBAR_WIDTH}px` },
+          ml: { md: bareHome ? 0 : `${SIDEBAR_WIDTH}px` },
           minHeight: '100vh',
           display: 'flex',
           flexDirection: 'column',

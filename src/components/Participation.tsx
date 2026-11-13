@@ -1,13 +1,13 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { CheckCircle2, CircleDot, CircleSlash, Clock3 } from 'lucide-react';
-import { LegislativeItem, ParticipationWindow } from '../types';
+import { LegislativeItem, NoticeRecord, ParticipationWindow } from '../types';
 import { PROGRESS_STEPS, STAGE_META, normalizeStage } from '../utils/submissionStage';
 
 type Tone = 'law' | 'open' | 'progress' | 'ended';
 
 const ENDED = /withdrawn|lapsed|defeated|stayed|rejected/i;
-const OPEN = /^(first reading|public participation|introduced)$/i;
+const OPEN = /^public participation$/i;
 
 export function stageTone(stage: string): Tone {
   if (/^assented$/i.test(stage)) return 'law';
@@ -35,9 +35,9 @@ export function StagePill({ stage, asAt, className = '' }: { stage: string; asAt
   );
 }
 
-/** The API sends this with every bill; older responses fall back to "accepting" (the API still enforces it). */
+/** The API sends this with every bill. Without it, treat the bill as closed: never offer a submission the API may refuse. */
 export function participationFor(bill?: LegislativeItem | null): ParticipationWindow {
-  return bill?.participation || { status: 'open', accepting: true, reason: '' };
+  return bill?.participation || { status: 'closed', accepting: false, reason: 'This bill is not currently open for public participation.' };
 }
 
 export function formatDate(value?: string | null): string {
@@ -95,4 +95,28 @@ export function EditSubmissionAction({ billId, editable, editBlock, className = 
       {editBlock === 'closed' ? "Editing is closed: the committee's call for views has ended." : 'Editing is closed: a moderator has reviewed this submission.'}
     </p>
   );
+}
+
+export type CallForViewsStatus = { status: 'open' | 'upcoming' | 'closed'; opens_on: string; closes_on: string };
+
+/** The committee's published call for memoranda, if the bill has one: open now, upcoming, or closed. */
+export function callForViews(notices: NoticeRecord[], today = new Date()): CallForViewsStatus | null {
+  if (!notices.length) return null;
+  const day = today.toISOString().slice(0, 10);
+  const windows = notices.map(n => ({ opens_on: n.window_start.slice(0, 10), closes_on: n.window_end.slice(0, 10) }));
+  const open = windows.filter(w => w.opens_on <= day && day <= w.closes_on).sort((a, b) => b.closes_on.localeCompare(a.closes_on));
+  if (open.length) return { status: 'open', ...open[0] };
+  const upcoming = windows.filter(w => w.opens_on > day).sort((a, b) => a.opens_on.localeCompare(b.opens_on));
+  if (upcoming.length) return { status: 'upcoming', ...upcoming[0] };
+  const closed = [...windows].sort((a, b) => b.closes_on.localeCompare(a.closes_on));
+  return { status: 'closed', ...closed[0] };
+}
+
+/** Shows a bill's call for views as its status: "Call for views open until 20 Nov". */
+export function CallForViewsBadge({ call }: { call: CallForViewsStatus | null }) {
+  if (!call) return null;
+  const text = call.status === 'open' ? `Call for views open until ${formatDate(call.closes_on)}`
+    : call.status === 'upcoming' ? `Call for views opens ${formatDate(call.opens_on)}`
+    : `Call for views closed ${formatDate(call.closes_on)}`;
+  return <span className={`stage-pill ${call.status === 'open' ? 'is-open' : call.status === 'upcoming' ? 'is-progress' : 'is-ended'}`}><span>{text}</span></span>;
 }

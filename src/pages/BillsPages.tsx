@@ -5,10 +5,10 @@ import { getDaysOfNotice, getWindowLength } from '../utils/noticeDates';
 import { ParticipationReceipt, SubmissionStatus } from '../types';
 import {
   FileText, Clock, Building2, ArrowRight, ArrowLeft, ChevronRight, X, Search,
-  FileCheck, Calendar, FileSearch, Gavel, Users, Download, SlidersHorizontal, RotateCcw, Flag
+  FileCheck, Calendar, FileSearch, Gavel, Users, Download, SlidersHorizontal, RotateCcw, Flag, BookOpenText
 } from 'lucide-react';
 import { Dialog, DialogActions, DialogContent, DialogTitle, IconButton } from '@mui/material';
-import { Deadline, EditSubmissionAction, EditBlock, StagePill, SubmissionProgress, participationFor, formatDate, formatBytes, stageTone } from '../components/Participation';
+import { CallForViewsBadge, Deadline, EditSubmissionAction, EditBlock, StagePill, SubmissionProgress, callForViews, participationFor, formatDate, formatBytes, stageTone } from '../components/Participation';
 import { motion } from 'framer-motion';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, PieChart, Pie, Cell } from 'recharts';
 import {
@@ -19,6 +19,9 @@ import { confidenceClasses, confidenceLabel } from '../utils/confidence';
 import { api } from '../api/endpoints';
 import { getApiUrl } from '../api/client';
 import { reportDocumentHref } from '../utils/reportLinks';
+import { ReportAnalysisPanel, ReportSubmissionsTable, useParticipationSummary } from '../components/ParticipationSummary';
+import type { ReportDecision } from '../api/endpoints';
+import type { SubmissionStage } from '../utils/submissionStage';
 
 function SubmissionStatusBadge({ status }: { status: SubmissionStatus }) {
   return StatusBadge({ status });
@@ -49,13 +52,15 @@ function downloadReadableBillDocument(
 }
 
 const BILLS_PER_PAGE = 20;
-type BillFilter = 'open' | 'parliament' | 'law' | 'ended' | 'all';
+type BillFilter = 'open' | 'calls' | 'submissions' | 'parliament' | 'law' | 'ended' | 'all';
 const BILL_FILTERS: { id: BillFilter; label: string; note: string }[] = [
+  { id: 'all', label: 'All bills', note: 'Every bill on the platform' },
   { id: 'open', label: 'Open for views', note: 'Committees are taking public views now' },
+  { id: 'calls', label: 'Has a call for views', note: 'The committee has published a call for memoranda (open, upcoming or closed)' },
   { id: 'parliament', label: 'In progress', note: 'Being debated, or not yet open for views' },
+  { id: 'submissions', label: 'Has submissions', note: 'Submissions sent on this platform or recorded in the committee report' },
   { id: 'law', label: 'Now law', note: 'Assented to by the President' },
   { id: 'ended', label: 'Ended', note: 'Withdrawn, lapsed or defeated' },
-  { id: 'all', label: 'All bills', note: '' },
 ];
 
 function billGroup(bill: { stage: string; participation?: { accepting: boolean } }): BillFilter {
@@ -69,12 +74,14 @@ function billGroup(bill: { stage: string; participation?: { accepting: boolean }
 export function BillsListPage() {
   const { state, dispatch } = useApp();
   const [searchParams, setSearchParams] = useSearchParams();
-  const filter = (searchParams.get('show') as BillFilter) || 'open';
+  const filter = (searchParams.get('show') as BillFilter) || 'all';
   const isOfficer = state.currentUser?.role === 'committee_officer';
   const committee = isOfficer ? 'all' : searchParams.get('committee') || 'all';
   const legislature = isOfficer ? 'all' : searchParams.get('legislature') || 'all';
   const [query, setQuery] = useState('');
-  const [sortBy, setSortBy] = useState<'deadline' | 'recent' | 'title' | 'submissions'>('deadline');
+  const [sortChoice, setSortBy] = useState<'deadline' | 'recent' | 'title' | 'submissions' | null>(null);
+  // Bills with submissions read best busiest first.
+  const sortBy = sortChoice || (filter === 'submissions' ? 'submissions' : 'deadline');
   const [page, setPage] = useState(1);
 
   const setParam = (key: string, value: string, fallback: string) => {
@@ -98,20 +105,44 @@ export function BillsListPage() {
   }, [dispatch]);
 
   const committeeName = (bill: typeof state.bills[number]) => state.committees.find(c => c.id === bill.committee_id)?.name || 'No committee assigned yet';
+  // Submissions per bill: sent on this platform, plus those the committee report records.
+  const [traced, setTraced] = useState<Map<string, number>>(new Map());
+  useEffect(() => {
+    let cancelled = false;
+    api.participationOutcomes().then(result => {
+      if (cancelled) return;
+      setTraced(new Map(result.bills.map(row => [row.id, row.platform.submissions + (row.report?.submissions_recorded || 0)])));
+    }).catch(() => { /* Platform counts below still work. */ });
+    return () => { cancelled = true; };
+  }, [state.receipts.length]);
   const submissionCount = useMemo(() => {
-    const counts = new Map<string, number>();
-    state.receipts.forEach(r => counts.set(r.legislative_item_id, (counts.get(r.legislative_item_id) || 0) + 1));
+    const platform = new Map<string, number>();
+    state.receipts.forEach(r => platform.set(r.legislative_item_id, (platform.get(r.legislative_item_id) || 0) + 1));
+    const counts = new Map(traced);
+    platform.forEach((n, billId) => counts.set(billId, Math.max(n, counts.get(billId) || 0)));
     return counts;
-  }, [state.receipts]);
+  }, [state.receipts, traced]);
+  const calls = useMemo(() => {
+    const byBill = new Map<string, typeof state.notices>();
+    state.notices.forEach(n => byBill.set(n.bill_ref, [...(byBill.get(n.bill_ref) || []), n]));
+    return new Map(Array.from(byBill, ([billId, notices]) => [billId, callForViews(notices)]));
+  }, [state.notices]);
   const counts = useMemo(() => {
-    const result: Record<BillFilter, number> = { open: 0, parliament: 0, law: 0, ended: 0, all: state.bills.length };
-    state.bills.forEach(bill => { result[billGroup(bill)] += 1; });
+    const result: Record<BillFilter, number> = { open: 0, calls: 0, submissions: 0, parliament: 0, law: 0, ended: 0, all: state.bills.length };
+    state.bills.forEach(bill => {
+      result[billGroup(bill)] += 1;
+      if (calls.get(bill.id)) result.calls += 1;
+      if (submissionCount.get(bill.id)) result.submissions += 1;
+    });
     return result;
-  }, [state.bills]);
+  }, [state.bills, calls, submissionCount]);
 
   const needle = query.trim().toLowerCase();
   const bills = state.bills
-    .filter(bill => filter === 'all' || billGroup(bill) === filter)
+    .filter(bill => filter === 'all'
+      || (filter === 'calls' ? Boolean(calls.get(bill.id))
+        : filter === 'submissions' ? Boolean(submissionCount.get(bill.id))
+          : billGroup(bill) === filter))
     .filter(bill => legislature === 'all' || bill.institution === legislature)
     .filter(bill => committee === 'all' || (committee === '__unassigned__' ? !bill.committee_id : bill.committee_id === committee))
     .filter(bill => !needle || `${bill.title} ${bill.identifier} ${bill.institution} ${committeeName(bill)}`.toLowerCase().includes(needle))
@@ -135,13 +166,13 @@ export function BillsListPage() {
       <header>
         <p className="text-xs font-black uppercase tracking-[0.18em] text-primary-600 mb-3">{isOfficer ? (state.committees[0]?.name || 'Your committee') : 'National Assembly and county assemblies'}</p>
         <h1 className="text-4xl md:text-5xl font-black tracking-tighter text-surface-900 mb-3">{isOfficer ? "Your committee's bills" : 'Find a bill'}</h1>
-        <p className="text-lg text-surface-600 max-w-3xl leading-relaxed">Bills from the National Assembly, Nairobi City County Assembly and Trans Nzoia County Assembly. Committees take public views after a bill's First Reading and before its Second Reading; open bills are listed first, soonest deadline at the top.</p>
+        <p className="text-lg text-surface-600 max-w-3xl leading-relaxed">Bills from the National Assembly, Nairobi City County Assembly and Trans Nzoia County Assembly. A bill is open for views only while its committee's call for memoranda is running. Open bills are listed first, soonest deadline at the top.</p>
       </header>
 
       <section className="bill-filters" aria-label="Filter bills">
         <div className="bill-filter-chips" role="tablist" aria-label="Bill status">
           {BILL_FILTERS.map(item => (
-            <button key={item.id} type="button" role="tab" aria-selected={filter === item.id} className={`bill-chip ${filter === item.id ? 'is-active' : ''}`} onClick={() => setParam('show', item.id, 'open')} title={item.note}>
+            <button key={item.id} type="button" role="tab" aria-selected={filter === item.id} className={`bill-chip ${filter === item.id ? 'is-active' : ''}`} onClick={() => setParam('show', item.id, 'all')} title={item.note}>
               {item.label} <span>{counts[item.id]}</span>
             </button>
           ))}
@@ -191,6 +222,7 @@ export function BillsListPage() {
               </div>
               <div className="side">
                 <StagePill stage={bill.stage} />
+                <CallForViewsBadge call={calls.get(bill.id) || null} />
                 {participation.accepting && <Deadline participation={participation} />}
                 <ArrowRight className="h-4 w-4 text-surface-400" aria-hidden="true" />
               </div>
@@ -466,6 +498,7 @@ export function BillPage() {
   const [myReceipt, setMyReceipt] = useState<{ public_id: string; editable: boolean; edit_block?: EditBlock } | null>(null);
   const bill = state.bills.find(b => b.id === id);
   const isCitizen = state.currentUser?.role === 'citizen';
+  const participationData = useParticipationSummary(id);
 
   useEffect(() => {
     if (!id) return;
@@ -533,6 +566,17 @@ export function BillPage() {
   const billNotices = state.notices.filter(n => n.bill_ref === bill.id);
   const billReports = state.reports.filter(r => r.bill_ref === bill.id);
   const billStageSource = (bill.documents || []).find(doc => /official bills tracker/i.test(doc.name));
+  const documentHref = (doc: { url?: string; storage_ref?: string }, index: number) => doc.url && doc.url !== '#'
+    ? doc.url
+    : doc.storage_ref ? `${getApiUrl()}/bills/${encodeURIComponent(bill.id)}/documents/${index}` : undefined;
+  // The bill's text; for a county bill that is now law, the Act on Kenya Law.
+  const billTextIndex = (() => {
+    const docs = bill.documents || [];
+    const isText = (pattern: RegExp) => docs.findIndex((doc, i) => pattern.test(doc.name) && Boolean(documentHref(doc, i)));
+    const text = isText(/official bill document|bill text/i);
+    return text >= 0 ? text : isText(/kenya law/i);
+  })();
+  const billText = billTextIndex >= 0 ? { ...(bill.documents || [])[billTextIndex], href: documentHref((bill.documents || [])[billTextIndex], billTextIndex)! } : null;
   const timelineHistory: Array<{ date: string; stage: string; note: string; isLatestStage?: boolean; sourceUrl?: string }> = (bill.status_history || []).map(item => ({ ...item }));
   const stageTimelineDate = bill.stage_as_at || bill.source_updated_at || '';
   const latestIndex = timelineHistory.length - 1;
@@ -557,7 +601,13 @@ export function BillPage() {
     { name: 'Moderate', value: billMatches.filter(m => m.confidence_score >= 0.5 && m.confidence_score < 0.75).length, color: '#f59e0b' },
     { name: 'Low', value: billMatches.filter(m => m.confidence_score < 0.5).length, color: '#ef4444' },
   ];
-  const outcomeChart = outcomes.map(o => ({ name: o.status.replace(' with reasons', ''), submissions: o.count }));
+  // Submissions the committee report records (written memoranda, hearings), read by the AI.
+  const reportItems = participationData.items;
+  const REPORT_STAGE: Record<ReportDecision, SubmissionStage> = { adopted: 'adopted', amended: 'amended', rejected: 'rejected', 'not addressed': 'not_addressed' };
+  const reportCount = (status: SubmissionStage) => reportItems.filter(item => REPORT_STAGE[item.decision] === status).length;
+  const allOutcomes = outcomes.map(o => ({ ...o, platform: o.count, report: reportCount(o.status), count: o.count + reportCount(o.status) }));
+  const totalSubmissions = billReceipts.length + reportItems.length;
+  const outcomeChart = allOutcomes.map(o => ({ name: o.status.replace('_', ' '), submissions: o.count }));
 
   const sectionHeading = (Icon: React.ElementType, kicker: string, title: React.ReactNode, description?: string) => (
     <div className="mb-6">
@@ -590,6 +640,7 @@ export function BillPage() {
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
           <span className="font-mono font-bold text-[#3b4747] bg-[#f1eee7] px-3 py-1 rounded-lg border border-[#e2ded5]">{bill.identifier}</span>
           <span className="flex items-center gap-1.5 font-semibold text-[#3b4747]"><Building2 className="h-4 w-4 text-[#176b2b]" aria-hidden="true" /> {bill.institution}</span>
+          <CallForViewsBadge call={callForViews(billNotices)} />
           {bill.committee_id && (
             <span className="flex items-center gap-1.5 font-semibold text-[#3b4747]">
               <Users className="h-4 w-4 text-[#a52d29]" aria-hidden="true" /> {state.committees.find(c => c.id === bill.committee_id)?.name || 'Committee'}
@@ -597,6 +648,16 @@ export function BillPage() {
             </span>
           )}
           {billStageSource?.url && <a href={billStageSource.url} target="_blank" rel="noreferrer" className="text-xs font-bold text-[#11521f] underline underline-offset-2">Stage from the National Assembly Bills Tracker{bill.source_updated_at ? ` · as at ${formatDate(bill.source_updated_at)}` : ''}</a>}
+        </div>
+        <div className="read-bill-panel">
+          <div className="read-bill-icon"><BookOpenText className="h-6 w-6" aria-hidden="true" /></div>
+          <div className="min-w-0 flex-1">
+            <strong>{billText ? 'Read the bill' : 'Bill text not yet available'}</strong>
+            <span>{billText
+              ? (/kenya law/i.test(billText.name) ? 'The Act as passed, on Kenya Law.' : `The official text published by ${bill.institution === 'National Assembly' ? 'Parliament' : `the ${bill.institution}`} (PDF).`)
+              : `${bill.institution === 'National Assembly' ? 'Parliament' : `The ${bill.institution}`} has not published this bill's text online yet. Its stage and committee documents are below.`}</span>
+          </div>
+          {billText && <a href={billText.href} target="_blank" rel="noreferrer" className="action-button is-primary"><FileText className="h-4 w-4" aria-hidden="true" /> Read the bill</a>}
         </div>
         <div className={`participation-banner ${participation.accepting ? 'is-open' : 'is-closed'}`} role="status">
           <p>
@@ -609,6 +670,72 @@ export function BillPage() {
       </header>
 
       <BillStageTracker stage={bill.stage} accepting={participation.accepting} />
+
+      {/* Where the submissions are */}
+      <Card className="!p-7 md:!p-8" hover={false}>
+        {sectionHeading(FileCheck, 'Submissions', 'Where the submissions are', 'Every submission on this bill, whether sent on this platform or made to the committee directly, and how the committee treated it.')}
+        <p className="text-sm font-semibold text-[#3b4747] mb-4">
+          {totalSubmissions} submission{totalSubmissions === 1 ? '' : 's'} traced: {billReceipts.length} sent on this platform{reportItems.length ? `, ${reportItems.length} recorded in the committee report (written memoranda and hearings)` : ''}.
+        </p>
+        <div className="stage-counts">
+          {allOutcomes.map(o => (
+            <div key={o.status} className={`stage-count ${o.count ? '' : 'is-zero'}`}>
+              <strong>{o.count}</strong>
+              <SubmissionStatusBadge status={o.status as SubmissionStatus} />
+              {o.report > 0 && <small className="block text-[11px] font-semibold text-[#687575] mt-1">{o.platform} on this platform · {o.report} in the report</small>}
+            </div>
+          ))}
+        </div>
+        <p className="mt-4 mb-0 text-xs font-semibold text-surface-500">Outcome labels record what the committee's report says. They are not legal findings or judgments about anyone.</p>
+        <ReportAnalysisPanel data={participationData} hasReport={billReports.length > 0} />
+        <details className="bill-stats">
+          <summary>See statistics and charts</summary>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-8">
+          <div className="rounded-2xl bg-[#f1f8f2] border border-[#cfe5d4] p-4"><p className="text-xs font-black uppercase tracking-wider text-[#176b2b]">Submissions</p><p className="text-3xl font-black text-[#0f4f1f] mt-1">{totalSubmissions}</p></div>
+          <div className="rounded-2xl bg-[#f2f6fb] border border-[#cfdcee] p-4"><p className="text-xs font-black uppercase tracking-wider text-[#1d3557]">Matched</p><p className="text-3xl font-black text-[#1d3557] mt-1">{confirmedMatches.length}</p></div>
+          <div className="rounded-2xl bg-[#fdf5e4] border border-[#f0d9a8] p-4"><p className="text-xs font-black uppercase tracking-wider text-[#7a4a05]">Reports</p><p className="text-3xl font-black text-[#6b4106] mt-1">{billReports.length}</p></div>
+          <div className="rounded-2xl bg-[#f6f5f1] border border-[#e2ded5] p-4"><p className="text-xs font-black uppercase tracking-wider text-[#526060]">Avg confidence</p><p className="text-3xl font-black text-[#182020] mt-1">{billMatches.length ? `${Math.round(averageConfidence * 100)}%` : '—'}</p></div>
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          <div><h3 className="font-black text-[#182020] mb-4">Submission outcomes</h3><div className="h-64">{totalSubmissions ? <ResponsiveContainer width="100%" height="100%"><BarChart data={outcomeChart} margin={{ top: 8, right: 12, left: -20, bottom: 8 }}><CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" /><XAxis dataKey="name" tick={{ fontSize: 11 }} interval={0} angle={-15} textAnchor="end" height={45} /><YAxis allowDecimals={false} tick={{ fontSize: 11 }} /><Tooltip /><Bar dataKey="submissions" fill="#176b2b" radius={[6, 6, 0, 0]} /></BarChart></ResponsiveContainer> : <div className="h-full flex items-center justify-center rounded-2xl bg-[#faf9f6] text-sm text-[#687575]">No submission data yet.</div>}</div></div>
+          <div><h3 className="font-black text-[#182020] mb-4">Match confidence bands</h3><div className="h-64">{billMatches.length ? <ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={confidenceBands} dataKey="value" nameKey="name" cx="50%" cy="45%" innerRadius={55} outerRadius={85} paddingAngle={3} label={({ name, value }) => `${name}: ${value}`}><Cell fill="#22c55e" /><Cell fill="#f59e0b" /><Cell fill="#ef4444" /></Pie><Tooltip /></PieChart></ResponsiveContainer> : <div className="h-full flex items-center justify-center rounded-2xl bg-[#faf9f6] text-sm text-[#687575]">Matching has not been run yet.</div>}</div>{billMatches.length > 0 && <div className="flex justify-center gap-4 text-xs font-bold text-[#3b4747]"><span><i className="inline-block w-2.5 h-2.5 rounded-full bg-green-500 mr-1" />High ≥75%</span><span><i className="inline-block w-2.5 h-2.5 rounded-full bg-amber-500 mr-1" />Moderate</span><span><i className="inline-block w-2.5 h-2.5 rounded-full bg-red-500 mr-1" />Low</span></div>}</div>
+        </div>
+        </details>
+      </Card>
+
+      {/* Submissions */}
+      <Card className="!p-7 md:!p-8" hover={false}>
+        {sectionHeading(Users, 'Public Submissions', <>Submissions <span className="text-[#94a09d]">({totalSubmissions})</span></>, totalSubmissions ? 'Who said what, and how the committee treated it. Select a submission to read it in full.' : undefined)}
+        {totalSubmissions === 0 ? (
+          <div className="text-center py-12 rounded-2xl bg-[#faf9f6] border border-dashed border-[#e2ded5]">
+            <Users className="h-12 w-12 text-[#cfcac0] mx-auto mb-3" aria-hidden="true" />
+            <p className="text-lg font-semibold text-[#3b4747]">No submissions yet for this bill.</p>
+            {canSubmit ? (
+              <>
+                <p className="text-sm text-[#687575] mb-5">Be the first to submit your view.</p>
+                <Link to={submitHref} className="action-button is-primary">{submitLabel}</Link>
+              </>
+            ) : <p className="text-sm text-[#687575]">{participation.reason}</p>}
+          </div>
+        ) : (
+          <div className="grid gap-8">
+            {billReceipts.length > 0 && (
+              <div>
+                <h3 className="text-lg font-black text-[#182020] mb-3">Sent on this platform <span className="text-[#94a09d]">({billReceipts.length})</span></h3>
+                <SubmissionsTable receipts={billReceipts} myReceiptId={myReceipt?.public_id} myEdit={myReceipt} />
+              </div>
+            )}
+            {reportItems.length > 0 && (
+              <div>
+                <h3 className="text-lg font-black text-[#182020] mb-1">Recorded in the committee report <span className="text-[#94a09d]">({reportItems.length})</span></h3>
+                <p className="text-sm text-[#596767] mb-3">Memoranda and oral submissions the committee lists in its report, with what it decided on each. Read from the report by AI: open the report to check any item.</p>
+                <ReportSubmissionsTable items={reportItems} />
+              </div>
+            )}
+          </div>
+        )}
+      </Card>
+
 
       {/* Documents */}
       <div id="documents">
@@ -677,52 +804,6 @@ export function BillPage() {
               );
             })}
           </div>
-        )}
-      </Card>
-
-      {/* Where the submissions are */}
-      <Card className="!p-7 md:!p-8" hover={false}>
-        {sectionHeading(FileCheck, 'Submissions', 'Where the submissions are', 'Each submission moves from received, to the committee, to the published report and the committee\'s response.')}
-        <div className="stage-counts">
-          {outcomes.map(o => (
-            <div key={o.status} className={`stage-count ${o.count ? '' : 'is-zero'}`}>
-              <strong>{o.count}</strong>
-              <SubmissionStatusBadge status={o.status as SubmissionStatus} />
-            </div>
-          ))}
-        </div>
-        <p className="mt-4 mb-0 text-xs font-semibold text-surface-500">Outcome labels record what the committee's report says. They are not legal findings or judgments about anyone.</p>
-        <details className="bill-stats">
-          <summary>See statistics and charts</summary>
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-8">
-          <div className="rounded-2xl bg-[#f1f8f2] border border-[#cfe5d4] p-4"><p className="text-xs font-black uppercase tracking-wider text-[#176b2b]">Submissions</p><p className="text-3xl font-black text-[#0f4f1f] mt-1">{billReceipts.length}</p></div>
-          <div className="rounded-2xl bg-[#f2f6fb] border border-[#cfdcee] p-4"><p className="text-xs font-black uppercase tracking-wider text-[#1d3557]">Matched</p><p className="text-3xl font-black text-[#1d3557] mt-1">{confirmedMatches.length}</p></div>
-          <div className="rounded-2xl bg-[#fdf5e4] border border-[#f0d9a8] p-4"><p className="text-xs font-black uppercase tracking-wider text-[#7a4a05]">Reports</p><p className="text-3xl font-black text-[#6b4106] mt-1">{billReports.length}</p></div>
-          <div className="rounded-2xl bg-[#f6f5f1] border border-[#e2ded5] p-4"><p className="text-xs font-black uppercase tracking-wider text-[#526060]">Avg confidence</p><p className="text-3xl font-black text-[#182020] mt-1">{billMatches.length ? `${Math.round(averageConfidence * 100)}%` : '—'}</p></div>
-        </div>
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          <div><h3 className="font-black text-[#182020] mb-4">Submission outcomes</h3><div className="h-64">{billReceipts.length ? <ResponsiveContainer width="100%" height="100%"><BarChart data={outcomeChart} margin={{ top: 8, right: 12, left: -20, bottom: 8 }}><CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" /><XAxis dataKey="name" tick={{ fontSize: 11 }} interval={0} angle={-15} textAnchor="end" height={45} /><YAxis allowDecimals={false} tick={{ fontSize: 11 }} /><Tooltip /><Bar dataKey="submissions" fill="#176b2b" radius={[6, 6, 0, 0]} /></BarChart></ResponsiveContainer> : <div className="h-full flex items-center justify-center rounded-2xl bg-[#faf9f6] text-sm text-[#687575]">No submission data yet.</div>}</div></div>
-          <div><h3 className="font-black text-[#182020] mb-4">Match confidence bands</h3><div className="h-64">{billMatches.length ? <ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={confidenceBands} dataKey="value" nameKey="name" cx="50%" cy="45%" innerRadius={55} outerRadius={85} paddingAngle={3} label={({ name, value }) => `${name}: ${value}`}><Cell fill="#22c55e" /><Cell fill="#f59e0b" /><Cell fill="#ef4444" /></Pie><Tooltip /></PieChart></ResponsiveContainer> : <div className="h-full flex items-center justify-center rounded-2xl bg-[#faf9f6] text-sm text-[#687575]">Matching has not been run yet.</div>}</div>{billMatches.length > 0 && <div className="flex justify-center gap-4 text-xs font-bold text-[#3b4747]"><span><i className="inline-block w-2.5 h-2.5 rounded-full bg-green-500 mr-1" />High ≥75%</span><span><i className="inline-block w-2.5 h-2.5 rounded-full bg-amber-500 mr-1" />Moderate</span><span><i className="inline-block w-2.5 h-2.5 rounded-full bg-red-500 mr-1" />Low</span></div>}</div>
-        </div>
-        </details>
-      </Card>
-
-      {/* Submissions */}
-      <Card className="!p-7 md:!p-8" hover={false}>
-        {sectionHeading(Users, 'Public Submissions', <>Submissions <span className="text-[#94a09d]">({billReceipts.length})</span></>, billReceipts.length ? 'Select a submission to read it in full.' : undefined)}
-        {billReceipts.length === 0 ? (
-          <div className="text-center py-12 rounded-2xl bg-[#faf9f6] border border-dashed border-[#e2ded5]">
-            <Users className="h-12 w-12 text-[#cfcac0] mx-auto mb-3" aria-hidden="true" />
-            <p className="text-lg font-semibold text-[#3b4747]">No submissions yet for this bill.</p>
-            {canSubmit ? (
-              <>
-                <p className="text-sm text-[#687575] mb-5">Be the first to submit your view.</p>
-                <Link to={submitHref} className="action-button is-primary">{submitLabel}</Link>
-              </>
-            ) : <p className="text-sm text-[#687575]">{participation.reason}</p>}
-          </div>
-        ) : (
-          <SubmissionsTable receipts={billReceipts} myReceiptId={myReceipt?.public_id} myEdit={myReceipt} />
         )}
       </Card>
 

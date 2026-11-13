@@ -42,7 +42,7 @@ async def person(db_session, role="citizen", **fields):
                                       password_hash=get_password_hash("password123"), status="active", **fields))
 
 
-def bill_row(stage="First Reading", **fields):
+def bill_row(stage="Public participation", **fields):
     return LegislativeItem(title=fields.pop("title", f"The Test Bill {uuid.uuid4().hex[:4]}, 2026"),
                            identifier=fields.pop("identifier", f"NA/2026/Bill-{uuid.uuid4().hex[:6]}"),
                            institution=fields.pop("institution", "National Assembly"), stage=stage,
@@ -163,7 +163,7 @@ async def test_public_bill_pages_and_flow(client, db_session, world):
     bill = world["open_bill"]
     assert client.get(f"{API}/bills/{uuid.uuid4()}").status_code == 404
     assert client.get(f"{API}/bills/{uuid.uuid4()}/flow").status_code == 404
-    assert len(client.get(f"{API}/bills", params={"institution": "National Assembly", "stage": "First Reading", "search": "test bill"}).json()["bills"]) == 2
+    assert len(client.get(f"{API}/bills", params={"institution": "National Assembly", "stage": "Public participation", "search": "test bill"}).json()["bills"]) == 2
 
     citizens = [await person(db_session) for _ in range(3)]
     receipts = [submit(client, c, bill, text=f"View number {i}").json() for i, c in enumerate(citizens)]

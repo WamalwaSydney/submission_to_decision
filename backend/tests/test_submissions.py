@@ -31,10 +31,39 @@ def test_bills_before_first_reading_are_not_yet_open():
         assert window["status"] == "not_yet_open"
 
 
-def test_first_reading_is_open_without_a_notice():
+def test_first_reading_waits_for_the_committees_call_for_memoranda():
     window = participation_window("First Reading")
+    assert window["accepting"] is False
+    assert window["status"] == "not_yet_open"
+    assert "call for memoranda" in window["reason"]
+
+
+def test_public_participation_stage_is_open_without_a_notice():
+    window = participation_window("Public participation")
     assert window["accepting"] is True
     assert window["closes_on"] is None
+
+
+def test_only_the_public_participation_stage_is_open_without_a_notice():
+    for stage in ("Introduced", "Awaiting public participation", "Public participation closed", "Published by the assembly"):
+        assert participation_window(stage)["accepting"] is False, stage
+
+
+def test_stage_follows_the_call_for_memoranda():
+    from app.participation import stage_from_notices
+    today = date(2026, 11, 3)
+    open_notice = {"window_start": "2026-10-20", "window_end": "2026-11-10"}
+    closed_notice = {"window_start": "2026-09-01", "window_end": "2026-09-21"}
+    future_notice = {"window_start": "2026-11-20", "window_end": "2026-12-04"}
+    assert stage_from_notices("First Reading", [open_notice], today) == "Public participation"
+    assert stage_from_notices("Public participation", [open_notice], today) is None
+    assert stage_from_notices("Public participation", [closed_notice], today, "First Reading") == "First Reading"
+    assert stage_from_notices("Public participation", [closed_notice], today, "Public participation") == "Public participation closed"
+    assert stage_from_notices("Public participation", [future_notice], today) == "Awaiting public participation"
+    assert stage_from_notices("Public participation closed", [open_notice], today) == "Public participation"
+    # A bill that has moved past participation is never pulled back.
+    assert stage_from_notices("Second Reading", [open_notice], today) is None
+    assert stage_from_notices("First Reading", [closed_notice], today) is None
 
 
 def test_call_for_memoranda_window_is_authoritative():
@@ -67,7 +96,7 @@ def headers_for(user):
     return {"Authorization": f"Bearer {create_access_token({'sub': str(user.id)})}"}
 
 
-async def make_bill(db_session, stage="First Reading", identifier=None):
+async def make_bill(db_session, stage="Public participation", identifier=None):
     bill = LegislativeItem(title=f"The Test Bill ({stage}), 2026", identifier=identifier or f"NA/2026/Bill-{uuid.uuid4().hex[:6]}",
                            institution="National Assembly", stage=stage, documents=[], status_history=[])
     db_session.add(bill)

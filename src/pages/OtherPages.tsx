@@ -648,7 +648,7 @@ export function MyReceiptsPage() {
           </div>
           <p className="text-xl font-bold text-surface-700 mb-2">No submissions yet</p>
           <p className="text-surface-500 mb-4">You have not submitted any views yet.</p>
-          <Link to="/submit" className="btn-primary inline-flex items-center gap-2 mt-2">Submit your first view</Link>
+          <Link to="/bills?show=open" className="btn-primary inline-flex items-center gap-2 mt-2">Find a bill open for views</Link>
         </Card>
       ) : (
         <Card className="!p-6 md:!p-7">

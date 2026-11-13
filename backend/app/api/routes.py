@@ -21,11 +21,11 @@ from app.auth import get_current_user, require_role, verify_password, get_passwo
 from app.models import (
     User, Committee, LegislativeItem, ParticipationReceipt, Message,
     CommitteeReport, ReportEntry, SubmissionMatch, RepresentativeProfile, NoticeRecord,
-    ModerationAction, PasswordRecoveryCode,
+    ModerationAction, PasswordRecoveryCode, ReportAnalysis,
 )
 from app.services import receipt_service, linking_service, ingestion_service, storage_service, notification_service
-from app.services import submission_documents
-from app.participation import participation_window
+from app.services import submission_documents, report_analysis_service, llm_matching_service
+from app.participation import participation_window, stage_from_notices
 from app.submission_stage import STAGES, submission_stage
 from app.audit import record_audit
 from app import rate_limit
@@ -790,6 +790,111 @@ async def bootstrap(db: AsyncSession = Depends(get_db)):
         "notices": notices,
         "profiles": [profile for profile in await all_rows(RepresentativeProfile, exclude=PROFILE_PUBLIC_EXCLUDE) if profile.get("profile_label") != "simulated"],
     }
+
+
+# ============ What happened to public views (AI reading of committee reports) ============
+
+PASSED_STAGES = {"assented", "passed by national assembly", "passed by senate", "mediation report adopted"}
+
+
+async def _platform_counts(db: AsyncSession, bill_ids) -> dict:
+    """Per bill: platform submissions and how moderators decided their proposed matches."""
+    ids = list(bill_ids)
+    out = {bill_id: {"submissions": 0, "confirmed": 0, "rejected": 0, "pending": 0} for bill_id in ids}
+    if not ids:
+        return out
+    receipts = (await db.execute(current_receipts().where(ParticipationReceipt.legislative_item_id.in_(ids)))).scalars().all()
+    by_receipt = {receipt.id: receipt.legislative_item_id for receipt in receipts}
+    for receipt in receipts:
+        out[receipt.legislative_item_id]["submissions"] += 1
+    if by_receipt:
+        matches = (await db.execute(select(SubmissionMatch.receipt_ref, SubmissionMatch.reviewer_decision)
+                                    .where(SubmissionMatch.receipt_ref.in_(list(by_receipt))))).all()
+        decided: dict = {}
+        for receipt_ref, decision in matches:
+            # A receipt counts once: confirmed beats pending beats rejected.
+            rank = {"confirmed": 3, "pending": 2, "rejected": 1}.get(decision or "pending", 0)
+            if rank > decided.get(receipt_ref, (0, None))[0]:
+                decided[receipt_ref] = (rank, decision or "pending")
+        for receipt_ref, (_, decision) in decided.items():
+            out[by_receipt[receipt_ref]][decision] += 1
+    return out
+
+
+@router.get("/bills/{bill_id}/participation-summary")
+async def bill_participation_summary(bill_id: UUID, db: AsyncSession = Depends(get_db)):
+    """How many views a bill received and what the committee did with them. Reads stored results only."""
+    bill = (await db.execute(select(LegislativeItem).where(LegislativeItem.id == bill_id, LegislativeItem.is_simulated.is_(False)))).scalar_one_or_none()
+    if not bill:
+        raise HTTPException(status_code=404, detail="Bill not found")
+    reports = (await db.execute(select(CommitteeReport.id).where(CommitteeReport.bill_ref == bill.id, CommitteeReport.is_simulated.is_(False)))).scalars().all()
+    analyses = await report_analysis_service.analyses_for_bills(db, [bill.id])
+    return {
+        "bill_id": str(bill.id),
+        "platform": (await _platform_counts(db, [bill.id]))[bill.id],
+        "reports": len(reports),
+        "report_analysis": report_analysis_service.combine(analyses.get(bill.id, [])),
+        "ai_available": llm_matching_service.is_configured(),
+    }
+
+
+@router.post("/bills/{bill_id}/participation-summary/generate")
+async def generate_bill_participation_summary(
+    bill_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_role("administrator", "reviewer", "committee_officer")),
+):
+    """Ask Gemini to read this bill's committee reports. Staff only, because each run is a paid API call."""
+    bill = (await db.execute(select(LegislativeItem).where(LegislativeItem.id == bill_id, LegislativeItem.is_simulated.is_(False)))).scalar_one_or_none()
+    if not bill:
+        raise HTTPException(status_code=404, detail="Bill not found")
+    await ensure_committee_scope(db, current_user, bill.id)
+    if not llm_matching_service.is_configured():
+        raise HTTPException(status_code=503, detail="AI analysis is not configured on this server (GEMINI_API_KEY is missing).")
+    reports = (await db.execute(select(CommitteeReport).where(CommitteeReport.bill_ref == bill.id, CommitteeReport.is_simulated.is_(False)))).scalars().all()
+    if not reports:
+        raise HTTPException(status_code=409, detail="This bill has no committee report to analyse yet.")
+    bill_key, bill_title = bill.id, bill.title
+    try:
+        for report in reports:
+            await report_analysis_service.analyse_report(db, report, bill_title)
+    except Exception as exc:  # network or model failure: keep any earlier analysis
+        await db.rollback()
+        log.warning("Report analysis failed for bill %s: %s", bill_key, exc)
+        raise HTTPException(status_code=502, detail="The AI service could not analyse the report right now. Try again in a few minutes.")
+    await record_audit(db, entity_type="legislative_item", entity_id=bill.id, action="report_analysis_generated", actor_id=current_user.id,
+                       details={"reports": len(reports), "model": llm_matching_service.MODEL})
+    await db.commit()
+    return await bill_participation_summary(bill.id, db)
+
+
+@router.get("/participation-outcomes")
+async def participation_outcomes(passed_only: bool = False, db: AsyncSession = Depends(get_db)):
+    """Bills with an AI reading of their committee report, or with platform submissions, and what happened to the views."""
+    analysed = (await db.execute(
+        select(CommitteeReport.bill_ref).join(ReportAnalysis, ReportAnalysis.report_ref == CommitteeReport.id)
+        .where(CommitteeReport.bill_ref.is_not(None), CommitteeReport.is_simulated.is_(False))
+    )).scalars().all()
+    with_submissions = (await db.execute(select(ParticipationReceipt.legislative_item_id).distinct())).scalars().all()
+    bill_ids = set(analysed) | set(with_submissions)
+    if not bill_ids:
+        return {"bills": []}
+    bills = (await db.execute(select(LegislativeItem).where(LegislativeItem.id.in_(bill_ids), LegislativeItem.is_simulated.is_(False)))).scalars().all()
+    if passed_only:
+        bills = [bill for bill in bills if (bill.stage or "").strip().casefold() in PASSED_STAGES]
+    analyses = await report_analysis_service.analyses_for_bills(db, [bill.id for bill in bills])
+    platform = await _platform_counts(db, [bill.id for bill in bills])
+    rows = []
+    for bill in bills:
+        combined = report_analysis_service.combine(analyses.get(bill.id, []))
+        rows.append({
+            "id": str(bill.id), "title": bill.title, "identifier": bill.identifier, "institution": bill.institution, "stage": bill.stage,
+            "passed": (bill.stage or "").strip().casefold() in PASSED_STAGES,
+            "platform": platform[bill.id],
+            "report": {k: v for k, v in combined.items() if k != "items"} if combined else None,
+        })
+    rows.sort(key=lambda row: (not row["passed"], -((row["report"] or {}).get("submissions_recorded") or 0), row["title"]))
+    return {"bills": rows}
 
 
 # ============ Public bill flow ============
@@ -1739,6 +1844,8 @@ async def create_notice(
         bill_text_accessible=bill_text_accessible,
     )
     db.add(notice)
+    await db.flush()
+    await _sync_bill_stage_with_notices(db, bill)
     await db.commit()
     await db.refresh(notice)
     receipts_result = await db.execute(current_receipts().where(ParticipationReceipt.legislative_item_id == notice.bill_ref))
@@ -1749,6 +1856,16 @@ async def create_notice(
         )
 
     return {"notice": to_dict(notice)}
+
+
+async def _sync_bill_stage_with_notices(db: AsyncSession, bill: LegislativeItem) -> None:
+    """A bill is at "Public participation" exactly while a call for views is open."""
+    notices = (await db.execute(select(NoticeRecord).where(NoticeRecord.bill_ref == bill.id))).scalars().all()
+    new_stage = stage_from_notices(bill.stage, notices, date.today(), bill.source_status)
+    if not new_stage:
+        return
+    bill.stage = new_stage
+    bill.status_history = [*(bill.status_history or []), {"date": date.today().isoformat(), "stage": new_stage, "note": "Call for views recorded by the committee."}]
 
 
 @router.put("/notices/{notice_id}")
@@ -1793,6 +1910,8 @@ async def update_notice(
     notice.window_end = window_end
     notice.mode = mode
     notice.bill_text_accessible = bill_text_accessible
+    await db.flush()
+    await _sync_bill_stage_with_notices(db, bill)
     await db.commit()
     await db.refresh(notice)
     return {"notice": to_dict(notice)}

@@ -432,6 +432,9 @@ async def test_main_stores_everything_and_reports_failure_rates(db_session, monk
 
     async def ok():
         return await fetched()
+    async def no_texts():
+        return []
+    monkeypatch.setattr(sync, "fetch_bill_texts", no_texts)
     monkeypatch.setattr(sync, "fetch_all", ok)
     assert await sync.main() == 0
     async with TestSession() as session:
@@ -446,3 +449,67 @@ async def test_main_stores_everything_and_reports_failure_rates(db_session, monk
         return await fetched(rows=[bill(identifier="", title="")])
     monkeypatch.setattr(sync, "fetch_all", skipped)
     assert await sync.main() == 1
+
+
+@pytest.mark.asyncio
+async def test_bills_are_at_public_participation_only_while_a_call_is_open(db_session):
+    async with test_engine.begin() as conn:
+        await prepare_schema(conn)
+        await sync.upsert_bills(conn, [bill()], date(2026, 3, 1))
+        await sync.upsert_notices(conn, [
+            notice(),  # water bill: open 1-21 March
+            notice(source_url="https://www.parliament.go.ke/memoranda-old", bill_title="Old Roads Bill", bill_number=None, deadline=date(2026, 3, 5), notice_date=date(2026, 2, 20)),
+        ])
+        stage = lambda ident: conn.execute(text("SELECT stage, status_history FROM legislative_items WHERE identifier LIKE :i"), {"i": ident})
+
+        assert await sync.sync_participation_stages(conn, date(2026, 3, 10)) == (1, 1)
+        water = (await stage("NA/2026/Bill-012")).first()
+        assert water.stage == "Public participation" and "21 March 2026" in water.status_history[-1]["note"]
+        assert (await stage("NA/2026/Notice-%")).first().stage == "Public participation closed"
+
+        # The call closes: the bill goes back to its tracker stage.
+        assert await sync.sync_participation_stages(conn, date(2026, 3, 25)) == (0, 1)
+        assert (await stage("NA/2026/Bill-012")).first().stage == "First Reading"
+        # Nothing to change on a second run.
+        assert await sync.sync_participation_stages(conn, date(2026, 3, 25)) == (0, 0)
+
+
+def test_prose_fragments_are_not_bill_names():
+    for junk in ("Read the Bill", "M.P. The Bill"):
+        assert sync.NOTICE_JUNK_TITLE_RE.search(junk), junk
+    assert not sync.NOTICE_JUNK_TITLE_RE.search("Water Bill")
+
+
+BILL_LIST_HTML = """
+<table>
+<tr><td><div class="post-title"><a href="/sites/default/files/2026-11/THE%20WATER%20BILL%2C2026.pdf">THE WATER BILL,2026</a></div></td></tr>
+<tr><td><div class="post-title"><a href="/sites/default/files/2026-10/forests.pdf">The Forests Bill, 2026 (National Assembly Bills No. 20 of 2026)</a></div></td></tr>
+<tr><td><div class="post-title"><a href="/sites/default/files/2026-10/climate.pdf">The Climate Change (Amendment) Bill, No.45 of 2026</a></div></td></tr>
+<tr><td><div class="post-title"><a href="/sites/default/files/2026-09/digest.pdf">BILL DIGEST: THE WATER BILL, 2026</a></div></td></tr>
+<tr><td><div class="post-title"><a href="/sites/default/files/2026-11/hansard.pdf">The Hansard - Thursday</a></div></td></tr>
+</table>
+"""
+
+
+def test_bill_list_keeps_bill_pdfs_only():
+    rows = sync.parse_bill_list(BILL_LIST_HTML, "https://www.parliament.go.ke/the-national-assembly/house-business/bills")
+    assert [(r.title, r.house, r.number, r.year) for r in rows] == [
+        ("THE WATER BILL,2026", None, None, 2026),
+        ("The Forests Bill, 2026 (National Assembly Bills No. 20 of 2026)", "na", 20, 2026),
+        ("The Climate Change (Amendment) Bill, No.45 of 2026", None, None, 2026),
+    ]
+    assert rows[0].url.startswith("https://www.parliament.go.ke/sites/default/files/")
+
+
+@pytest.mark.asyncio
+async def test_bill_texts_attach_by_number_or_title(db_session):
+    async with test_engine.begin() as conn:
+        await prepare_schema(conn)
+        await sync.upsert_bills(conn, [bill(), bill(identifier="NA/2026/Bill-020", title="The Forests Bill, 2026", number=20),
+                                       bill(identifier="NA/2026/Bill-030", title="The Climate Change (Amendment) Bill, 2026", number=30)], date(2026, 3, 1))
+        rows = sync.parse_bill_list(BILL_LIST_HTML, "https://www.parliament.go.ke/the-national-assembly/house-business/bills")
+        assert await sync.attach_bill_texts(conn, rows) == 3
+        assert await sync.attach_bill_texts(conn, rows) == 0  # already linked
+        docs = dict((await conn.execute(text("SELECT identifier, documents FROM legislative_items WHERE identifier IN ('NA/2026/Bill-012','NA/2026/Bill-020')"))).all())
+        assert any(d["url"].endswith("THE%20WATER%20BILL%2C2026.pdf") for d in docs["NA/2026/Bill-012"])
+        assert any(d["url"].endswith("forests.pdf") for d in docs["NA/2026/Bill-020"])

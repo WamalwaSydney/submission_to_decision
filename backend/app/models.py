@@ -146,6 +146,19 @@ class ReportEntry(Base):
     report = relationship("CommitteeReport", back_populates="entries")
     matches = relationship("SubmissionMatch", back_populates="report_entry")
 
+class ReportAnalysis(Base):
+    """Gemini's reading of a committee report: which public submissions it records
+    and what the committee decided on each. An aid for readers, not a verified record."""
+    __tablename__ = "report_analyses"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    report_ref = Column(UUID(as_uuid=True), ForeignKey("committee_reports.id"), nullable=False, unique=True)
+    model = Column(String(100), nullable=False)
+    entries_analysed = Column(Integer, nullable=False, default=0)
+    items = Column(JSON, nullable=False, default=list)
+    summary = Column(Text)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
 class SubmissionMatch(Base):
     __tablename__ = "submission_matches"
 

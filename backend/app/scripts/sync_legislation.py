@@ -695,7 +695,9 @@ NOTICE_FORMAL_BILL_RE = re.compile(
 # Fragments that the line scan used to mistake for bill titles.
 NOTICE_JUNK_TITLE_RE = re.compile(
     r"^(?:\(|amendment\)|national\s+assembly\s+bill|senate\s+bill|bill\s+no|it\s+is\s+notified|invitation|notification|"
-    r"submitted\s+by|and\s+whereas|hearings|assembly\s+bill)|\bis\s+a\s+bill\b|\bthe\s+kenyan\s+parliament\s+website\b",
+    r"submitted\s+by|and\s+whereas|hearings|assembly\s+bill)|\bis\s+a\s+bill\b|\bthe\s+kenyan\s+parliament\s+website\b"
+    # Prose fragments such as "Read the Bill" or "M.P. The Bill" name no bill.
+    r"|^(?:[\w.]+\s+){0,2}the\s+bill$",
     re.I,
 )
 
@@ -1200,6 +1202,134 @@ async def upsert_notices(conn, notices: list[NoticeRow]) -> int:
     return done
 
 
+async def sync_participation_stages(conn, today: date) -> tuple[int, int]:
+    """Put bills at "Public participation" exactly while their call for memoranda is open.
+
+    Returns (opened, moved_on). Only Parliament bills are touched; county
+    assemblies and clerk-entered stages are left as they are.
+    """
+    from app.participation import stage_from_notices
+    rows = (await conn.execute(text(
+        "SELECT l.id, l.stage, l.source_status, l.status_history, "
+        "COALESCE(json_agg(json_build_object('window_start', n.window_start, 'window_end', n.window_end)) FILTER (WHERE n.id IS NOT NULL), '[]') AS notices "
+        "FROM legislative_items l LEFT JOIN notice_records n ON n.bill_ref = l.id "
+        "WHERE l.institution = 'National Assembly' AND l.is_simulated = false "
+        "GROUP BY l.id"))).fetchall()
+    opened = moved = 0
+    for row in rows:
+        notices = row.notices if isinstance(row.notices, list) else json.loads(row.notices)
+        new_stage = stage_from_notices(row.stage, notices, today, row.source_status)
+        if not new_stage:
+            continue
+        history = list(row.status_history or [])
+        if new_stage == "Public participation":
+            closes = max(n["window_end"] for n in notices if n["window_start"] <= today.isoformat() <= n["window_end"])
+            note = f"The committee's call for memoranda is open until {date.fromisoformat(closes).strftime('%d %B %Y')}."
+            opened += 1
+        else:
+            note = "The committee's call for memoranda has ended." if new_stage != "Awaiting public participation" else "The committee has published a call for memoranda that opens later."
+            moved += 1
+        if not history or history[-1].get("stage") != new_stage:
+            history.append({"date": today.isoformat(), "stage": new_stage, "note": note})
+        await conn.execute(
+            text("UPDATE legislative_items SET stage=:stage, status_history=CAST(:history AS json) WHERE id=:id"),
+            {"stage": new_stage, "history": json.dumps(history), "id": row.id},
+        )
+    return opened, moved
+
+
+# --------------------------------------------------------------------------
+# Bill texts
+# --------------------------------------------------------------------------
+# Parliament's Bills pages list each published bill with its PDF. The trackers
+# give a bill's stage but not its text, so citizens could not read most bills.
+BILL_LIST_PAGES = (
+    f"{BASE}/the-national-assembly/house-business/bills",
+    f"{BASE}/the-senate/house-business/bills",
+)
+BILL_LIST_PARLIAMENTS = ("2022", "2017")
+BILL_LIST_MAX_PAGES = 40
+BILL_TEXT_NAME = "Official bill document (Parliament PDF)"
+BILL_TEXT_REF_RE = re.compile(r"\([^)]*\bno\.?\s*\d+\.?\s*of\b[^)]*\)|,?\s*no\.?\s*\d+\.?\s*of\s+20\d{2}|\.pdf$", re.I)
+NOT_A_BILL_TEXT_RE = re.compile(r"digest|order\s+paper|hansard|tracker|memorand|report\s+of|votes\s+and\s+proceedings|gazette\s+notice", re.I)
+
+
+@dataclass(frozen=True)
+class BillText:
+    title: str
+    url: str
+    house: str | None
+    number: int | None
+    year: int | None
+
+
+def parse_bill_list(html: str, page_url: str) -> list[BillText]:
+    """Bill PDFs on one page of Parliament's Bills listing."""
+    found = []
+    for a in BeautifulSoup(html, "lxml").select(".post-title a[href]"):
+        url = urljoin(page_url, a["href"])
+        title = clean(a.get_text(" ", strip=True))
+        if not PDF_RE.search(url) or not re.search(r"\bbill\b", title, re.I) or NOT_A_BILL_TEXT_RE.search(title):
+            continue
+        ref = BILL_REF_RE.search(title)
+        generic = None if ref else GENERIC_BILL_REF_RE.search(title)
+        year = YEAR_RE.search(title)
+        found.append(BillText(
+            title=title, url=url,
+            house=canonical_house(ref.group("house")) if ref else None,
+            number=int(ref.group("number")) if ref else (int(generic.group(1)) if generic else None),
+            year=int(ref.group("year")) if ref else (int(generic.group(2)) if generic else (int(year.group(1)) if year else None)),
+        ))
+    return found
+
+
+async def fetch_bill_texts() -> list[BillText]:
+    """Every bill PDF on Parliament's National Assembly and Senate Bills pages, newest first."""
+    texts: list[BillText] = []
+    async with httpx.AsyncClient(headers=HEADERS, timeout=60, follow_redirects=True) as client:
+        for base in BILL_LIST_PAGES:
+            for parliament in BILL_LIST_PARLIAMENTS:
+                for page in range(BILL_LIST_MAX_PAGES):
+                    url = f"{base}?title=%20&field_parliament_value={parliament}&page={page}"
+                    try:
+                        rows = parse_bill_list((await get(client, url)).text, url)
+                    except httpx.HTTPError as exc:
+                        log.warning("Bills page unavailable %s: %s", url, exc)
+                        break
+                    if not rows:
+                        break
+                    texts.extend(rows)
+                    await asyncio.sleep(POLITE_DELAY_S)
+    return list({text_row.url: text_row for text_row in texts}.values())
+
+
+async def attach_bill_texts(conn, texts: list[BillText]) -> int:
+    """Link each Parliament bill to its published text. Returns how many bills gained one."""
+    bills = (await conn.execute(text(
+        "SELECT id, title, bill_house, bill_number, bill_year, documents FROM legislative_items "
+        "WHERE institution='National Assembly' AND is_simulated=false"))).fetchall()
+    by_ref = {(row.bill_house, row.bill_number, row.bill_year): row for row in bills if row.bill_number is not None}
+    by_title: dict[tuple, list] = {}
+    for row in bills:
+        by_title.setdefault((canonical_title(row.title), row.bill_year), []).append(row)
+    has_text = {row.id for row in bills if any(isinstance(d, dict) and d.get("name") == BILL_TEXT_NAME for d in (row.documents or []))}
+    added = 0
+    for item in texts:
+        bill = by_ref.get((item.house, item.number, item.year)) if item.house and item.number else None
+        if bill is None:
+            # Titles are written many ways ("BILL,2026", "Bill, 2026 (National Assembly Bills No. 17 of 2025)",
+            # "Bill, No.45 of 2023"): drop the bill reference but keep "(Amendment)" and "(No. 2)".
+            name = BILL_TEXT_REF_RE.sub(" ", item.title)
+            matches = by_title.get((canonical_title(name), item.year), [])
+            bill = matches[0] if len(matches) == 1 else None
+        if bill is None or bill.id in has_text:
+            continue
+        await merge_bill_document(conn, bill.id, BILL_TEXT_NAME, item.url)
+        has_text.add(bill.id)
+        added += 1
+    return added
+
+
 # --------------------------------------------------------------------------
 # Committee reports
 # --------------------------------------------------------------------------
@@ -1335,6 +1465,11 @@ async def main() -> int:
         log.error("DATABASE_URL is not set")
         return 1
     bills, notices, reports, committee_count, failed = await fetch_all()
+    try:
+        bill_texts = await fetch_bill_texts()
+    except Exception as exc:  # bill texts are a bonus; never block the stage sync
+        log.warning("Could not read Parliament's Bills pages: %s", exc)
+        bill_texts = []
     engine = create_async_engine(database_url, pool_pre_ping=True)
     try:
         async with engine.begin() as conn:
@@ -1343,6 +1478,9 @@ async def main() -> int:
                 await conn.execute(text(statement))
             new_bills, skipped_bills = await upsert_bills(conn, bills, date.today())
             notice_count = await upsert_notices(conn, notices)
+            opened, moved_on = await sync_participation_stages(conn, date.today())
+            log.info("Bill texts: %d found on Parliament's Bills pages, %d newly linked", len(bill_texts), await attach_bill_texts(conn, bill_texts))
+            log.info("Public participation: %d bill(s) open now, %d moved on after their call closed", opened, moved_on)
             new_reports = await upsert_reports(conn, reports)
             # County assemblies (Nairobi, Trans Nzoia). A county failure is logged, not fatal.
             from app.scripts.sync_county_bills import sync_counties

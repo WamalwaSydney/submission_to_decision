@@ -110,28 +110,30 @@ def check_proposal(receipt: dict, entry: dict, confidence: float, explanation: s
     }
 
 
-async def propose_matches(receipts: list[dict[str, Any]], entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    if not receipts or not entries or not is_configured():
-        return []
-    prompt_data = {
-        "receipts": [{"id": str(r["id"]), "clause": r.get("clause_ref"), "text": r.get("submission_text", "")} for r in receipts],
-        "report_entries": [{"id": str(e["id"]), "clause": e.get("clause_ref"), "summary": e.get("extracted_summary", "")} for e in entries],
-    }
+async def generate_json(system: str, prompt: str, schema: dict, max_output_tokens: int = 3000) -> dict | None:
+    """Ask Gemini for JSON matching `schema`. Returns None if the model sends no content."""
     body = {
-        "systemInstruction": {"parts": [{"text": SYSTEM_INSTRUCTION}]},
-        "contents": [{"role": "user", "parts": [{"text": "Match these records. The JSON data follows.\n" + json.dumps(prompt_data, ensure_ascii=False)}]}],
+        "systemInstruction": {"parts": [{"text": system}]},
+        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
         "generationConfig": {
             "temperature": 0,
             "responseMimeType": "application/json",
-            "responseSchema": RESPONSE_SCHEMA,
-            "maxOutputTokens": 3000,
+            "responseSchema": schema,
+            "maxOutputTokens": max_output_tokens,
         },
     }
-    async with httpx.AsyncClient(timeout=45) as client:
+    async with httpx.AsyncClient(timeout=90) as client:
         # The key goes in a header, never the URL, so it cannot leak into error messages or logs.
-        # Gemini returns 429/503 when busy; those usually pass, so retry a few times with a growing wait.
+        # Gemini returns 429/503 when busy, and sometimes drops the connection or times out;
+        # those usually pass, so retry a few times with a growing wait.
         for attempt in range(RETRIES + 1):
-            response = await client.post(f"{BASE_URL}/models/{MODEL}:generateContent", headers={"x-goog-api-key": os.environ["GEMINI_API_KEY"]}, json=body)
+            try:
+                response = await client.post(f"{BASE_URL}/models/{MODEL}:generateContent", headers={"x-goog-api-key": os.environ["GEMINI_API_KEY"]}, json=body)
+            except httpx.TransportError as exc:
+                if attempt == RETRIES:
+                    raise RuntimeError(f"Gemini request failed: {type(exc).__name__}") from exc
+                await asyncio.sleep(RETRY_BASE_SECONDS * 2 ** attempt)
+                continue
             if response.status_code not in RETRY_STATUSES or attempt == RETRIES:
                 break
             await asyncio.sleep(RETRY_BASE_SECONDS * 2 ** attempt)
@@ -144,9 +146,24 @@ async def propose_matches(receipts: list[dict[str, Any]], entries: list[dict[str
         payload = response.json()
     parts = payload.get("candidates", [{}])[0].get("content", {}).get("parts", [])
     content = next((part.get("text") for part in parts if part.get("text")), None)
-    if not content:
+    return json.loads(content) if content else None
+
+
+async def propose_matches(receipts: list[dict[str, Any]], entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not receipts or not entries or not is_configured():
         return []
-    data = json.loads(content)
+    prompt_data = {
+        "receipts": [{"id": str(r["id"]), "clause": r.get("clause_ref"), "text": r.get("submission_text", "")} for r in receipts],
+        "report_entries": [{"id": str(e["id"]), "clause": e.get("clause_ref"), "summary": e.get("extracted_summary", "")} for e in entries],
+    }
+    data = await generate_json(
+        SYSTEM_INSTRUCTION,
+        "Match these records. The JSON data follows.\n" + json.dumps(prompt_data, ensure_ascii=False),
+        RESPONSE_SCHEMA,
+        max_output_tokens=3000,
+    )
+    if data is None:
+        return []
     receipts_by_id = {str(r["id"]): r for r in receipts}
     entries_by_id = {str(e["id"]): e for e in entries}
     clean = []

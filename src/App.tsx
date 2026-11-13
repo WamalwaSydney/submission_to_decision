@@ -9,7 +9,6 @@ import { ReceiptLookupPage, ReceiptVerifyPage } from './pages/ReceiptPages';
 import { SubmitViewPage } from './pages/SubmitViewPage';
 import { LoginPage } from './pages/LoginPage';
 import { ResetPasswordPage } from './pages/ResetPasswordPage';
-import { NoticesPage } from './pages/NoticesPage';
 import { SignupPage } from './pages/SignupPage';
 import { ReviewerQueuePage, ReportedContentPage } from './pages/ModeratorPages';
 import { CommitteeOfficerIngestionPage, CommitteeOfficerNoticesPage } from './pages/ClerkPages';
@@ -107,7 +106,9 @@ function AppRoutes() {
         <Route path="/receipt-verify" element={<ReceiptVerifyPage />} />
         <Route path="/submit" element={<CitizenSubmissionRoute />} />
         <Route path="/account-security" element={<Navigate to="/" replace />} />
-        <Route path="/notices" element={<NoticesPage />} />
+        {/* Calls for views now show as each bill's status on the Bills page. */}
+        <Route path="/notices" element={<Navigate to="/bills?show=calls" replace />} />
+        <Route path="/outcomes" element={<Navigate to="/bills?show=submissions" replace />} />
         <Route path="/my-receipts" element={<MyReceiptsPage />} />
         <Route path="/reviewer/queue" element={<ReviewerQueuePage />} />
         <Route path="/reviewer/reports" element={<ReportedContentPage />} />

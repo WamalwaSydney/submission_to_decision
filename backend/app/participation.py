@@ -12,9 +12,12 @@ and Standing Order 127:
   deciding. No new public submissions are taken (Committee of the Whole House,
   Third Reading, passage, assent).
 
-So a published call for memoranda (a notice record) is authoritative: its
-window decides. Without one, a bill is treated as open only while it sits at
-First Reading with its committee.
+So a bill takes submissions only at the "Public participation" stage. The
+sync (and a clerk recording a call for views) puts a bill at that stage while
+its committee's call for memoranda is open, and moves it on once the call
+closes. A published call (a notice record) is authoritative: its window
+decides. A bill at First Reading has been sent to its committee but waits for
+the committee's call for memoranda.
 """
 from __future__ import annotations
 
@@ -22,23 +25,27 @@ from datetime import date
 from typing import Iterable, Optional
 
 # Stages where the committee is receiving views.
-OPEN_STAGES = {
-    "first reading",
-    "public participation",
-    "introduced",  # bills a committee secretariat ingests for its own call for views
-}
+PUBLIC_PARTICIPATION = "Public participation"
+PUBLIC_PARTICIPATION_CLOSED = "Public participation closed"
+AWAITING_PUBLIC_PARTICIPATION = "Awaiting public participation"
+
+OPEN_STAGES = {PUBLIC_PARTICIPATION.casefold()}
 
 # Stages before public participation begins.
 NOT_YET_OPEN_STAGES = {
     "legislative proposal": "This is a legislative proposal still being drafted. Public participation starts after it is published as a bill and read a First Time.",
     "published": "The bill has been published in the Kenya Gazette but not yet read a First Time. Public participation opens once it is committed to a committee.",
     "awaiting first reading": "The bill is awaiting its First Reading. Public participation opens once it is committed to a committee.",
+    "first reading": "The bill has been read a First Time and sent to its committee. Submissions open when the committee publishes its call for memoranda.",
     "published by the assembly": "The county assembly has published this bill but does not publish its stage online. Submissions open when the assembly's Clerk's Office records a call for views on this platform.",
+    "introduced": "The committee has added this bill. Submissions open when it records its call for views.",
+    "awaiting public participation": "The committee has published a call for memoranda that has not opened yet.",
     "referred to national assembly": "The Senate has sent this bill to the National Assembly. Public participation opens after its First Reading in the National Assembly.",
 }
 
 # Stages after public participation has ended, with the reason shown to citizens.
 CLOSED_STAGES = {
+    "public participation closed": "The committee's call for memoranda has closed and it is preparing its report. Submissions are closed.",
     "assented": "This bill has been assented to and is now law. Submissions are closed.",
     "withdrawn": "This bill was withdrawn. Submissions are closed.",
     "lapsed": "This bill lapsed. Submissions are closed.",
@@ -117,3 +124,30 @@ def participation_window(stage: Optional[str], notices: Iterable = (), today: Op
         "reason": "This bill is not currently open for public participation.",
         "opens_on": None, "closes_on": None,
     }
+
+
+def stage_from_notices(stage: Optional[str], notices: Iterable = (), today: Optional[date] = None, source_stage: Optional[str] = None) -> Optional[str]:
+    """The stage a bill should be at given its calls for memoranda, or None to leave it.
+
+    * An open call puts the bill at "Public participation" (unless it has already
+      moved past it, for example to the Second Reading).
+    * A bill at "Public participation" with no open call goes back to its official
+      tracker stage, or to "Awaiting public participation" / "Public participation
+      closed" when the call has not opened yet or has ended.
+    """
+    today = today or date.today()
+    key = (stage or "").strip().casefold()
+    if key in CLOSED_STAGES and key != PUBLIC_PARTICIPATION_CLOSED.casefold():
+        return None
+    windows = [window for window in (_notice_dates(notice) for notice in notices) if window[0] and window[1]]
+    if any(start <= today <= end for start, end in windows):
+        return None if key in OPEN_STAGES else PUBLIC_PARTICIPATION
+    if key not in OPEN_STAGES and key != AWAITING_PUBLIC_PARTICIPATION.casefold():
+        return None
+    if any(start > today for start, _ in windows):
+        new = AWAITING_PUBLIC_PARTICIPATION
+    elif source_stage and source_stage.strip().casefold() not in OPEN_STAGES:
+        new = source_stage
+    else:
+        new = PUBLIC_PARTICIPATION_CLOSED
+    return None if new.casefold() == key else new

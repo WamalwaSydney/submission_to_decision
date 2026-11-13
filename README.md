@@ -23,6 +23,11 @@ Public participation can feel one-way: people rarely learn whether their views w
 4. reads the **committee report** when it is tabled and proposes which part of it answers each view;
 5. has a **moderator confirm or reject** every proposal, so no outcome is shown without a human decision;
 6. shows each submission's stage in plain language: **Received → With the committee → Report published → Response under review → Adopted / Amended / Rejected with reasons / Not addressed in the report**.
+7. uses **Gemini to read each committee report** and show, for every bill, how many public submissions the report records and whether the committee adopted, changed or rejected each one. The **Has submissions** filter on the Bills page lists every bill with submissions; open one to see who said what and how the committee treated it. It is labelled as an AI reading of the report, not an official record, and never changes a citizen's outcome (`python -m app.scripts.analyse_reports --passed`).
+
+Only bills at the "Public participation" stage accept submissions. The sync puts a Parliament bill at that stage while its committee's call for memoranda is open. When the call closes, the bill goes back to its official tracker stage, or to "Public participation closed". A clerk recording a call for views on the platform moves the bill's stage the same way. A bill at First Reading with no open call waits for one.
+
+On a bill's page, "Where the submissions are" and the submissions table trace every submission: those sent on the platform, and those the committee report records (memoranda and oral submissions, read from the report by Gemini). For each one it shows who made it, what they asked for, and whether the committee adopted, amended or rejected it, or did not respond.
 
 **Scope:** tracing stops at the committee report, because that is where the legislature formally records what it heard from the public and how it treated each view. A platform receipt proves what this platform recorded and when; it does not prove the view reached the committee. This is an independent pilot, not an official legislative record, and not legal advice.
 

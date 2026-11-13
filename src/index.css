@@ -193,6 +193,10 @@
   .stage-pill.is-open { color:#0f4f1f; background:#f1f8f2; border-color:#cfe5d4; }
   .stage-pill.is-progress { color:#7a4a05; background:#fdf5e4; border-color:#f0d9a8; }
   .stage-pill.is-ended { color:#475454; background:#f1f0ec; border-color:#dcd9d1; }
+  .read-bill-panel { display:flex; flex-wrap:wrap; align-items:center; gap:14px 18px; padding:18px 20px; border:1px solid #cfdcee; border-radius:16px; background:#f2f6fb; color:#1d3557; }
+  .read-bill-panel strong { display:block; font-size:1.05rem; font-weight:900; color:#182020; }
+  .read-bill-panel span { display:block; font-size:.9rem; line-height:1.5; }
+  .read-bill-icon { display:flex; align-items:center; justify-content:center; width:48px; height:48px; flex-shrink:0; border-radius:14px; background:#fff; border:1px solid #cfdcee; color:#1d3557; }
   .participation-banner { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:14px 20px; padding:16px 18px; border:1px solid; border-radius:16px; }
   .participation-banner p { margin:0; font-size:.9rem; line-height:1.55; }
   .participation-banner strong { display:block; margin-bottom:2px; font-size:.95rem; }

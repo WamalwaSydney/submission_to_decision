@@ -27,6 +27,39 @@ export interface BootstrapResponse {
   profiles: any[];
 }
 
+export type ReportDecision = 'adopted' | 'amended' | 'rejected' | 'not addressed';
+export interface ReportSubmissionItem {
+  entry_id: string;
+  clause_ref?: string | null;
+  stakeholder: string;
+  issue: string;
+  decision: ReportDecision;
+  reason: string;
+  report_id: string;
+  report_title: string;
+}
+export interface PlatformCounts { submissions: number; confirmed: number; rejected: number; pending: number; }
+export interface ReportAnalysisSummary {
+  model: string;
+  generated_at: string | null;
+  reports_analysed: number;
+  submissions_recorded: number;
+  decisions: Record<ReportDecision, number>;
+  summary: string | null;
+}
+export interface ParticipationSummary {
+  bill_id: string;
+  platform: PlatformCounts;
+  reports: number;
+  report_analysis: (ReportAnalysisSummary & { items: ReportSubmissionItem[] }) | null;
+  ai_available: boolean;
+}
+export interface ParticipationOutcomeRow {
+  id: string; title: string; identifier: string; institution: string; stage: string; passed: boolean;
+  platform: PlatformCounts;
+  report: ReportAnalysisSummary | null;
+}
+
 export const api = {
   bootstrap: () => apiFetch<BootstrapResponse>('/bootstrap'),
   committees: () => apiFetch<{ committees: any[] }>('/committees'),
@@ -44,6 +77,9 @@ export const api = {
     return apiFetch<any>('/committees/me/bills', { method: 'POST', body: form });
   },
   billFlow: (billId: string) => apiFetch<any>(`/bills/${encodeURIComponent(billId)}/flow`),
+  participationSummary: (billId: string) => apiFetch<ParticipationSummary>(`/bills/${encodeURIComponent(billId)}/participation-summary`),
+  generateParticipationSummary: (billId: string) => apiFetch<ParticipationSummary>(`/bills/${encodeURIComponent(billId)}/participation-summary/generate`, { method: 'POST' }),
+  participationOutcomes: (passedOnly = false) => apiFetch<{ bills: ParticipationOutcomeRow[] }>(`/participation-outcomes${passedOnly ? '?passed_only=true' : ''}`),
   users: () => apiFetch<{ users: User[] }>('/users'),
   updateUser: (userId: string, data: { role: User['role']; status: User['status']; committee_id?: string }) => apiFetch<any>(`/users/${encodeURIComponent(userId)}`, { method: 'PUT', body: JSON.stringify(data) }),
   approveCommitteeOfficer: (userId: string, committeeId: string) => apiFetch<any>(`/users/${encodeURIComponent(userId)}/approve-committee-officer`, { method: 'POST', body: JSON.stringify({ committee_id: committeeId }) }),
