@@ -1,4 +1,6 @@
 """AI reading of committee reports: what happened to public submissions on a bill."""
+import json
+
 import pytest
 
 from app.services import llm_matching_service, report_analysis_service
@@ -149,3 +151,23 @@ async def test_gemini_dropped_connections_are_retried_then_reported(monkeypatch)
     with pytest.raises(RuntimeError, match="ReadTimeout"):
         await llm_matching_service.generate_json("s", "p", {})
     assert len(attempts) == llm_matching_service.RETRIES + 1
+
+
+@pytest.mark.asyncio
+async def test_unnamed_stakeholders_are_found_in_the_report_table_but_never_invented(monkeypatch):
+    report = ("SCHEDULE OF SUBMISSIONS\nStakeholder: KENYA COFFEE PRODUCERS ASSOCIATION\n"
+              "154. Amend clause 12 to require county licences for coffee millers operating in the county.\n"
+              "155. Amend the Bill by deleting the clause because it is provided for under the Capital Markets Act.\n")
+    items = [{"entry_id": "e1", "stakeholder": "Not named"}, {"entry_id": "e2", "stakeholder": "Not named"}, {"entry_id": "e3", "stakeholder": "CREDENCE AFRICA"}]
+    entries = {"e1": "155. Amend the Bill by deleting the clause because it is provided for under the Capital Markets Act.",
+               "e2": "154. Amend clause 12 to require county licences for coffee millers operating in the county."}
+
+    async def generate_json(system, prompt, schema, max_output_tokens=3000):
+        asked = json.loads(prompt.split("\n", 1)[1])
+        assert all("[[SUBMISSION]]" in a["context"] for a in asked)
+        return {"results": [{"id": asked[0]["id"], "stakeholder": "KENYA COFFEE PRODUCERS ASSOCIATION"},
+                            {"id": asked[1]["id"], "stakeholder": "Kenya Tea Board"}]}  # not in the text: rejected
+    monkeypatch.setattr(llm_matching_service, "generate_json", generate_json)
+    assert await report_analysis_service.recover_names(report, items, entries) == 1
+    assert items[0]["stakeholder"] == "KENYA COFFEE PRODUCERS ASSOCIATION" and items[0]["stakeholder_from"] == "report table"
+    assert items[1]["stakeholder"] == "Not named" and items[2]["stakeholder"] == "CREDENCE AFRICA"

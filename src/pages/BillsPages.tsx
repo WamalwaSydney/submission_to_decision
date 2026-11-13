@@ -19,7 +19,7 @@ import { confidenceClasses, confidenceLabel } from '../utils/confidence';
 import { api } from '../api/endpoints';
 import { getApiUrl } from '../api/client';
 import { reportDocumentHref } from '../utils/reportLinks';
-import { ReportAnalysisPanel, ReportSubmissionsTable, useParticipationSummary } from '../components/ParticipationSummary';
+import { FinalActPanel, HousePanel, ReportAnalysisPanel, ReportSubmissionsTable, useParticipationSummary } from '../components/ParticipationSummary';
 import type { ReportDecision } from '../api/endpoints';
 import type { SubmissionStage } from '../utils/submissionStage';
 
@@ -657,7 +657,8 @@ export function BillPage() {
               ? (/kenya law/i.test(billText.name) ? 'The Act as passed, on Kenya Law.' : `The official text published by ${bill.institution === 'National Assembly' ? 'Parliament' : `the ${bill.institution}`} (PDF).`)
               : `${bill.institution === 'National Assembly' ? 'Parliament' : `The ${bill.institution}`} has not published this bill's text online yet. Its stage and committee documents are below.`}</span>
           </div>
-          {billText && <a href={billText.href} target="_blank" rel="noreferrer" className="action-button is-primary"><FileText className="h-4 w-4" aria-hidden="true" /> Read the bill</a>}
+          {billText && <a href={billText.href} target="_blank" rel="noreferrer" className={`action-button ${participationData.finalAct?.has_text ? 'is-secondary' : 'is-primary'}`}><FileText className="h-4 w-4" aria-hidden="true" /> Read the bill</a>}
+          {participationData.finalAct?.has_text && <Link to={`/bills/${bill.id}/act`} className="action-button is-primary"><BookOpenText className="h-4 w-4" aria-hidden="true" /> Read the final Act</Link>}
         </div>
         <div className={`participation-banner ${participation.accepting ? 'is-open' : 'is-closed'}`} role="status">
           <p>
@@ -688,17 +689,19 @@ export function BillPage() {
         </div>
         <p className="mt-4 mb-0 text-xs font-semibold text-surface-500">Outcome labels record what the committee's report says. They are not legal findings or judgments about anyone.</p>
         <ReportAnalysisPanel data={participationData} hasReport={billReports.length > 0} />
+        <HousePanel data={participationData} passed={/^(assented|passed by national assembly|passed by senate|mediation report adopted)$/i.test(bill.stage)} />
+        <FinalActPanel data={participationData} assented={/^assented$/i.test(bill.stage)} />
         <details className="bill-stats">
           <summary>See statistics and charts</summary>
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-8">
           <div className="rounded-2xl bg-[#f1f8f2] border border-[#cfe5d4] p-4"><p className="text-xs font-black uppercase tracking-wider text-[#176b2b]">Submissions</p><p className="text-3xl font-black text-[#0f4f1f] mt-1">{totalSubmissions}</p></div>
-          <div className="rounded-2xl bg-[#f2f6fb] border border-[#cfdcee] p-4"><p className="text-xs font-black uppercase tracking-wider text-[#1d3557]">Matched</p><p className="text-3xl font-black text-[#1d3557] mt-1">{confirmedMatches.length}</p></div>
+          <div className="rounded-2xl bg-[#f2f6fb] border border-[#cfdcee] p-4"><p className="text-xs font-black uppercase tracking-wider text-[#1d3557]">Platform views matched</p><p className="text-3xl font-black text-[#1d3557] mt-1">{confirmedMatches.length}</p></div>
           <div className="rounded-2xl bg-[#fdf5e4] border border-[#f0d9a8] p-4"><p className="text-xs font-black uppercase tracking-wider text-[#7a4a05]">Reports</p><p className="text-3xl font-black text-[#6b4106] mt-1">{billReports.length}</p></div>
           <div className="rounded-2xl bg-[#f6f5f1] border border-[#e2ded5] p-4"><p className="text-xs font-black uppercase tracking-wider text-[#526060]">Avg confidence</p><p className="text-3xl font-black text-[#182020] mt-1">{billMatches.length ? `${Math.round(averageConfidence * 100)}%` : '—'}</p></div>
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           <div><h3 className="font-black text-[#182020] mb-4">Submission outcomes</h3><div className="h-64">{totalSubmissions ? <ResponsiveContainer width="100%" height="100%"><BarChart data={outcomeChart} margin={{ top: 8, right: 12, left: -20, bottom: 8 }}><CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" /><XAxis dataKey="name" tick={{ fontSize: 11 }} interval={0} angle={-15} textAnchor="end" height={45} /><YAxis allowDecimals={false} tick={{ fontSize: 11 }} /><Tooltip /><Bar dataKey="submissions" fill="#176b2b" radius={[6, 6, 0, 0]} /></BarChart></ResponsiveContainer> : <div className="h-full flex items-center justify-center rounded-2xl bg-[#faf9f6] text-sm text-[#687575]">No submission data yet.</div>}</div></div>
-          <div><h3 className="font-black text-[#182020] mb-4">Match confidence bands</h3><div className="h-64">{billMatches.length ? <ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={confidenceBands} dataKey="value" nameKey="name" cx="50%" cy="45%" innerRadius={55} outerRadius={85} paddingAngle={3} label={({ name, value }) => `${name}: ${value}`}><Cell fill="#22c55e" /><Cell fill="#f59e0b" /><Cell fill="#ef4444" /></Pie><Tooltip /></PieChart></ResponsiveContainer> : <div className="h-full flex items-center justify-center rounded-2xl bg-[#faf9f6] text-sm text-[#687575]">Matching has not been run yet.</div>}</div>{billMatches.length > 0 && <div className="flex justify-center gap-4 text-xs font-bold text-[#3b4747]"><span><i className="inline-block w-2.5 h-2.5 rounded-full bg-green-500 mr-1" />High ≥75%</span><span><i className="inline-block w-2.5 h-2.5 rounded-full bg-amber-500 mr-1" />Moderate</span><span><i className="inline-block w-2.5 h-2.5 rounded-full bg-red-500 mr-1" />Low</span></div>}</div>
+          <div><h3 className="font-black text-[#182020] mb-4">Match confidence bands</h3><div className="h-64">{billMatches.length ? <ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={confidenceBands} dataKey="value" nameKey="name" cx="50%" cy="45%" innerRadius={55} outerRadius={85} paddingAngle={3} label={({ name, value }) => `${name}: ${value}`}><Cell fill="#22c55e" /><Cell fill="#f59e0b" /><Cell fill="#ef4444" /></Pie><Tooltip /></PieChart></ResponsiveContainer> : <div className="h-full flex items-center justify-center rounded-2xl bg-[#faf9f6] text-sm text-[#687575] text-center px-6">{billReceipts.length ? 'The AI has not proposed matches for the views sent on this platform yet.' : 'Matching links views sent on this platform to the committee report. No views were sent on this platform for this bill, so there is nothing to match. The submissions above come from the committee report itself.'}</div>}</div>{billMatches.length > 0 && <div className="flex justify-center gap-4 text-xs font-bold text-[#3b4747]"><span><i className="inline-block w-2.5 h-2.5 rounded-full bg-green-500 mr-1" />High ≥75%</span><span><i className="inline-block w-2.5 h-2.5 rounded-full bg-amber-500 mr-1" />Moderate</span><span><i className="inline-block w-2.5 h-2.5 rounded-full bg-red-500 mr-1" />Low</span></div>}</div>
         </div>
         </details>
       </Card>
@@ -729,7 +732,7 @@ export function BillPage() {
               <div>
                 <h3 className="text-lg font-black text-[#182020] mb-1">Recorded in the committee report <span className="text-[#94a09d]">({reportItems.length})</span></h3>
                 <p className="text-sm text-[#596767] mb-3">Memoranda and oral submissions the committee lists in its report, with what it decided on each. Read from the report by AI: open the report to check any item.</p>
-                <ReportSubmissionsTable items={reportItems} />
+                <ReportSubmissionsTable items={reportItems} finalAct={participationData.finalAct} house={participationData.house} submitters={participationData.summary?.report_analysis?.submitters} platformLinks={participationData.summary?.platform_links} />
               </div>
             )}
           </div>

@@ -1,5 +1,6 @@
 # API Routes — All REST endpoints
 
+import asyncio
 import os
 import re
 import random
@@ -19,12 +20,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db, async_session
 from app.auth import get_current_user, require_role, verify_password, get_password_hash, create_access_token
 from app.models import (
+    ActTrace,
     User, Committee, LegislativeItem, ParticipationReceipt, Message,
     CommitteeReport, ReportEntry, SubmissionMatch, RepresentativeProfile, NoticeRecord,
     ModerationAction, PasswordRecoveryCode, ReportAnalysis,
 )
 from app.services import receipt_service, linking_service, ingestion_service, storage_service, notification_service
-from app.services import submission_documents, report_analysis_service, llm_matching_service
+from app.services import submission_documents, report_analysis_service, llm_matching_service, act_trace_service, house_trace_service
 from app.participation import participation_window, stage_from_notices
 from app.submission_stage import STAGES, submission_stage
 from app.audit import record_audit
@@ -541,6 +543,49 @@ async def receipt_stages(db: AsyncSession, bill: LegislativeItem, receipts) -> d
     }
 
 
+async def trace_for_entry(db: AsyncSession, bill: LegislativeItem, entry: ReportEntry) -> dict | None:
+    """Everything traced for one committee report entry: the committee's decision, the House's and the Act's.
+
+    A citizen's platform submission joins this trace once a moderator confirms it matches the entry.
+    """
+    key = f"{entry.report_ref}:{entry.id}"
+    analyses = await report_analysis_service.analyses_for_bills(db, [bill.id])
+    items = (report_analysis_service.combine(analyses.get(bill.id, [])) or {}).get("items", [])
+    committee = next((item for item in items if f"{item.get('report_id')}:{item.get('entry_id')}" == key), None)
+    house_row = await house_trace_service.get_trace(db, bill.id)
+    act_row = await act_trace_service.get_trace(db, bill.id)
+    house_item = next((item for item in (house_row.items or []) if item.get("key") == key), None) if house_row else None
+    act_item = next((item for item in (act_row.items or []) if item.get("key") == key), None) if act_row else None
+    return {
+        "key": key,
+        "bill_id": str(bill.id),
+        "bill_stage": bill.stage,
+        "committee": committee,
+        "house": house_item,
+        "house_source": house_trace_service.SOURCE_NOTE if house_item else None,
+        "act": act_item,
+        "final_act": {"title": act_row.act_title, "citation": act_row.act_citation, "url": act_row.act_url,
+                      "has_text": bool(act_row.act_text)} if act_row else None,
+    }
+
+
+async def platform_links(db: AsyncSession, bill_id) -> dict:
+    """For each committee report entry, the platform receipts a moderator confirmed it answers."""
+    receipts = (await db.execute(current_receipts().where(ParticipationReceipt.legislative_item_id == bill_id))).scalars().all()
+    if not receipts:
+        return {}
+    by_id = {receipt.id: receipt for receipt in receipts}
+    rows = (await db.execute(
+        select(SubmissionMatch.receipt_ref, ReportEntry.report_ref, ReportEntry.id)
+        .join(ReportEntry, ReportEntry.id == SubmissionMatch.report_entry_ref)
+        .where(SubmissionMatch.receipt_ref.in_(list(by_id)), SubmissionMatch.reviewer_decision == "confirmed")
+    )).all()
+    links: dict = {}
+    for receipt_ref, report_ref, entry_id in rows:
+        links.setdefault(f"{report_ref}:{entry_id}", []).append(receipt_service.stable_id_of(by_id[receipt_ref]))
+    return links
+
+
 def public_receipt_dict(receipt: ParticipationReceipt) -> dict:
     data = to_dict(receipt, exclude=PUBLIC_RECEIPT_EXCLUDE)
     # Citizens always see their original receipt ID; this version's own ID
@@ -834,6 +879,9 @@ async def bill_participation_summary(bill_id: UUID, db: AsyncSession = Depends(g
         "platform": (await _platform_counts(db, [bill.id]))[bill.id],
         "reports": len(reports),
         "report_analysis": report_analysis_service.combine(analyses.get(bill.id, [])),
+        "final_act": act_trace_service.to_public(await act_trace_service.get_trace(db, bill.id)),
+        "house": house_trace_service.to_public(await house_trace_service.get_trace(db, bill.id)),
+        "platform_links": await platform_links(db, bill.id),
         "ai_available": llm_matching_service.is_configured(),
     }
 
@@ -868,6 +916,120 @@ async def generate_bill_participation_summary(
     return await bill_participation_summary(bill.id, db)
 
 
+FINAL_ACT_MAX_BYTES = 25 * 1024 * 1024
+
+
+async def _check_final_act(db: AsyncSession, bill: LegislativeItem, row, user: User) -> None:
+    """Trace the committee's adopted recommendations into the Act. Raises 502 if Gemini fails."""
+    analyses = await report_analysis_service.analyses_for_bills(db, [bill.id])
+    items = (report_analysis_service.combine(analyses.get(bill.id, [])) or {}).get("items", [])
+    if not act_trace_service.recommendations(items) or not llm_matching_service.is_configured():
+        return
+    bill_key, bill_title, documents, user_id = bill.id, bill.title, list(bill.documents or []), user.id
+    bill_text = row.bill_text or await act_trace_service.fetch_bill_text(documents)
+    try:
+        await act_trace_service.run_trace(db, row, items, bill_title, bill_text)
+    except Exception as exc:  # the Act stays saved; only the check failed
+        await db.rollback()
+        log.warning("Final Act check failed for bill %s: %s", bill_key, exc)
+        raise HTTPException(status_code=502, detail="The Act was saved, but the AI check failed. Try 'Check again' in a few minutes.")
+    await record_audit(db, entity_type="legislative_item", entity_id=bill_key, action="final_act_checked", actor_id=user_id,
+                       details={"recommendations": len(row.items or []), "model": llm_matching_service.MODEL})
+    await db.commit()
+
+
+async def _assented_bill_for_staff(db: AsyncSession, bill_id: UUID, user: User) -> LegislativeItem:
+    bill = (await db.execute(select(LegislativeItem).where(LegislativeItem.id == bill_id, LegislativeItem.is_simulated.is_(False)))).scalar_one_or_none()
+    if not bill:
+        raise HTTPException(status_code=404, detail="Bill not found")
+    await ensure_committee_scope(db, user, bill.id)
+    if (bill.stage or "").strip().casefold() != "assented":
+        raise HTTPException(status_code=409, detail="Only bills that have been assented to have a final Act.")
+    return bill
+
+
+@router.post("/bills/{bill_id}/final-act")
+async def upload_final_act(
+    bill_id: UUID,
+    file: UploadFile = File(...),
+    act_title: Optional[str] = Form(None),
+    act_url: Optional[str] = Form(None),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_role("administrator", "reviewer", "committee_officer")),
+):
+    """Store the bill's final Act (PDF from Kenya Law) and check which recommendations made it into the law."""
+    bill = await _assented_bill_for_staff(db, bill_id, current_user)
+    content = await file.read(FINAL_ACT_MAX_BYTES + 1)
+    if len(content) > FINAL_ACT_MAX_BYTES:
+        raise HTTPException(status_code=422, detail="The Act PDF is larger than 25 MB.")
+    if not content.startswith(b"%PDF"):
+        raise HTTPException(status_code=422, detail="Upload the Act as a PDF file.")
+    if act_url and urlparse(act_url).hostname not in {"kenyalaw.org", "new.kenyalaw.org", "www.kenyalaw.org"}:
+        raise HTTPException(status_code=422, detail="The Act link must be a Kenya Law address.")
+    stored = storage_service.persist_report(content, file.filename or "act.pdf")
+    act_text, _ = await asyncio.to_thread(ingestion_service.extract_text, stored["storage_ref"])
+    if len(act_text.strip()) < 500:
+        raise HTTPException(status_code=422, detail="Could not read the text of this PDF.")
+    row = await act_trace_service.get_trace(db, bill.id)
+    if row is None:
+        row = ActTrace(bill_ref=bill.id, items=[])
+        db.add(row)
+    row.storage_ref, row.sha256, row.act_text = stored["storage_ref"], stored["sha256"], act_text
+    row.act_title = (act_title or "").strip()[:500] or row.act_title or re.sub(r"\bBill\b", "Act", bill.title)
+    row.act_url = act_url or row.act_url
+    row.items, row.checked_at, row.model = [], None, None
+    await record_audit(db, entity_type="legislative_item", entity_id=bill.id, action="final_act_uploaded", actor_id=current_user.id,
+                       details={"sha256": stored["sha256"], "act_title": row.act_title})
+    await db.commit()
+    await _check_final_act(db, bill, row, current_user)
+    return await bill_participation_summary(bill_id, db)
+
+
+@router.get("/bills/{bill_id}/final-act/text")
+async def final_act_text(bill_id: UUID, db: AsyncSession = Depends(get_db)):
+    """The final Act's text, with what was checked against it, for the public Act reader."""
+    bill = (await db.execute(select(LegislativeItem).where(LegislativeItem.id == bill_id, LegislativeItem.is_simulated.is_(False)))).scalar_one_or_none()
+    row = await act_trace_service.get_trace(db, bill_id) if bill else None
+    if not row or not row.act_text:
+        raise HTTPException(status_code=404, detail="The text of this bill's final Act is not on the platform yet.")
+    analyses = await report_analysis_service.analyses_for_bills(db, [bill.id])
+    items = (report_analysis_service.combine(analyses.get(bill.id, [])) or {}).get("items", [])
+    return {
+        "bill": {"id": str(bill.id), "title": bill.title, "identifier": bill.identifier},
+        "act": act_trace_service.to_public(row),
+        "has_pdf": bool(row.storage_ref),
+        "text": row.act_text,
+        "recommendations": {act_trace_service.item_key(item): item for item in act_trace_service.recommendations(items)},
+    }
+
+
+@router.get("/bills/{bill_id}/final-act/document")
+async def final_act_document(bill_id: UUID, db: AsyncSession = Depends(get_db)):
+    """The uploaded PDF of the final Act."""
+    row = await act_trace_service.get_trace(db, bill_id)
+    path = Path(row.storage_ref) if row and row.storage_ref else None
+    if not path or not path.is_file() or storage_service.STORAGE_DIR.resolve() not in path.resolve().parents:
+        raise HTTPException(status_code=404, detail="No PDF of the final Act is stored for this bill.")
+    return FileResponse(path, media_type="application/pdf", filename=f"{re.sub(r'[^A-Za-z0-9]+', '_', row.act_title or 'Act').strip('_')}.pdf")
+
+
+@router.post("/bills/{bill_id}/final-act/check")
+async def check_final_act(
+    bill_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_role("administrator", "reviewer", "committee_officer")),
+):
+    """Re-run the check of the committee's recommendations against the stored Act."""
+    bill = await _assented_bill_for_staff(db, bill_id, current_user)
+    if not llm_matching_service.is_configured():
+        raise HTTPException(status_code=503, detail="AI analysis is not configured on this server (GEMINI_API_KEY is missing).")
+    row = await act_trace_service.get_trace(db, bill.id)
+    if row is None or not row.act_text:
+        raise HTTPException(status_code=409, detail="Upload the final Act first.")
+    await _check_final_act(db, bill, row, current_user)
+    return await bill_participation_summary(bill_id, db)
+
+
 @router.get("/participation-outcomes")
 async def participation_outcomes(passed_only: bool = False, db: AsyncSession = Depends(get_db)):
     """Bills with an AI reading of their committee report, or with platform submissions, and what happened to the views."""
@@ -891,7 +1053,7 @@ async def participation_outcomes(passed_only: bool = False, db: AsyncSession = D
             "id": str(bill.id), "title": bill.title, "identifier": bill.identifier, "institution": bill.institution, "stage": bill.stage,
             "passed": (bill.stage or "").strip().casefold() in PASSED_STAGES,
             "platform": platform[bill.id],
-            "report": {k: v for k, v in combined.items() if k != "items"} if combined else None,
+            "report": {k: v for k, v in combined.items() if k not in ("items", "submitters")} if combined else None,
         })
     rows.sort(key=lambda row: (not row["passed"], -((row["report"] or {}).get("submissions_recorded") or 0), row["title"]))
     return {"bills": rows}
@@ -1357,11 +1519,14 @@ async def get_receipt(public_id: str, db: AsyncSession = Depends(get_db)):
     match_decision = match.reviewer_decision if match else None
 
     match_data = None
+    trace = None
     if match and match.reviewer_decision in {"confirmed", "rejected"}:
         entry_result = await db.execute(
             select(ReportEntry).where(ReportEntry.id == match.report_entry_ref)
         )
         entry = entry_result.scalar_one_or_none()
+        if entry and match.reviewer_decision == "confirmed":
+            trace = await trace_for_entry(db, bill, entry)
         if entry or match.reviewer_decision == "rejected":
             match_data = {
                 "method": match.match_method,
@@ -1399,6 +1564,8 @@ async def get_receipt(public_id: str, db: AsyncSession = Depends(get_db)):
         "hash": receipt.hash,
         "previous_hash": receipt.previous_hash,
         "match": match_data,
+        # Once matched, the receipt follows the committee report entry through the House and into the Act.
+        "trace": trace,
     }
 
 

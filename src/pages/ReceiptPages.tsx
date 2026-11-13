@@ -15,6 +15,7 @@ import { confidenceClasses, confidenceBarClass, confidenceLabel } from '../utils
 import { copyText } from '../utils/clipboard';
 import QRCode from 'qrcode';
 import { EditBlock, EditSubmissionAction, SubmissionProgress } from '../components/Participation';
+import { ReceiptTraceTimeline } from '../components/ParticipationSummary';
 import { STAGE_META, normalizeStage } from '../utils/submissionStage';
 
 function receiptLink(publicId: string) {
@@ -262,6 +263,7 @@ export function ReceiptLookupPage() {
                   <h3 className="text-sm font-black text-surface-900 mb-4">Where this submission is</h3>
                   <SubmissionProgress stage={status || 'received'} />
                 </section>
+                {remoteReceipt?.trace && <ReceiptTraceTimeline trace={remoteReceipt.trace} received={receipt.timestamp} />}
                 {isMine && !remoteReceipt?.superseded && (
                   <section className="rounded-2xl p-5 border border-accent-200 bg-accent-50/60 flex flex-wrap items-center justify-between gap-3" aria-label="Edit your submission">
                     <div>

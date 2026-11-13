@@ -146,6 +146,41 @@ class ReportEntry(Base):
     report = relationship("CommitteeReport", back_populates="entries")
     matches = relationship("SubmissionMatch", back_populates="report_entry")
 
+class HouseTrace(Base):
+    """What the House did, in the Committee of the Whole House, with each recommendation
+    the committee adopted. Hansard text comes from Mzalendo's copy of Parliament's Hansard."""
+    __tablename__ = "house_traces"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    bill_ref = Column(UUID(as_uuid=True), ForeignKey("legislative_items.id"), nullable=False, unique=True)
+    sittings = Column(JSON, nullable=False, default=list)
+    hansard_text = Column(Text)
+    model = Column(String(100))
+    items = Column(JSON, nullable=False, default=list)
+    checked_at = Column(DateTime(timezone=True))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class ActTrace(Base):
+    """A bill's final Act, and whether each recommendation the committee adopted
+    made it into the law. Gemini proposes; every quote is checked against the Act text."""
+    __tablename__ = "act_traces"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    bill_ref = Column(UUID(as_uuid=True), ForeignKey("legislative_items.id"), nullable=False, unique=True)
+    act_title = Column(String(500))
+    act_citation = Column(String(100))
+    act_url = Column(String(1000))
+    storage_ref = Column(String(1000))
+    sha256 = Column(String(64))
+    act_text = Column(Text)
+    bill_text = Column(Text)  # the bill as first published, kept so it is read (often by OCR) only once
+    model = Column(String(100))
+    items = Column(JSON, nullable=False, default=list)
+    checked_at = Column(DateTime(timezone=True))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class ReportAnalysis(Base):
     """Gemini's reading of a committee report: which public submissions it records
     and what the committee decided on each. An aid for readers, not a verified record."""
@@ -156,6 +191,7 @@ class ReportAnalysis(Base):
     model = Column(String(100), nullable=False)
     entries_analysed = Column(Integer, nullable=False, default=0)
     items = Column(JSON, nullable=False, default=list)
+    submitters = Column(JSON)  # stakeholders the report says sent views, each name checked against the report text
     summary = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 

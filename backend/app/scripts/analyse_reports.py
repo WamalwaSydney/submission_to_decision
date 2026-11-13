@@ -5,6 +5,7 @@ Usage (inside the backend container):
     python -m app.scripts.analyse_reports --bill NA/2025/Bill-015 --bill SENATE/2023/Bill-010
     python -m app.scripts.analyse_reports --all --limit 20    # any bill with a report
     add --redo to re-run reports that already have an analysis
+    python -m app.scripts.analyse_reports --names        # find stakeholders shown as "Not named" in stored analyses
 
 Each report is one or more paid Gemini calls (20 entries per call), so start small.
 """
@@ -21,10 +22,41 @@ from app.models import CommitteeReport, LegislativeItem, ReportAnalysis, ReportE
 from app.services import llm_matching_service, report_analysis_service
 
 
+async def names(db) -> None:
+    """Re-read the report text around submissions shown as 'Not named' to find who made them."""
+    from sqlalchemy.orm.attributes import flag_modified
+
+    analyses = (await db.execute(select(ReportAnalysis))).scalars().all()
+    work = [a.id for a in analyses if any((i.get("stakeholder") or "") == report_analysis_service.UNNAMED for i in a.items or [])]
+    print(f"{len(work)} report(s) with unnamed stakeholders", flush=True)
+    for analysis_id in work:
+        analysis = await db.get(ReportAnalysis, analysis_id)
+        report = await db.get(CommitteeReport, analysis.report_ref)
+        title = report.title or str(report.id)
+        entries = {str(e.id): e.extracted_summary or "" for e in (await db.execute(select(ReportEntry).where(ReportEntry.report_ref == report.id))).scalars().all()}
+        items = [dict(i) for i in analysis.items or []]
+        before = sum(1 for i in items if i.get("stakeholder") == report_analysis_service.UNNAMED)
+        try:
+            found = await report_analysis_service.recover_names(report.extracted_text or "", items, entries)
+        except Exception as exc:
+            await db.rollback()
+            print(f"  FAILED {title[:70]}: {exc}", flush=True)
+            continue
+        analysis.items = items
+        flag_modified(analysis, "items")
+        if analysis.submitters is None:
+            analysis.submitters = await report_analysis_service.list_submitters(report.extracted_text or "")
+        await db.commit()
+        print(f"  {title[:70]}: named {found} of {before}", flush=True)
+
+
 async def run(args: argparse.Namespace) -> None:
     if not llm_matching_service.is_configured():
         raise SystemExit("GEMINI_API_KEY is not set.")
     async with async_session() as db:
+        if args.names:
+            await names(db)
+            return
         query = (select(CommitteeReport, LegislativeItem)
                  .join(LegislativeItem, LegislativeItem.id == CommitteeReport.bill_ref)
                  .where(CommitteeReport.is_simulated.is_(False), LegislativeItem.is_simulated.is_(False)))
@@ -62,4 +94,5 @@ if __name__ == "__main__":
     parser.add_argument("--all", action="store_true", help="every bill with a committee report")
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument("--redo", action="store_true", help="re-run reports that already have an analysis")
+    parser.add_argument("--names", action="store_true", help="find stakeholders shown as 'Not named'")
     asyncio.run(run(parser.parse_args()))

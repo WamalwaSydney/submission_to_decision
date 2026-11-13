@@ -29,6 +29,10 @@ Only bills at the "Public participation" stage accept submissions. The sync puts
 
 On a bill's page, "Where the submissions are" and the submissions table trace every submission: those sent on the platform, and those the committee report records (memoranda and oral submissions, read from the report by Gemini). For each one it shows who made it, what they asked for, and whether the committee adopted, amended or rejected it, or did not respond.
 
+For passed bills, the trace continues through the House. `python -m app.scripts.trace_house --passed` finds each bill's Committee of the Whole House debate in Mzalendo's copy of the Hansard. It uses the stage dates from Parliament's Bills Tracker and matches the bill by its official number. Gemini then matches each recommendation the committee adopted to the House's decision: agreed, passed unchanged, negatived, withdrawn or no amendment. A decision is shown only when the cited Hansard lines record it, on the right clause, and an independent second check agrees the amendment carries out the recommendation.
+
+For assented bills, the trace continues into the law. `python -m app.scripts.trace_acts --find` links each bill to its Act on Kenya Law. Staff then upload the Act PDF on the bill page, or load a folder with `--dir`. Kenya Law blocks automated downloads, so Act texts are never scraped. Gemini checks each recommendation the committee adopted against the Act. A recommendation counts as **in the final Act** only if Gemini's quoted wording is really in the Act and was not already in the bill as published. Otherwise it shows as "could not confirm".
+
 **Scope:** tracing stops at the committee report, because that is where the legislature formally records what it heard from the public and how it treated each view. A platform receipt proves what this platform recorded and when; it does not prove the view reached the committee. This is an independent pilot, not an official legislative record, and not legal advice.
 
 ## Roles

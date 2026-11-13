@@ -47,11 +47,80 @@ export interface ReportAnalysisSummary {
   decisions: Record<ReportDecision, number>;
   summary: string | null;
 }
+export type ActStatus = 'in_act' | 'not_in_act' | 'unclear';
+/** Whether one recommendation the committee adopted made it into the final Act. */
+export interface FinalActItem {
+  key: string; // `${report_id}:${entry_id}`
+  status: ActStatus;
+  section: string | null;
+  quote: string | null;
+  quote_verified: boolean;
+  act_span?: string | null; // the matching wording exactly as it appears in the Act
+  removed_wording?: string | null; // for deletions: wording in the bill as published that the Act no longer has
+  evidence?: 'quote' | 'changed' | 'kept' | 'removed' | null;
+  verdict?: 'yes' | 'partly';
+  verdict_reason?: string;
+  explanation: string;
+}
+export type HouseDecision = 'agreed' | 'unchanged' | 'negatived' | 'withdrawn' | 'not_found' | 'unclear';
+/** What the House did with one recommendation, in the Committee of the Whole House. */
+export interface HouseItem {
+  key: string;
+  decision: HouseDecision;
+  clause: string | null;
+  excerpt: string | null;
+  sitting: { id: number; url: string; title: string } | null;
+  explanation: string;
+  supported?: boolean;
+  verdict?: 'yes' | 'partly';
+  verdict_reason?: string;
+}
+export interface HouseTrace {
+  sittings: { id: number; url: string; title: string }[];
+  found: boolean;
+  model: string | null;
+  checked_at: string | null;
+  counts: Record<HouseDecision, number> | null;
+  items: HouseItem[];
+  source: string;
+}
+/** A platform receipt's path once a moderator confirms it matches a committee report entry. */
+export interface ReceiptTrace {
+  key: string;
+  bill_id: string;
+  bill_stage: string;
+  committee: ReportSubmissionItem | null;
+  house: HouseItem | null;
+  house_source: string | null;
+  act: FinalActItem | null;
+  final_act: { title: string | null; citation: string | null; url: string | null; has_text: boolean } | null;
+}
+export interface FinalAct {
+  title: string | null;
+  citation: string | null;
+  url: string | null;
+  has_text: boolean;
+  model: string | null;
+  checked_at: string | null;
+  counts: Record<ActStatus, number> | null;
+  checked: number;
+  items: FinalActItem[];
+}
+export interface FinalActText {
+  bill: { id: string; title: string; identifier: string };
+  act: FinalAct;
+  has_pdf: boolean;
+  text: string;
+  recommendations: Record<string, ReportSubmissionItem>;
+}
 export interface ParticipationSummary {
   bill_id: string;
   platform: PlatformCounts;
   reports: number;
-  report_analysis: (ReportAnalysisSummary & { items: ReportSubmissionItem[] }) | null;
+  report_analysis: (ReportAnalysisSummary & { items: ReportSubmissionItem[]; submitters?: Record<string, string[]> }) | null;
+  final_act: FinalAct | null;
+  house: HouseTrace | null;
+  platform_links?: Record<string, string[]>;
   ai_available: boolean;
 }
 export interface ParticipationOutcomeRow {
@@ -79,6 +148,14 @@ export const api = {
   billFlow: (billId: string) => apiFetch<any>(`/bills/${encodeURIComponent(billId)}/flow`),
   participationSummary: (billId: string) => apiFetch<ParticipationSummary>(`/bills/${encodeURIComponent(billId)}/participation-summary`),
   generateParticipationSummary: (billId: string) => apiFetch<ParticipationSummary>(`/bills/${encodeURIComponent(billId)}/participation-summary/generate`, { method: 'POST' }),
+  uploadFinalAct: (billId: string, file: File, actUrl?: string) => {
+    const form = new FormData();
+    form.append('file', file);
+    if (actUrl) form.append('act_url', actUrl);
+    return apiFetch<ParticipationSummary>(`/bills/${encodeURIComponent(billId)}/final-act`, { method: 'POST', body: form });
+  },
+  finalActText: (billId: string) => apiFetch<FinalActText>(`/bills/${encodeURIComponent(billId)}/final-act/text`),
+  checkFinalAct: (billId: string) => apiFetch<ParticipationSummary>(`/bills/${encodeURIComponent(billId)}/final-act/check`, { method: 'POST' }),
   participationOutcomes: (passedOnly = false) => apiFetch<{ bills: ParticipationOutcomeRow[] }>(`/participation-outcomes${passedOnly ? '?passed_only=true' : ''}`),
   users: () => apiFetch<{ users: User[] }>('/users'),
   updateUser: (userId: string, data: { role: User['role']; status: User['status']; committee_id?: string }) => apiFetch<any>(`/users/${encodeURIComponent(userId)}`, { method: 'PUT', body: JSON.stringify(data) }),

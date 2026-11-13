@@ -5,6 +5,7 @@ import { Layout } from './components/Layout';
 import { AuthShell } from './components/AuthShell';
 import { HomePage } from './pages/HomePage';
 import { BillsListPage, BillPage } from './pages/BillsPages';
+import { ActPage } from './pages/ActPage';
 import { ReceiptLookupPage, ReceiptVerifyPage } from './pages/ReceiptPages';
 import { SubmitViewPage } from './pages/SubmitViewPage';
 import { LoginPage } from './pages/LoginPage';
@@ -101,6 +102,7 @@ function AppRoutes() {
         <Route path="/" element={<HomePage />} />
         <Route path="/bills" element={<BillsListPage />} />
         <Route path="/bills/:id" element={<BillPage />} />
+        <Route path="/bills/:id/act" element={<ActPage />} />
         <Route path="/bill-flow/:id" element={<BillFlowPage />} />
         <Route path="/receipt-lookup" element={<ReceiptLookupPage />} />
         <Route path="/receipt-verify" element={<ReceiptVerifyPage />} />
