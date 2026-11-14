@@ -2,14 +2,14 @@
 
 Participation Trace helps citizens follow their public-participation submissions on bills in Kenya's National Assembly and county assemblies, from the moment they send a view to the committee's recorded response.
 
-> **Deployment status (8 November 2026):** the hosted API and database run the 6 November release, and demo data has been removed from the hosted database. Later changes (paginated tables, editing from every view, report ingestion table) are validated locally (201 backend tests in 15 modules with 97% line coverage, type check and production build) and are **not yet deployed**. See [Deploying this release](#deploying-this-release).
+> **Status (14 November 2026):** the live site and API run the latest code, and the production database holds the full trace: committee reports, the analysis of each submission, House decisions and final Acts. Locally, 248 backend tests pass with 87% line coverage, and the type check and production build pass. See [Testing](#testing) and [Deploying this release](#deploying-this-release).
 
 ## Project links
 
 - **GitHub repository:** https://github.com/WamalwaSydney/submission_to_decision.git
 - **Figma prototype:** [Participation Trace — Kenya](https://www.figma.com/design/0xIxRyyV8vdUSg8vsUHtxx/Participation-Trace-%E2%80%94-Kenya?node-id=0-1&t=iD8kLK1UBjEuoB1B-1)
 - **Video demonstration (5–10 minutes):** [_Video Link._](https://youtu.be/6kwjzjb825I)
-- **Technical report (PDF, 2 pages):** [`docs/TECHNICAL_REPORT.pdf`](https://drive.google.com/file/d/1q9JY7gkEAiBDc2BhVNsxL6lmVeTWuHaA/view?usp=sharing)
+- **Technical report (PDF, 3 pages):** [`docs/TECHNICAL_REPORT.pdf`](https://github.com/WamalwaSydney/submission_to_decision/blob/main/docs/TECHNICAL_REPORT.pdf) (copy on [Google Drive](https://drive.google.com/file/d/1q9JY7gkEAiBDc2BhVNsxL6lmVeTWuHaA/view?usp=sharing)); source: [`docs/TECHNICAL_REPORT.typ`](docs/TECHNICAL_REPORT.typ)
 - **Live application (Netlify):** https://participationtrace.netlify.app
 - **API health check (Render):** https://submission-to-decision.onrender.com/health
 
@@ -35,7 +35,7 @@ For passed bills, the trace continues through the House. `python -m app.scripts.
 
 For assented bills, the trace continues into the law. `python -m app.scripts.trace_acts --find` links each bill to its Act on Kenya Law. Staff then upload the Act PDF on the bill page, or load a folder with `--dir`. Kenya Law blocks automated downloads, so Act texts are never scraped. Gemini checks each recommendation the committee adopted against the Act. A recommendation counts as **in the final Act** only if Gemini's quoted wording is really in the Act and was not already in the bill as published. Otherwise it shows as "could not confirm".
 
-**Scope:** tracing stops at the committee report, because that is where the legislature formally records what it heard from the public and how it treated each view. A platform receipt proves what this platform recorded and when; it does not prove the view reached the committee. This is an independent pilot, not an official legislative record, and not legal advice.
+**Scope:** the trace follows a view from its receipt to the committee report, then to the House's decision and the final Act. A platform receipt proves what this platform recorded and when; it does not prove the view reached the committee. AI readings of reports, debates and Acts are labelled as such and checked against the source text, but no person signs them off. This is an independent pilot, not an official legislative record, and not legal advice.
 
 ## Roles
 
@@ -76,7 +76,23 @@ Neither county assembly publishes a bill's current stage online, so county bills
 | Security | JWT, argon2, recovery codes, role and committee scope checks, in-memory rate limits |
 | Hosting | Netlify (frontend), Render (API, Docker), Neon (database) |
 
-More detail: [docs/SYSTEM.md](docs/SYSTEM.md) (architecture and rules), [docs/API.md](docs/API.md), [docs/DB.md](docs/DB.md), [docs/DECISIONS.md](docs/DECISIONS.md), [docs/EVALUATION.md](docs/EVALUATION.md).
+More detail: [docs/SYSTEM.md](docs/SYSTEM.md) (architecture and rules), [docs/API.md](docs/API.md), [docs/DB.md](docs/DB.md), [docs/EVALUATION.md](docs/EVALUATION.md).
+
+## Technical requirements
+
+| Requirement | Version used and tested |
+|---|---|
+| Operating system | Windows 11 (development); Linux containers in Docker and in production |
+| Docker | Docker 29.6 with Compose v2 (5.1). This is the simplest way to run everything. |
+| Node.js and npm | Node.js 20 (20.20), npm 10, for the frontend |
+| Python | 3.11 (the backend image is `python:3.11-slim`) |
+| PostgreSQL | 15 (`postgres:15-alpine` locally, Neon in production) |
+| PDF and OCR tools | `poppler-utils` (`pdftotext`, `pdftoppm`) and `tesseract-ocr`, both installed in the backend image |
+| Frontend libraries | React 18.2, TypeScript 5.7, Vite 6.3, Material UI 9.4, Tailwind CSS 4.1, React Router 6 |
+| Backend libraries | FastAPI 0.104, SQLAlchemy 2 (async) with asyncpg 0.29, Alembic 1.13, Pydantic 2, pytest 7.4 (see `backend/requirements.txt`) |
+| Optional | A Gemini API key (`GEMINI_API_KEY`) for the AI steps; Typst 0.14 to rebuild the technical report |
+| Hardware | Developed on an Intel Core i5-13420H with 16 GB RAM. The stack at rest uses about 200 MB (API) and 120 MB (database); allow 8 GB RAM and 5 GB of disk for Docker images and data. OCR of large scanned reports is CPU-heavy. |
+| Browsers | Tested in Chrome 157 and Edge 157 on Windows 11, and in Chrome on Android |
 
 ## Running locally
 
@@ -140,25 +156,11 @@ npm run typecheck
 npm run build
 ```
 
-Point the frontend at a local API by creating `.env.local`:
+Point the frontend at the API by creating `.env.local`. Use port 8001 for the Docker Compose backend (8000 if you run `uvicorn` yourself):
 
 ```text
-VITE_API_URL=http://localhost:8000/api/v1
+VITE_API_URL=http://localhost:8001/api/v1
 ```
-
-### Full stack with Docker Compose
-
-```bash
-docker compose up -d
-```
-
-The local Compose configuration is intended to start:
-
-- PostgreSQL on port 5432
-- FastAPI backend on port 8000
-- React frontend on port 3000
-
-Local development uses the Compose PostgreSQL container, not Neon. Do not point local experiments at the production Neon database.
 
 ### Seed data
 
@@ -169,70 +171,25 @@ python -m app.seed
 
 The seed set includes three institutions, unclaimed profiles, simulated bills, sample receipts, reports, report entries, matches, notices, and demo accounts. The current bill catalogue is supplied through the Parliament legislation sync; seeded bills are separate local/demo records. Do not use seed data as evidence of real legislative activity.
 
-## Demo accounts
+## Demo accounts (local only)
 
-Sign in at `/login` using a simulated account:
+After `python -m app.seed`, sign in at `/login` with password `password123`:
 
-- Jane Citizen — citizen
-- Hon. Simulated Rep — representative
-- Mod User — moderator
-- Admin User — administrator
-- Clerk User — clerk
+| Account | Role |
+|---|---|
+| `jane@example.com` | Citizen |
+| `mod@example.com` | Moderator (`reviewer`) |
+| `committee@example.com` | Clerk's Office (`committee_officer`) |
+| `admin@example.com` | Administrator |
 
-These are demo accounts, not production credentials. Never use real passwords in a demo environment, and do not seed demo accounts into a database that holds real pilot data.
+These passwords are published, so the seed script refuses to run against a hosted database. The live site has no demo accounts.
 
 ## CI/CD
 
-- **Netlify** builds and deploys the frontend from GitHub on push to the production branch; pull requests can get deploy previews.
-- **Render** builds and deploys the API from GitHub using `backend/Dockerfile`, and uses `/health` as its health check path.
-- **GitHub Actions** (in `.github/workflows/`) should run `npm run typecheck`, `npm run build` and `pytest backend/tests/` on every pull request, and branch protection should require them to pass before merging to the production branch.
-- Keep staging and production data separate (for example separate Neon branches or databases, with separate Render services and Netlify contexts).
-
-## Project structure
-
-```text
-├── README.md
-├── docs/
-│   ├── DECISIONS.md
-│   ├── SYSTEM.md
-│   ├── API.md
-│   ├── DB.md
-│   └── diagrams/
-│       ├── usecase.puml
-│       ├── class.puml
-│       ├── erd.puml
-│       ├── architecture.puml
-│       ├── sequence-submission.puml
-│       └── sequence-profile.puml
-├── src/                         # React frontend (deployed to Netlify)
-│   ├── App.tsx
-│   ├── types.ts
-│   ├── api/
-│   │   ├── client.ts
-│   │   └── endpoints.ts
-│   ├── context/AppContext.tsx
-│   ├── data/seed.ts
-│   ├── utils/hashChain.ts
-│   ├── utils/offline.ts
-│   ├── components/
-│   └── pages/
-├── backend/                     # FastAPI application (deployed to Render)
-│   ├── app/
-│   │   ├── main.py
-│   │   ├── models.py
-│   │   ├── auth.py
-│   │   ├── seed.py
-│   │   ├── api/routes.py
-│   │   └── services/
-│   ├── tests/
-│   ├── requirements.txt
-│   └── Dockerfile
-├── docker-compose.yml
-├── .github/workflows/
-└── package.json
-```
-
-This archive includes the Alembic directory and `.env.example`. Deployment configuration should be supplied by the hosting environment or added before production deployment; do not claim a live deployment unless the frontend/API/database smoke test has been completed against the deployed services.
+- **Netlify** builds and deploys the frontend from GitHub on every push to `main`.
+- **Render** builds and deploys the API from GitHub using `backend/Dockerfile`, with `/health` as its health check.
+- **GitHub Actions** (`.github/workflows/sync.yml`) runs the Parliament and county sync against the production database every night at 02:00 UTC.
+- Tests run locally before each push (see [Testing](#testing)); running them in GitHub Actions on every pull request is a next step.
 
 ## Functional requirements (reported status)
 
@@ -251,7 +208,7 @@ This archive includes the Alembic directory and `.env.example`. Deployment confi
 | FR11 | Moderation and appeals | Implemented | Implemented |
 | FR12 | Anonymized export | Implemented | Implemented |
 
-Report upload now generates idempotent match proposals for moderator review. Report entry correction and report verification are server-backed. Before submission, still distinguish working end-to-end behavior from UI-only or simulated behavior and complete a live smoke test if deployment is claimed.
+Uploading a report creates match proposals for moderator review (repeat uploads do not duplicate them), and report entries can be corrected and verified on the server.
 
 ## Status vocabulary
 
@@ -272,7 +229,7 @@ docker compose exec -e TEST_DATABASE_URL=postgresql+asyncpg://postgres:postgres@
 
 Create the test database once with `docker compose exec postgres psql -U postgres -c "create database participation_platform_test"`. The tests install the same append-only triggers as production, so code that tries to change a receipt fails in tests too. The `evaluation/` folder is mounted into the backend container for the report-parsing fixtures.
 
-Latest local run (8 November 2026): **201 passed** across 15 test modules, **97% line coverage** of `app/`. Coverage includes:
+Latest local run (14 November 2026): **248 passed** across 20 test modules, **87% line coverage** of `app/` (it was 97% before the House and Act tracing scripts, which are not yet fully tested). Coverage includes:
 
 - **Receipts and the chain:** tamper detection (edited text, deleted receipt, swapped document), append-only enforcement, edits and versions.
 - **Participation rules:** when a bill accepts views, one submission per bill, document uploads.
@@ -280,15 +237,20 @@ Latest local run (8 November 2026): **201 passed** across 15 test modules, **97%
 - **Access and abuse:** committee scope, rate limits and sign-in lockout, AI-manipulation guards.
 - **Data sync:** National Assembly tracker formats, county parsers, committee assignment.
 - **Reports:** report parsing and OCR fixtures.
+- **Tracing:** report analysis, House and Act evidence checks, and a receipt followed into the Act.
+- **Counties and production copy:** Nairobi Acts and reports, Act library loading, and the trace bundle never replacing entries matched to submissions.
+- **Performance:** the start-up data leaving out report texts and being compressed.
+
+Lighthouse (14 November 2026): home page 99 on desktop and 74–78 on mobile; bills page 95 on desktop and 65–68 on mobile. Accessibility and best practices score 100. Details are in the technical report.
 
 ## Deploying this release
 
 The hosted services are configured as before: Netlify builds the frontend with `VITE_API_URL`, Render runs `backend/Dockerfile` with `DATABASE_URL`, `JWT_SECRET_KEY` and `CORS_ORIGINS`, and Neon stores the data (`ssl=require`). Never put secrets in a `VITE_*` variable.
 
 1. Back up Neon (or create a branch) and test the steps there first.
-2. Deploy the API, then run `alembic upgrade head` against Neon. The two new migrations add columns only; receipts are never rewritten.
-3. Run `python -m app.scripts.sync_legislation` against Neon. This updates National Assembly stages, adds the county bills and committees, and assigns committees.
-4. Deploy the frontend.
+2. Push to `main` so Render and Netlify deploy, then run `alembic upgrade head` against Neon. Migrations only add tables and columns; receipts are never rewritten. Never edit a migration that has already run.
+3. Run `python -m app.scripts.sync_legislation` against Neon, or let the nightly GitHub Actions sync do it. This updates National Assembly stages, adds the county bills, Acts and reports, and assigns committees.
+4. Copy the trace with `trace_bundle export` locally and `trace_bundle import` against Neon (see [Running locally](#running-locally)).
 5. In **Administration → Committee assignments**, confirm the subject-matter suggestions, starting with bills open for views.
 6. Smoke test: `/health`, sign in, submit, edit, look up and verify a receipt, a moderator decision, and a Clerk's Office account seeing only its committee.
 
@@ -309,18 +271,25 @@ Platform notes:
 │   │   ├── submission_stage.py      # a submission's journey
 │   │   ├── committee_assignment.py  # committees for bills; county committees
 │   │   ├── rate_limit.py            # request limits and sign-in lockout
-│   │   ├── scripts/                 # sync_legislation.py, sync_county_bills.py
-│   │   └── services/                # receipts, ingestion, matching, documents, notifications, report worker
+│   │   ├── scripts/                 # syncs (Parliament, counties), analyse_reports, trace_house, trace_acts,
+│   │   │                            # act_library, download_county_acts, fill_gaps, trace_bundle
+│   │   └── services/                # receipts, ingestion (OCR), matching, report analysis, House and Act tracing
 │   ├── alembic/versions/            # migrations
-│   └── tests/
-├── src/
-│   ├── pages/                       # role home pages, bills, submit, receipts, moderation, admin, Clerk's Office
-│   ├── components/                  # Layout, UI, Participation (stage pill, progress tracker)
+│   ├── tests/                       # 20 pytest modules
+│   ├── requirements.txt
+│   └── Dockerfile
+├── src/                             # React frontend
+│   ├── pages/                       # role home pages, bills, Act reader, submit, receipts, moderation, admin, Clerk's Office
+│   ├── components/                  # Layout, UI, Participation (stage pill, progress tracker), trace summary
 │   ├── context/AppContext.tsx       # app data; Clerk's Office scoping
-│   └── utils/submissionStage.ts     # stage labels shared with the backend rules
-├── docs/                            # SYSTEM, API, DB, DECISIONS, EVALUATION, technical report
-├── evaluation/                      # evaluation scripts and synthetic fixtures
-└── docker-compose.yml
+│   ├── api/                         # HTTP client and endpoints
+│   └── utils/                       # submission stages, offline drafts, links
+├── public/                          # icons, service worker, offline page
+├── docs/                            # SYSTEM, API, DB, EVALUATION, diagrams, technical report (PDF and Typst source)
+├── evaluation/                      # matching and usability evaluation scripts, data and results
+├── .github/workflows/sync.yml       # nightly production sync
+├── docker-compose.yml
+└── package.json
 ```
 
 ## Limitations

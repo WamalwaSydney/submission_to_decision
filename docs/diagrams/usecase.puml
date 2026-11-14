@@ -1,0 +1,98 @@
+@startuml usecase
+title Participation Trace — Use Cases
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam packageStyle rectangle
+left to right direction
+
+actor "Visitor" as Visitor
+actor "Citizen" as Citizen
+actor "Clerk's Office\n(committee_officer)" as Clerk
+actor "Moderator\n(reviewer)" as Moderator
+actor "Administrator" as Admin
+actor "Google Gemini" as Gemini <<system>>
+actor "Trace scripts\n(run by staff)" as Sync <<system>>
+
+Citizen -|> Visitor
+
+rectangle "Participation Trace" {
+  package "Public access" {
+    usecase "Browse bills and\ncalls for views" as UC_Browse
+    usecase "Follow a bill's trace:\ncommittee → House → Act" as UC_Trace
+    usecase "Read the final Act\n(recommendations highlighted)" as UC_Act
+    usecase "Look up a receipt" as UC_Lookup
+    usecase "Verify the hash chain" as UC_Verify
+  }
+
+  package "Citizen participation" {
+    usecase "Submit a view\n(while the call is open)" as UC_Submit
+    usecase "Receive a receipt" as UC_Receipt
+    usecase "Upload a memorandum" as UC_Memo
+    usecase "Save a draft offline" as UC_Offline
+    usecase "Edit a view\n(new version)" as UC_Edit
+    usecase "Track my views and\nreceive updates" as UC_Track
+    usecase "Report content" as UC_Report
+  }
+
+  package "Clerk's Office (own committee only)" {
+    usecase "Publish a call for views" as UC_Call
+    usecase "Upload a committee report" as UC_Upload
+    usecase "Extract report entries\n(OCR fallback)" as UC_Extract
+    usecase "Verify report entries" as UC_VerifyEntries
+    usecase "Upload the final Act" as UC_UploadAct
+  }
+
+  package "Review and administration" {
+    usecase "Propose matches" as UC_Propose
+    usecase "Confirm or reject a match\n(reason required)" as UC_Review
+    usecase "Uphold or dismiss\nreported content" as UC_Moderate
+    usecase "Approve accounts and\nmanage committees" as UC_Accounts
+    usecase "Confirm committee\nassignments" as UC_Assign
+    usecase "Export anonymised data" as UC_Export
+  }
+
+  package "Tracing (passed bills)" {
+    usecase "Analyse a report:\nwho said what, and the decision" as UC_Analyse
+    usecase "Check House decisions\nagainst the Hansard" as UC_House
+    usecase "Check the final Act\n(quotes verified)" as UC_ActCheck
+  }
+}
+
+Visitor --> UC_Browse
+Visitor --> UC_Trace
+Visitor --> UC_Act
+Visitor --> UC_Lookup
+Visitor --> UC_Verify
+
+Citizen --> UC_Submit
+Citizen --> UC_Edit
+Citizen --> UC_Track
+Citizen --> UC_Report
+UC_Submit ..> UC_Receipt : <<include>>
+UC_Memo ..> UC_Submit : <<extend>>
+UC_Offline ..> UC_Submit : <<extend>>
+
+Clerk --> UC_Call
+Clerk --> UC_Upload
+Clerk --> UC_VerifyEntries
+Clerk --> UC_UploadAct
+UC_Upload ..> UC_Extract : <<include>>
+UC_Extract ..> UC_Propose : <<include>>
+
+Moderator --> UC_Review
+Moderator --> UC_Moderate
+Admin --> UC_Accounts
+Admin --> UC_Assign
+Admin --> UC_Export
+
+UC_Propose --> Gemini
+UC_UploadAct ..> UC_ActCheck : <<include>>
+Sync --> UC_Analyse
+Sync --> UC_House
+Sync --> UC_ActCheck
+UC_Analyse --> Gemini
+UC_House --> Gemini
+UC_ActCheck --> Gemini
+UC_Trace ..> UC_House : shows
+UC_Trace ..> UC_ActCheck : shows
+@enduml

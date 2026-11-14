@@ -151,6 +151,51 @@ package "Domain model" #FDF6F5 {
     superseded
   }
 
+  class ReportAnalysis <<AI reading>> {
+    +id: UUID
+    +model: str
+    +entries_analysed: int
+    +{field} items: list  -- stakeholder, issue, decision, reason
+    +submitters: list
+    +summary: str
+  }
+
+  class HouseTrace <<Committee of the Whole House>> {
+    +id: UUID
+    +sittings: list
+    +hansard_text: str
+    +model: str
+    +{field} items: list  -- key, decision, clause, excerpt
+    +checked_at: datetime
+  }
+
+  enum HouseDecision {
+    agreed
+    unchanged
+    negatived
+    withdrawn
+    not_found
+    unclear
+  }
+
+  class ActTrace <<Final Act>> {
+    +id: UUID
+    +act_title: str
+    +act_citation: str
+    +act_url: str
+    +act_text: str
+    +bill_text: str
+    +sha256: str
+    +{field} items: list  -- key, status, section, quote
+    +checked_at: datetime
+  }
+
+  enum ActStatus {
+    in_act
+    not_in_act
+    unclear
+  }
+
   class Message <<Notification>> {
     +id: UUID
     +subject: str
@@ -207,6 +252,13 @@ package "Domain model" #FDF6F5 {
   ParticipationReceipt "0..1" ..> "0..1" ParticipationReceipt : previous_hash\n(chain link)
   LegislativeItem "0..1" <-- "0..*" CommitteeReport : reports on
   CommitteeReport "1" *-- "0..*" ReportEntry : contains
+  CommitteeReport "1" *-- "0..1" ReportAnalysis : read by Gemini
+  LegislativeItem "1" *-- "0..1" HouseTrace : House decisions
+  LegislativeItem "1" *-- "0..1" ActTrace : final Act
+  HouseTrace ..> ReportAnalysis : keys "report:entry"
+  ActTrace ..> ReportAnalysis : keys "report:entry"
+  HouseTrace ..> HouseDecision
+  ActTrace ..> ActStatus
   ParticipationReceipt "1" <-- "0..*" SubmissionMatch : proposes for
   ReportEntry "1" <-- "0..*" SubmissionMatch : answered by
   User "0..1" <-- "0..*" SubmissionMatch : decided by (moderator)
@@ -237,7 +289,13 @@ package "Services and integrations" #F2F7F2 {
   class NotificationService <<citizen updates>>
   class ReportWorker <<background>>
   class SyncScripts <<Parliament, counties>>
+  class ReportAnalysisService <<who said what>>
+  class HouseTraceService <<Hansard check>>
+  class ActTraceService <<Act check>>
+  class Evidence <<quotes checked against source>>
+  class TraceScripts <<analyse_reports, trace_house, trace_acts, act_library, trace_bundle>>
   class GeminiAPI <<external>>
+  class Mzalendo <<external: Hansard, bill texts>>
 }
 
 APIRoutes --> ReceiptService
@@ -259,4 +317,19 @@ NotificationService ..> Message : creates
 SyncScripts ..> LegislativeItem : creates, updates
 SyncScripts ..> NoticeRecord : creates
 SyncScripts ..> Committee : creates
+SyncScripts ..> CommitteeReport : creates, links to bill
+SyncScripts --> Mzalendo
+TraceScripts --> ReportAnalysisService
+TraceScripts --> HouseTraceService
+TraceScripts --> ActTraceService
+ReportAnalysisService --> GeminiAPI
+HouseTraceService --> GeminiAPI
+ActTraceService --> GeminiAPI
+HouseTraceService --> Mzalendo
+HouseTraceService --> Evidence
+ActTraceService --> Evidence
+ReportAnalysisService ..> ReportAnalysis : creates
+HouseTraceService ..> HouseTrace : creates
+ActTraceService ..> ActTrace : creates
+APIRoutes --> ActTraceService : Act reader, Act upload
 @enduml

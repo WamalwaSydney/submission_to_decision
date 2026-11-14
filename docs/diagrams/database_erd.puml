@@ -251,6 +251,47 @@ entity password_recovery_codes {
   * created_at : timestamptz
 }
 
+entity report_analyses {
+  * id : uuid <<PK>>
+  --
+  * report_ref : uuid <<FK>> <<UQ>>
+  * model : varchar(100)
+  * entries_analysed : integer
+  * items : json
+  submitters : json
+  summary : text
+  created_at : timestamptz
+}
+
+entity house_traces {
+  * id : uuid <<PK>>
+  --
+  * bill_ref : uuid <<FK>> <<UQ>>
+  * sittings : json
+  hansard_text : text
+  model : varchar(100)
+  * items : json
+  checked_at : timestamptz
+  created_at : timestamptz
+}
+
+entity act_traces {
+  * id : uuid <<PK>>
+  --
+  * bill_ref : uuid <<FK>> <<UQ>>
+  act_title : varchar(500)
+  act_citation : varchar(100)
+  act_url : varchar(1000)
+  storage_ref : varchar(1000)
+  sha256 : varchar(64)
+  act_text : text
+  bill_text : text
+  model : varchar(100)
+  * items : json
+  checked_at : timestamptz
+  created_at : timestamptz
+}
+
 ' ---------------- Relationships (crow's foot) ----------------
 committees            |o--o{ users                    : "committee_id"
 users                 |o--o{ committees               : "created_by"
@@ -275,6 +316,9 @@ users                 |o--o{ representative_profiles  : "user_id / verifier_id"
 users                 |o--o{ audit_log                : "actor_id"
 users                 ||--o{ password_reset_tokens    : "user_id"
 users                 ||--o{ password_recovery_codes  : "user_id"
+committee_reports     ||--o| report_analyses          : "report_ref"
+legislative_items     ||--o| house_traces             : "bill_ref"
+legislative_items     ||--o| act_traces               : "bill_ref"
 
 note right of participation_receipts
   Hash chain: each row's hash =
@@ -288,5 +332,13 @@ end note
 note bottom of moderation_actions
   content_id is polymorphic (receipt or
   report entry), so it has no foreign key.
+end note
+
+note bottom of act_traces
+  items[] key each recommendation as
+  "<report id>:<entry id>"; house_traces
+  uses the same keys, so one submission can
+  be followed from report to House to Act.
+  Every quote is checked against act_text.
 end note
 @enduml
