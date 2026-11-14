@@ -41,7 +41,7 @@ from urllib.parse import urljoin, urlparse
 
 import httpx
 from bs4 import BeautifulSoup
-from rapidfuzz.fuzz import ratio
+from rapidfuzz.fuzz import partial_ratio, ratio
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import create_async_engine
@@ -1261,6 +1261,7 @@ class BillText:
     house: str | None
     number: int | None
     year: int | None
+    name: str = BILL_TEXT_NAME
 
 
 def parse_bill_list(html: str, page_url: str) -> list[BillText]:
@@ -1321,13 +1322,228 @@ async def attach_bill_texts(conn, texts: list[BillText]) -> int:
             # "Bill, No.45 of 2023"): drop the bill reference but keep "(Amendment)" and "(No. 2)".
             name = BILL_TEXT_REF_RE.sub(" ", item.title)
             matches = by_title.get((canonical_title(name), item.year), [])
-            bill = matches[0] if len(matches) == 1 else None
-        if bill is None or bill.id in has_text:
+            # Several rows with one title and year are the same bill (a proposal and the published bill).
+            for match in matches:
+                if match.id not in has_text:
+                    await merge_bill_document(conn, match.id, item.name or BILL_TEXT_NAME, item.url)
+                    has_text.add(match.id)
+                    added += 1
             continue
-        await merge_bill_document(conn, bill.id, BILL_TEXT_NAME, item.url)
+        if bill.id in has_text:
+            continue
+        await merge_bill_document(conn, bill.id, item.name or BILL_TEXT_NAME, item.url)
         has_text.add(bill.id)
         added += 1
     return added
+
+
+async def titles_with_text(conn) -> set[tuple[str, int | None]]:
+    rows = (await conn.execute(text("SELECT title, bill_year, documents FROM legislative_items WHERE is_simulated=false"))).all()
+    return {(canonical_title(r.title), r.bill_year) for r in rows
+            if any(isinstance(d, dict) and str(d.get("name", "")).startswith("Official bill document") for d in (r.documents or []))}
+
+
+# Mzalendo (mzalendo.com, a Kenyan parliamentary monitor) lists 13th-Parliament bills with the
+# official bill number and a link to Parliament's PDF, including PDFs missing from Parliament's own
+# Bills pages. Its CSV export and bill pages are public; we read them slowly.
+MZALENDO = "https://mzalendo.com"
+MZALENDO_BILLS_CSV = f"{MZALENDO}/legislative-trends/bills/?year=&house=&stage=&q=&format=csv"
+MZALENDO_COPY_NAME = "Official bill document (Parliament PDF, copy kept by Mzalendo)"
+
+
+def parse_mzalendo_bill_page(html: str, title: str, year: int | None) -> BillText | None:
+    """The official reference and PDF link on one Mzalendo bill page."""
+    soup = BeautifulSoup(html, "lxml")
+    identifier, pdf = None, None
+    for script in soup.select('script[type="application/ld+json"]'):
+        try:
+            data = json.loads(script.string or "")
+        except ValueError:
+            continue
+        for node in (data.get("@graph", [data]) if isinstance(data, dict) else []):
+            if isinstance(node, dict) and node.get("legislationIdentifier"):
+                identifier = identifier or node.get("legislationIdentifier")
+                based = node.get("isBasedOn")
+                if isinstance(based, str) and PDF_RE.search(based):
+                    pdf = pdf or based
+    links = [a["href"] for a in soup.select("a[href]") if PDF_RE.search(a["href"])]
+    pdf = pdf or next((h for h in links if (urlparse(h).hostname or "").endswith("parliament.go.ke")), None)
+    name = BILL_TEXT_NAME
+    if not pdf:
+        pdf = next((h for h in links if "mzdocs" in h), None)
+        name = MZALENDO_COPY_NAME
+    if not pdf:
+        return None
+    ref = BILL_TRACKER_REF_RE.search(identifier or "") or BILL_REF_RE.search(identifier or "")
+    return BillText(title=title, url=pdf, house=canonical_house(ref.group("house")) if ref else None,
+                    number=int(ref.group("number")) if ref else None,
+                    year=int(ref.group("year")) if ref else year, name=name)
+
+
+async def fetch_mzalendo_bill_texts(skip_titles: set[tuple[str, int | None]] = frozenset()) -> list[BillText]:
+    """Bill PDFs from Mzalendo's bill tracker, skipping bills whose text the platform already has."""
+    import csv
+    import io
+    texts: list[BillText] = []
+    async with httpx.AsyncClient(headers=HEADERS, timeout=60, follow_redirects=True) as client:
+        rows = list(csv.DictReader(io.StringIO((await get(client, MZALENDO_BILLS_CSV)).text)))
+        for row in rows:
+            year = int(row["Year"]) if (row.get("Year") or "").isdigit() else None
+            title = clean(row.get("Bill") or "")
+            if not row.get("URL") or (canonical_title(title), year) in skip_titles:
+                continue
+            try:
+                found = parse_mzalendo_bill_page((await get(client, row["URL"])).text, title, year)
+            except httpx.HTTPError as exc:
+                log.warning("Mzalendo bill page unavailable %s: %s", row["URL"], exc)
+                continue
+            if found:
+                if not found.house:
+                    found = replace(found, house=canonical_house(row.get("House")))
+                texts.append(found)
+            await asyncio.sleep(POLITE_DELAY_S * 2)
+    return texts
+
+
+# --------------------------------------------------------------------------
+# Linking committee reports to their bill
+# --------------------------------------------------------------------------
+REPORT_BILL_WORD_RE = re.compile(r"\bbills?\b", re.I)
+REPORT_BILL_YEAR_RE = re.compile(
+    r"^[\s,.(-]*(?:(?:national\s+assembly|senate|sen|n\.?a)\.?\s*)?(?:bills?\s*)?(?:no\.?\s*\d+\s*(?:,|of)?\s*)?(20\d{2})\b", re.I)
+# References report titles write that BILL_REF_RE misses: "(Senate No. 30 of 2024)", "Sen. Bill No. 1 of 2025".
+SHORT_BILL_REF_RE = re.compile(
+    r"\b(?P<house>national\s+assembly|senate|sen|n\.?a)\.?\s*(?:bills?\s*)?no\.?\s*(?P<number>\d+)\s*(?:,|of)?\s*(?P<year>20\d{2})\b", re.I)
+NAME_DROP_WORDS = {"bill", "bills", "no", "national", "assembly", "senate"}
+NAME_GLUE_WORDS = {"the", "of"}
+
+
+def _name_words(value: str) -> list[str]:
+    """A bill name as comparable words, with the abbreviations and spellings report titles use unified.
+
+    "the" and "of" are kept so a match can see where a name starts; compare names with _compact.
+    """
+    value = clean(value).lower().replace("&", " and ")
+    value = re.sub(r"\(\s*a\s*\)", " amendment ", value)
+    value = re.sub(r"\b(?:amdnt|amdt|ammendment|amendments)\b", "amendment", value)
+    value = re.sub(r"\.pdf\b|\bcompressed\b|_", " ", value)
+    value = re.sub(r"(\w)iz(e|es|ed|ation|ing)\b", r"\1is\2", value)  # equalization -> equalisation
+    value = re.sub(r"(?<=[a-z])-\s*(?=[a-z])", "", value)  # co-ordination, Anti- Money -> one word
+    return [w for w in re.findall(r"[a-z0-9]+", value) if w not in NAME_DROP_WORDS and not re.fullmatch(r"20\d{2}", w)]
+
+
+def _compact(words: list[str]) -> str:
+    return "".join(w for w in words if w not in NAME_GLUE_WORDS)
+
+
+# Words that can come just before a bill's name in a report title ("Report on the ...",
+# "...on its consideration of the ..."). A name must start after one of these, so the
+# "Appropriation Bill" does not match a report on the "Equalisation Fund Appropriation Bill".
+NAME_LEAD_WORDS = {"on", "to", "report", "consideration", "its", "into", "for", "regarding", "re", "memo",
+                   "memorandum", "addendum", "tabled", "final", "in", "referral", "amendments", "amendment",
+                   "about", "version", "the"}
+
+
+def name_matches(words: list[str], bill_words: list[str]) -> bool:
+    """True when a report title's words before "Bill" end with exactly this bill's name."""
+    target = _compact(bill_words)
+    if not target:
+        return False
+    for k, word in enumerate(words):
+        if word in NAME_GLUE_WORDS or _compact(words[k:]) != target:
+            continue
+        before = words[k - 1] if k else None
+        if before == "of":  # "consideration of X" yes, "Division of X" no
+            before = words[k - 2] if k > 1 else None
+            return before is None or (before in NAME_LEAD_WORDS and before != "the")
+        return before is None or before in NAME_LEAD_WORDS
+    return False
+
+
+def report_bill_reference(title: str) -> tuple[list[str], int | None]:
+    """What a report title says about its bill: the words before "Bill", and the bill's year."""
+    match = REPORT_BILL_WORD_RE.search(title or "")
+    if not match:
+        return [], None
+    year = REPORT_BILL_YEAR_RE.search(title[match.end():])
+    return _name_words(title[:match.start()]), int(year.group(1)) if year else None
+
+
+def _bill_name_words(title: str) -> list[str]:
+    """A bill row's name, ignoring anything the tracker appended after "Bill"."""
+    return report_bill_reference(title)[0] or _name_words(title)
+
+
+def _prefer_published(rows: list) -> list:
+    published = [row for row in rows if "/Proposal-" not in row.identifier and "/Notice-" not in row.identifier]
+    return published or rows
+
+
+async def resolve_report_bill(conn, row: dict):
+    """The bill a committee report is about, or None when the title does not say so unambiguously.
+
+    1. The official reference ("NA Bill No. 15 of 2026"), or a number and year found in one house only.
+    2. The bill's exact name and year as the title writes them ("...on the Insurance (Amendment) Bill, 2019").
+       Near matches are not linked here; they wait for a person in legislative_link_reviews.
+    """
+    house, number, year = canonical_house(row.get("bill_house")), row.get("bill_number"), row.get("bill_year")
+    title = row.get("title") or ""
+    short = None if (house and number) else SHORT_BILL_REF_RE.search(title)
+    if short:
+        house, number, year = canonical_house(short.group("house")) or ("na" if short.group("house").lower().startswith("n") else None), int(short.group("number")), int(short.group("year"))
+    if number and year:
+        found = (await conn.execute(text(
+            "SELECT id, identifier, title FROM legislative_items WHERE is_simulated=false AND bill_number=:number AND bill_year=:year"
+            + (" AND bill_house=:house" if house else " AND bill_house IN ('na','senate')")),
+            {"number": number, "year": year, "house": house})).all()
+        if not house:
+            # A number with no house could be either house's bill: the names must agree too.
+            words = _compact(report_bill_reference(title)[0])
+            found = [f for f in found if not words or partial_ratio(_compact(_bill_name_words(f.title)), words) >= 80]
+        if len(found) == 1:
+            return found[0].id
+    words, name_year = report_bill_reference(title)
+    if not words:
+        return None
+    years = [name_year or year] if (name_year or year) else []
+    if not years and row.get("date_tabled"):
+        tabled = row["date_tabled"].year
+        years = [tabled, tabled - 1, tabled - 2]
+    if not years:
+        return None
+    bills = (await conn.execute(text(
+        "SELECT id, identifier, title, bill_year FROM legislative_items WHERE is_simulated=false "
+        "AND bill_house IN ('na','senate') AND bill_year = ANY(:years)"), {"years": years})).all()
+    best, best_len = [], 0
+    for bill in bills:
+        bill_words = _bill_name_words(bill.title)
+        if name_matches(words, bill_words):
+            size = len(_compact(bill_words))
+            if size > best_len:
+                best, best_len = [bill], size
+            elif size == best_len:
+                best.append(bill)
+    best = _prefer_published(best)
+    # Rows with one name and year are copies of one bill (a proposal and the published bill).
+    if len({(_compact(_bill_name_words(b.title)), b.bill_year) for b in best}) != 1:
+        return None
+    return min(best, key=lambda b: (len(b.title), b.identifier)).id
+
+
+async def link_unlinked_reports(conn) -> int:
+    """Link committee reports that have no bill yet. Returns how many were linked."""
+    rows = (await conn.execute(text(
+        "SELECT id, title, bill_house, bill_number, bill_year, date_tabled FROM committee_reports "
+        "WHERE bill_ref IS NULL AND is_simulated=false "
+        "AND (bill_house IS NULL OR bill_house NOT IN ('ncca', 'tnca'))"))).mappings().all()  # county reports link in sync_county_bills
+    linked = 0
+    for row in rows:
+        bill_id = await resolve_report_bill(conn, dict(row))
+        if bill_id:
+            await conn.execute(text("UPDATE committee_reports SET bill_ref=:bill WHERE id=:id AND bill_ref IS NULL"),
+                               {"bill": bill_id, "id": row["id"]})
+            linked += 1
+    return linked
 
 
 # --------------------------------------------------------------------------
@@ -1336,15 +1552,11 @@ async def attach_bill_texts(conn, texts: list[BillText]) -> int:
 async def _upsert_report(conn, row: dict) -> bool:
     """Insert or update one report. Returns True if a new row was inserted."""
     is_new = False
-    bill_id = None
-    if row["bill_house"] and row["bill_number"] and row["bill_year"]:
-        bill = await conn.execute(text("SELECT id FROM legislative_items WHERE bill_house=:house AND bill_number=:number AND bill_year=:year ORDER BY id LIMIT 1"), {"house": row["bill_house"], "number": row["bill_number"], "year": row["bill_year"]})
-        found = bill.first()
-        bill_id = found[0] if found else None
+    bill_id = await resolve_report_bill(conn, row)
     existing = (await conn.execute(text("SELECT id FROM committee_reports WHERE source_url=:source_url AND committee_url=:committee_url"), {"source_url": row["source_url"], "committee_url": row["committee_url"]})).first()
     params = {**row, "bill_ref": bill_id, "source_document_ref": row["source_url"], "date_tabled": row["date_tabled"] or date.today(), "extraction_status": "pending", "ocr_used": False, "is_simulated": False}
     if existing:
-        await conn.execute(text("""UPDATE committee_reports SET bill_ref=:bill_ref,institution=:institution,date_tabled=:date_tabled,source_document_ref=:source_document_ref,committee_name=:committee_name,committee_url=:committee_url,title=:title,bill_house=:bill_house,bill_number=:bill_number,bill_year=:bill_year,source_url=:source_url,is_simulated=false WHERE id=:id"""), {**params, "id": existing[0]})
+        await conn.execute(text("""UPDATE committee_reports SET bill_ref=COALESCE(:bill_ref, bill_ref),institution=:institution,date_tabled=:date_tabled,source_document_ref=:source_document_ref,committee_name=:committee_name,committee_url=:committee_url,title=:title,bill_house=:bill_house,bill_number=:bill_number,bill_year=:bill_year,source_url=:source_url,is_simulated=false WHERE id=:id"""), {**params, "id": existing[0]})
         report_id = existing[0]
     else:
         report_id = uuid.uuid4()
@@ -1480,8 +1692,14 @@ async def main() -> int:
             notice_count = await upsert_notices(conn, notices)
             opened, moved_on = await sync_participation_stages(conn, date.today())
             log.info("Bill texts: %d found on Parliament's Bills pages, %d newly linked", len(bill_texts), await attach_bill_texts(conn, bill_texts))
+            try:
+                mzalendo_texts = await fetch_mzalendo_bill_texts(await titles_with_text(conn))
+                log.info("Bill texts: %d more from Mzalendo, %d newly linked", len(mzalendo_texts), await attach_bill_texts(conn, mzalendo_texts))
+            except Exception as exc:  # a bonus source; never block the sync
+                log.warning("Could not read Mzalendo's bill tracker: %s", exc)
             log.info("Public participation: %d bill(s) open now, %d moved on after their call closed", opened, moved_on)
             new_reports = await upsert_reports(conn, reports)
+            log.info("Committee reports: %d more linked to their bill by name", await link_unlinked_reports(conn))
             # County assemblies (Nairobi, Trans Nzoia). A county failure is logged, not fatal.
             from app.scripts.sync_county_bills import sync_counties
             county_results = await sync_counties(conn)

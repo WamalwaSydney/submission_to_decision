@@ -29,6 +29,8 @@ Only bills at the "Public participation" stage accept submissions. The sync puts
 
 On a bill's page, "Where the submissions are" and the submissions table trace every submission: those sent on the platform, and those the committee report records (memoranda and oral submissions, read from the report by Gemini). For each one it shows who made it, what they asked for, and whether the committee adopted, amended or rejected it, or did not respond.
 
+Committee reports reach their bill by the official reference ("NA Bill No. 15 of 2026", "Senate No. 30 of 2024") or by the bill's exact name and year as the report title writes it. Near matches wait for a person. Bill texts come from Parliament's Bills pages and, for bills those pages miss, from Mzalendo's bill tracker, which links Parliament's PDF. `python -m app.scripts.fill_gaps` links waiting reports, adds missing bill texts and reads the newly linked reports. Add `--part 0/4` (then `1/4`, and so on) to read reports in parallel.
+
 For passed bills, the trace continues through the House. `python -m app.scripts.trace_house --passed` finds each bill's Committee of the Whole House debate in Mzalendo's copy of the Hansard. It uses the stage dates from Parliament's Bills Tracker and matches the bill by its official number. Gemini then matches each recommendation the committee adopted to the House's decision: agreed, passed unchanged, negatived, withdrawn or no amendment. A decision is shown only when the cited Hansard lines record it, on the right clause, and an independent second check agrees the amendment carries out the recommendation.
 
 For assented bills, the trace continues into the law. `python -m app.scripts.trace_acts --find` links each bill to its Act on Kenya Law. Staff then upload the Act PDF on the bill page, or load a folder with `--dir`. Kenya Law blocks automated downloads, so Act texts are never scraped. Gemini checks each recommendation the committee adopted against the Act. A recommendation counts as **in the final Act** only if Gemini's quoted wording is really in the Act and was not already in the bill as published. Otherwise it shows as "could not confirm".
@@ -54,11 +56,12 @@ Each role gets its own home page with the actions it needs.
 | National Assembly bills, stages and dated history | Parliament's official Bills Tracker and legislative proposals tracker (PDFs) | `backend/app/scripts/sync_legislation.py` |
 | Calls for memoranda, committee reports | Parliament website | same |
 | Nairobi and Trans Nzoia bills | Each assembly's bills page | `backend/app/scripts/sync_county_bills.py` |
-| County Acts (bills that became law) | Kenya Law county legislation pages | same |
+| County Acts (bills that became law) | Nairobi's own Acts page (PDF and date of assent) and Kenya Law county legislation pages | same |
+| County committee reports on bills | Nairobi's papers-laid page (scanned PDFs, read with OCR) | same |
 | County committees | Each assembly's published committee list | `backend/app/committee_assignment.py` |
 | Which committee handles a bill | Official evidence; otherwise suggested from the bill's subject and confirmed by an administrator | same |
 
-Neither county assembly publishes a bill's current stage online, so county bills show **"Published by the assembly"** until a Clerk's Office account records the stage or the bill appears on Kenya Law as an Act. The Parliament sync runs the county sync and committee assignment at the end. Seed data (`python -m app.seed`) is simulated and kept separate from synced bills.
+Neither county assembly publishes a bill's current stage online, so county bills show **"Published by the assembly"** until a Clerk's Office account records the stage or the bill appears as an Act. An Act matches the bill of the same name and year, or the one bill of that name from up to three years earlier (never for yearly laws such as Finance or Appropriation); an Act already stored under another spelling of its name gets the new PDF rather than a second record. Nairobi committee reports link to their bill by assembly bill number, or by the bill's exact name and year; they are then read with `fill_gaps` and analysed with `analyse_reports --bill …`. Trans Nzoia publishes no committee reports on bills. The Parliament sync runs the county sync and committee assignment at the end. Seed data (`python -m app.seed`) is simulated and kept separate from synced bills.
 
 ## Technology
 
@@ -97,6 +100,27 @@ docker compose exec backend python -m app.seed                        # demo dat
 docker compose exec backend python -m app.scripts.sync_legislation    # National Assembly + counties
 docker compose exec backend python -m app.scripts.sync_county_bills   # counties only
 ```
+
+Act texts (for the Act reader and the check of what reached the law):
+
+```bash
+docker compose exec backend python -m app.scripts.download_county_acts      # every Act PDF on Nairobi's Acts page
+docker compose exec backend python -m app.scripts.act_library county        # load them onto their bills
+docker compose exec backend python -m app.scripts.trace_acts --parliament   # Acts Parliament publishes (free)
+docker compose exec backend python -m app.scripts.act_library missing       # what is still missing, and where it is
+docker compose exec backend python -m app.scripts.trace_acts --dir /app/var/acts/batch4   # Kenya Law PDFs downloaded by hand
+```
+
+Kenya Law blocks automated downloads and asks that its content not be used as AI input, so its Acts are downloaded by a person in a browser.
+
+**Putting the trace in production.** Reading reports (OCR) and analysing them (Gemini) is done once, locally. `trace_bundle` then copies every step of the trace (committee reports with their text and entries, the analysis of each submission, House decisions, and final Acts) to production:
+
+```bash
+docker compose exec backend python -m app.scripts.trace_bundle export      # -> var/trace_bundle.json.gz
+docker compose exec -e DATABASE_URL="postgresql+asyncpg://<production>" backend python -m app.scripts.trace_bundle import
+```
+
+Run production's Parliament and county syncs first so its bills exist. Records match by what identifies them outside the database (a report's official PDF address, a bill's identifier), and where production already has a report under another id, every reference to it is rewritten to production's ids. Running it again keeps what is there (`--replace` refreshes it), and entries already matched to citizens' submissions are never replaced. PDF files stay on the machine that loaded them; in production the Act reader shows the text, and "Download the Act (PDF)" opens the official copy on Parliament's or the county assembly's site when there is one.
 
 A database created by the seed script has no append-only triggers. To match production, stamp it and install the triggers as described in [docs/DB.md](docs/DB.md#migrations).
 
@@ -303,7 +327,7 @@ Platform notes:
 
 - Submissions are not yet forwarded to committee clerks, so the platform cannot prove a view reached the committee.
 - Committee reports often summarise themes rather than individual views, so some views will be "Not addressed in the report" even where a general response exists.
-- County coverage is two assemblies, and their websites publish neither bill stages nor committee reports.
+- County coverage is two assemblies. Neither publishes bill stages; Nairobi publishes committee reports as scans, which OCR reads imperfectly, and Trans Nzoia publishes none on bills.
 - Subject-matter committee assignments need administrator confirmation.
 - The interface is English-only; notifications are English and Kiswahili.
 - The app loads about 2.3 MB of data at start-up, which is slow on mobile data.

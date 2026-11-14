@@ -577,6 +577,8 @@ export function BillPage() {
     return text >= 0 ? text : isText(/kenya law/i);
   })();
   const billText = billTextIndex >= 0 ? { ...(bill.documents || [])[billTextIndex], href: documentHref((bill.documents || [])[billTextIndex], billTextIndex)! } : null;
+  // The latest committee report that can be opened, for the reading panel at the top.
+  const latestReport = [...billReports].sort((a, b) => (b.date_tabled || '').localeCompare(a.date_tabled || '')).find(report => reportDocumentHref(report));
   const timelineHistory: Array<{ date: string; stage: string; note: string; isLatestStage?: boolean; sourceUrl?: string }> = (bill.status_history || []).map(item => ({ ...item }));
   const stageTimelineDate = bill.stage_as_at || bill.source_updated_at || '';
   const latestIndex = timelineHistory.length - 1;
@@ -658,6 +660,7 @@ export function BillPage() {
               : `${bill.institution === 'National Assembly' ? 'Parliament' : `The ${bill.institution}`} has not published this bill's text online yet. Its stage and committee documents are below.`}</span>
           </div>
           {billText && <a href={billText.href} target="_blank" rel="noreferrer" className={`action-button ${participationData.finalAct?.has_text ? 'is-secondary' : 'is-primary'}`}><FileText className="h-4 w-4" aria-hidden="true" /> Read the bill</a>}
+          {latestReport && <a href={reportDocumentHref(latestReport)} target="_blank" rel="noreferrer" className={`action-button ${billText ? 'is-secondary' : 'is-primary'}`} title={latestReport.title || undefined}><FileCheck className="h-4 w-4" aria-hidden="true" /> Read the committee report{billReports.length > 1 ? ` (latest of ${billReports.length})` : ''}</a>}
           {participationData.finalAct?.has_text && <Link to={`/bills/${bill.id}/act`} className="action-button is-primary"><BookOpenText className="h-4 w-4" aria-hidden="true" /> Read the final Act</Link>}
         </div>
         <div className={`participation-banner ${participation.accepting ? 'is-open' : 'is-closed'}`} role="status">

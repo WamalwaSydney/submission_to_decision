@@ -44,6 +44,14 @@ PDF_RENDER_TIMEOUT = int(os.getenv("PDF_RENDER_TIMEOUT", "20"))
 OCR_TOTAL_TIMEOUT = int(os.getenv("OCR_TOTAL_TIMEOUT", "240"))
 MAX_OCR_PAGES = int(os.getenv("MAX_OCR_PAGES", "100"))
 
+# Report PDFs are downloaded only from these official sites (and their subdomains).
+OFFICIAL_REPORT_DOMAINS = ("parliament.go.ke", "nairobiassembly.go.ke", "transnzoiaassembly.go.ke")
+
+
+def is_official_report_host(host: str | None) -> bool:
+    host = (host or "").lower()
+    return any(host == domain or host.endswith("." + domain) for domain in OFFICIAL_REPORT_DOMAINS)
+
 
 def normalize_line(value: str) -> str:
     return re.sub(r"\s+", " ", value.replace("\u00a0", " ")).strip()
@@ -422,7 +430,8 @@ async def extract_pending_linked_reports(
 ) -> int:
     """Download and extract linked official Parliament PDFs before matching.
 
-    Accepts only HTTPS URLs on parliament.go.ke or its subdomains, validates
+    Accepts only HTTPS URLs on Parliament's or a county assembly's official
+    domain (OFFICIAL_REPORT_DOMAINS), validates
     redirect destinations, enforces a download size limit, and marks partial
     OCR results for manual review.
     """
@@ -460,16 +469,9 @@ async def extract_pending_linked_reports(
 
             try:
                 parsed = urlparse(report.source_url or "")
-                if (
-                    parsed.scheme != "https"
-                    or not parsed.hostname
-                    or not (
-                        parsed.hostname == "parliament.go.ke"
-                        or parsed.hostname.endswith(".parliament.go.ke")
-                    )
-                ):
+                if parsed.scheme != "https" or not is_official_report_host(parsed.hostname):
                     raise ValueError(
-                        "The linked report URL is not on the official Parliament HTTPS domain"
+                        "The linked report URL is not on an official Parliament or county assembly HTTPS domain"
                     )
 
                 chunks = []
@@ -495,13 +497,9 @@ async def extract_pending_linked_reports(
                     async with asyncio.timeout(PDF_DOWNLOAD_TOTAL_TIMEOUT):
                         async with client.stream("GET", report.source_url) as response:
                             response.raise_for_status()
-                            final_host = urlparse(str(response.url)).hostname or ""
-                            if not (
-                                final_host == "parliament.go.ke"
-                                or final_host.endswith(".parliament.go.ke")
-                            ):
+                            if not is_official_report_host(urlparse(str(response.url)).hostname):
                                 raise ValueError(
-                                    "PDF redirect left the official Parliament domain"
+                                    "PDF redirect left the official Parliament or county assembly domain"
                                 )
 
                             async for chunk in response.aiter_bytes():

@@ -3,6 +3,7 @@ import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, Download, ExternalLink, Landmark } from 'lucide-react';
 import { api, FinalActItem, FinalActText } from '../api/endpoints';
 import { getApiUrl } from '../api/client';
+import { actSourceName } from '../utils/actSource';
 import { ActBadge, ACT_NOTE, DecisionBadge } from '../components/ParticipationSummary';
 
 /** Lower-case letters and digits with single spaces, plus where each character came from in the original. */
@@ -159,7 +160,7 @@ export function ActPage() {
         <p className="text-sm font-semibold text-[#3b4747] m-0">{data.act.citation}{data.act.citation ? ' · ' : ''}from the {data.bill.title}</p>
         <div className="flex flex-wrap gap-3">
           {data.has_pdf && <a href={`${getApiUrl()}/bills/${encodeURIComponent(data.bill.id)}/final-act/document`} target="_blank" rel="noreferrer" className="action-button is-primary"><Download className="h-4 w-4" aria-hidden="true" /> Download the Act (PDF)</a>}
-          {data.act.url && <a href={data.act.url} target="_blank" rel="noreferrer" className="action-button is-secondary"><ExternalLink className="h-4 w-4" aria-hidden="true" /> Kenya Law</a>}
+          {data.act.url && <a href={data.act.url} target="_blank" rel="noreferrer" className="action-button is-secondary"><ExternalLink className="h-4 w-4" aria-hidden="true" /> {actSourceName(data.act.url)}</a>}
         </div>
       </header>
 

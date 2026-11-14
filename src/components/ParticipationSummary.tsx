@@ -7,6 +7,7 @@ import { useApp } from '../context/AppContext';
 import { Badge, BadgeVariant, Pager, usePaged } from './UI';
 import { formatDate } from './Participation';
 import { reportDocumentHref } from '../utils/reportLinks';
+import { actSourceName } from '../utils/actSource';
 
 export const DECISION_LABEL: Record<ReportDecision, string> = {
   adopted: 'Adopted',
@@ -288,7 +289,7 @@ export function FinalActPanel({ data, assented }: { data: ParticipationSummarySt
       {act?.title && (
         <p className="text-sm font-semibold text-[#3b4747] m-0">
           This bill became the <strong>{act.title}</strong>{act.citation ? ` (${act.citation})` : ''}.
-          {act.url && <> <a href={act.url} target="_blank" rel="noreferrer" className="font-bold text-[#11521f] underline underline-offset-2">Kenya Law</a></>}
+          {act.url && <> <a href={act.url} target="_blank" rel="noreferrer" className="font-bold text-[#11521f] underline underline-offset-2">{actSourceName(act.url)}</a></>}
         </p>
       )}
       {act?.has_text && data.summary?.bill_id && (
@@ -383,7 +384,7 @@ export function ReceiptTraceTimeline({ trace, received }: { trace: ReceiptTrace;
       body: trace.act ? <>{trace.act.act_span && <span className="block italic mb-1">“{trace.act.act_span.length > 300 ? `${trace.act.act_span.slice(0, 300)}…` : trace.act.act_span}”</span>}{trace.act.explanation}</>
         : trace.final_act ? `The bill became the ${trace.final_act.title}${trace.final_act.citation ? ` (${trace.final_act.citation})` : ''}; this view has not been checked against it yet.` : 'Not law yet.',
       link: trace.act?.status === 'in_act' && trace.final_act?.has_text ? <Link to={`/bills/${trace.bill_id}/act?q=${encodeURIComponent(trace.key)}`} className="underline font-bold">See it in the Act</Link>
-        : trace.final_act?.url ? <a href={trace.final_act.url} target="_blank" rel="noreferrer" className="underline font-bold">The Act on Kenya Law</a> : undefined,
+        : trace.final_act?.url ? <a href={trace.final_act.url} target="_blank" rel="noreferrer" className="underline font-bold">The Act ({actSourceName(trace.final_act.url)})</a> : undefined,
       done: Boolean(trace.act),
     },
   ];

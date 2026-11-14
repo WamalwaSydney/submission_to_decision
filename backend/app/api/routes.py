@@ -985,6 +985,12 @@ async def upload_final_act(
     return await bill_participation_summary(bill_id, db)
 
 
+def _official_act_pdf(url: str | None) -> bool:
+    """An Act PDF on Parliament's or a county assembly's own site, which anyone can open."""
+    parsed = urlparse(url or "")
+    return parsed.scheme == "https" and parsed.path.lower().endswith(".pdf") and ingestion_service.is_official_report_host(parsed.hostname)
+
+
 @router.get("/bills/{bill_id}/final-act/text")
 async def final_act_text(bill_id: UUID, db: AsyncSession = Depends(get_db)):
     """The final Act's text, with what was checked against it, for the public Act reader."""
@@ -997,7 +1003,7 @@ async def final_act_text(bill_id: UUID, db: AsyncSession = Depends(get_db)):
     return {
         "bill": {"id": str(bill.id), "title": bill.title, "identifier": bill.identifier},
         "act": act_trace_service.to_public(row),
-        "has_pdf": bool(row.storage_ref),
+        "has_pdf": bool(row.storage_ref and Path(row.storage_ref).is_file()) or _official_act_pdf(row.act_url),
         "text": row.act_text,
         "recommendations": {act_trace_service.item_key(item): item for item in act_trace_service.recommendations(items)},
     }
@@ -1005,10 +1011,12 @@ async def final_act_text(bill_id: UUID, db: AsyncSession = Depends(get_db)):
 
 @router.get("/bills/{bill_id}/final-act/document")
 async def final_act_document(bill_id: UUID, db: AsyncSession = Depends(get_db)):
-    """The uploaded PDF of the final Act."""
+    """The uploaded PDF of the final Act, or else its official copy on Parliament's or the county assembly's site."""
     row = await act_trace_service.get_trace(db, bill_id)
     path = Path(row.storage_ref) if row and row.storage_ref else None
     if not path or not path.is_file() or storage_service.STORAGE_DIR.resolve() not in path.resolve().parents:
+        if row and _official_act_pdf(row.act_url):
+            return RedirectResponse(row.act_url, status_code=307)
         raise HTTPException(status_code=404, detail="No PDF of the final Act is stored for this bill.")
     return FileResponse(path, media_type="application/pdf", filename=f"{re.sub(r'[^A-Za-z0-9]+', '_', row.act_title or 'Act').strip('_')}.pdf")
 

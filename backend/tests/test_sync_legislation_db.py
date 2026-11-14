@@ -326,7 +326,8 @@ async def test_reports_link_by_reference_or_wait_for_a_person(db_session):
         rows = [
             report(),
             report(source_url="https://www.parliament.go.ke/r/water-2.pdf"),  # same committee: consensus
-            report(title="Report on the Mental Health Bill", source_url="https://www.parliament.go.ke/r/mental.pdf",
+            # A near name (not the exact one) waits for a person.
+            report(title="Mental Helth Bill", source_url="https://www.parliament.go.ke/r/mental.pdf",
                    bill_house=None, bill_number=None, bill_year=2026, date_tabled=None),
             report(committee_name="Finance", source_url="https://www.parliament.go.ke/r/forests.pdf", bill_number=40),
             report(committee_name="Agriculture", committee_url="https://www.parliament.go.ke/c/agri", source_url="https://www.parliament.go.ke/r/forests-2.pdf", bill_number=40),
@@ -434,7 +435,10 @@ async def test_main_stores_everything_and_reports_failure_rates(db_session, monk
         return await fetched()
     async def no_texts():
         return []
+    async def no_mzalendo(skip=frozenset()):
+        return []
     monkeypatch.setattr(sync, "fetch_bill_texts", no_texts)
+    monkeypatch.setattr(sync, "fetch_mzalendo_bill_texts", no_mzalendo)
     monkeypatch.setattr(sync, "fetch_all", ok)
     assert await sync.main() == 0
     async with TestSession() as session:
@@ -513,3 +517,90 @@ async def test_bill_texts_attach_by_number_or_title(db_session):
         docs = dict((await conn.execute(text("SELECT identifier, documents FROM legislative_items WHERE identifier IN ('NA/2026/Bill-012','NA/2026/Bill-020')"))).all())
         assert any(d["url"].endswith("THE%20WATER%20BILL%2C2026.pdf") for d in docs["NA/2026/Bill-012"])
         assert any(d["url"].endswith("forests.pdf") for d in docs["NA/2026/Bill-020"])
+
+
+# ============ Linking reports by name, and bill texts from Mzalendo ============
+
+def test_a_report_title_names_its_bill_only_from_a_lead_word():
+    words, year = sync.report_bill_reference("Report of the Budget Committee on the Equalization Fund Appropriation Bill, 2025.pdf")
+    assert year == 2025
+    assert sync.name_matches(words, sync._bill_name_words("The Equalisation Fund Appropriation Bill, 2025"))
+    assert not sync.name_matches(words, sync._bill_name_words("The Appropriation Bill, 2025"))
+    words, _ = sync.report_bill_reference("Report on the consideration of the Food and Feed Safety Control Co-ordination Bill, 2023")
+    assert sync.name_matches(words, sync._bill_name_words("The Food and Feed Safety Control Coordination Bill, 2023"))
+    words, _ = sync.report_bill_reference("Report of the Budget Committee on the Division of Revenue Bill, 2026")
+    assert not sync.name_matches(words, sync._bill_name_words("The Revenue Bill, 2026"))
+    assert sync.report_bill_reference("The Creative Economy Support Bill (Senate No. 30 of 2024).pdf")[1] == 2024
+    assert sync.report_bill_reference("No bill here")[0] == [] and sync.report_bill_reference("Annual report") == ([], None)
+
+
+@pytest.mark.asyncio
+async def test_reports_link_by_exact_name_or_short_reference(db_session):
+    async with test_engine.begin() as conn:
+        await prepare_schema(conn)
+        await sync.upsert_bills(conn, [
+            bill(),
+            bill(identifier="NA/2025/Bill-021", title="The Equalisation Fund Appropriation Bill, 2025", number=21, year=2025),
+            bill(identifier="NA/2025/Bill-023", title="The Appropriation Bill, 2025", number=23, year=2025),
+            bill(identifier="SENATE/2024/Bill-030", title="The Creative Economy Support Bill, 2024", house="senate", number=30, year=2024),
+            bill(identifier="NA/2024/Bill-030", title="The Kenya Roads Bill, 2024", number=30, year=2024),
+            bill(identifier="NA/2023/Bill-036", title="The Transport Authority (Amendment) Bill, 2023", number=36, year=2023),
+            bill(identifier="NA/2024/Bill-024", title="The Transport Authority (Amendment) Bill, 2024", number=24, year=2024),
+        ], date(2026, 3, 1))
+        none = dict(bill_house=None, bill_number=None, bill_year=None)
+        rows = [
+            report(title="Report on the Equalization Fund Appropriation Bill, 2025.pdf", source_url="https://www.parliament.go.ke/r/1.pdf", **none),
+            report(title="The Report on the Creative Economy Support Bill (Senate No. 30 of 2024).pdf", source_url="https://www.parliament.go.ke/r/2.pdf", **none),
+            # No year and two bills of that name: left for a person.
+            report(title="Report on Consideration of the Transport Authority (Amendment) Bill-1.pdf", source_url="https://www.parliament.go.ke/r/3.pdf",
+                   date_tabled=date(2024, 6, 1), **none),
+        ]
+        await sync.upsert_reports(conn, rows)
+        linked = dict((await conn.execute(text(
+            "SELECT r.source_url, l.identifier FROM committee_reports r LEFT JOIN legislative_items l ON l.id=r.bill_ref"))).all())
+        # A report linked later keeps its link when the sync sees it again without one.
+        await conn.execute(text("UPDATE committee_reports SET bill_ref=(SELECT id FROM legislative_items WHERE identifier='NA/2023/Bill-036') WHERE source_url LIKE '%/3.pdf'"))
+        await sync.upsert_reports(conn, rows[2:])
+        kept = (await conn.execute(text("SELECT bill_ref IS NOT NULL FROM committee_reports WHERE source_url LIKE '%/3.pdf'"))).scalar_one()
+        await conn.execute(text("UPDATE committee_reports SET bill_ref=NULL"))
+        relinked = await sync.link_unlinked_reports(conn)
+    assert linked["https://www.parliament.go.ke/r/1.pdf"] == "NA/2025/Bill-021"
+    assert linked["https://www.parliament.go.ke/r/2.pdf"] == "SENATE/2024/Bill-030"
+    assert linked["https://www.parliament.go.ke/r/3.pdf"] is None
+    assert kept and relinked == 2
+
+
+MZALENDO_PAGE = """<html><head><script type="application/ld+json">{"@graph": [{"@type": "Legislation",
+"legislationIdentifier": "National Assembly Bill No. 66 of 2026",
+"isBasedOn": "https://www.parliament.go.ke/sites/default/files/2026-10/ANTI-DOPING.pdf"}]}</script>
+<script type="application/ld+json">not json</script></head><body></body></html>"""
+MZALENDO_COPY_PAGE = """<html><body><a href="https://fra1.digitaloceanspaces.com/mzdocs/prod/media/bills/pdfs/na-2026-442.pdf">PDF</a></body></html>"""
+
+
+def test_mzalendo_bill_pages_give_the_reference_and_pdf():
+    found = sync.parse_mzalendo_bill_page(MZALENDO_PAGE, "The Anti-Doping (Amendment) Bill, 2026", 2026)
+    assert (found.house, found.number, found.year, found.name) == ("na", 66, 2026, sync.BILL_TEXT_NAME)
+    copy = sync.parse_mzalendo_bill_page(MZALENDO_COPY_PAGE, "The Architects Bill, 2026", 2026)
+    assert copy.name == sync.MZALENDO_COPY_NAME and copy.number is None and copy.year == 2026
+    assert sync.parse_mzalendo_bill_page("<html></html>", "x", 2026) is None
+
+
+@pytest.mark.asyncio
+async def test_mzalendo_bill_texts_are_fetched_and_attached(db_session, monkeypatch):
+    csv_text = ("ID,Bill,Year,Stage,Sponsor,House,Updated,URL\n"
+                "853,\"The Anti-Doping (Amendment) Bill, 2026\",2026,First Reading,,National Assembly,2026-10-15,https://mzalendo.com/legislative-trends/bills/na/853/\n"
+                "442,\"The Architects Bill, 2026\",2026,First Reading,,National Assembly,2026-07-03,https://mzalendo.com/legislative-trends/bills/na/442/\n"
+                "1,\"The Water Bill, 2026\",2026,First Reading,,National Assembly,2026-07-03,https://mzalendo.com/legislative-trends/bills/na/1/\n"
+                "9,\"Missing page Bill\",2026,First Reading,,Senate,2026-07-03,https://mzalendo.com/legislative-trends/bills/senate/9/\n")
+    routes = {"format=csv": csv_text, "/na/853/": MZALENDO_PAGE, "/na/442/": MZALENDO_COPY_PAGE,
+              "/senate/9/": lambda request: httpx.Response(503, request=request)}
+    monkeypatch.setattr(sync.httpx, "AsyncClient", lambda **kw: REAL_ASYNC_CLIENT(transport=transport(routes), **kw))
+    texts = await sync.fetch_mzalendo_bill_texts({(sync.canonical_title("The Water Bill, 2026"), 2026)})
+    assert [(t.number, t.house) for t in texts] == [(66, "na"), (None, "na")]
+    async with test_engine.begin() as conn:
+        await prepare_schema(conn)
+        await sync.upsert_bills(conn, [bill(identifier="NA/2026/Bill-066", title="The Anti-Doping (Amendment) Bill, 2026", number=66),
+                                       bill(identifier="NA/2026/Bill-044", title="The Architects Bill, 2026", number=44)], date(2026, 3, 1))
+        assert await sync.attach_bill_texts(conn, texts) == 2
+        assert await sync.titles_with_text(conn) == {(sync.canonical_title("The Anti-Doping (Amendment) Bill, 2026"), 2026),
+                                                    (sync.canonical_title("The Architects Bill, 2026"), 2026)}
