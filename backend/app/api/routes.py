@@ -443,16 +443,18 @@ def to_dict(obj, exclude: set = frozenset()) -> dict:
     }
 
 
-def report_to_dict(report: CommitteeReport) -> dict:
+def report_to_dict(report: CommitteeReport, exclude=frozenset()) -> dict:
     """Serialize report data with source provenance separate from text extraction state."""
-    data = to_dict(report)
+    data = to_dict(report, exclude=exclude)
     source_url = (report.source_url or "").strip()
     host = (urlparse(source_url).hostname or "").lower().rstrip(".")
-    official_host = host == "parliament.go.ke" or host.endswith(".parliament.go.ke")
+    parliament = host == "parliament.go.ke" or host.endswith(".parliament.go.ke")
+    official_host = ingestion_service.is_official_report_host(host)  # Parliament or a county assembly's own site
     official_source = official_host and source_url.lower().startswith(("https://", "http://")) and not report.is_simulated
     data["source_verification_status"] = "verified" if official_source else "unverified"
     data["source_verification_label"] = (
-        "Official Parliament source verified" if official_source else "Source not verified as Parliament-hosted"
+        ("Official Parliament source verified" if parliament else "Official county assembly source verified")
+        if official_source else "Source not verified as an official Parliament or county assembly site"
     )
     return data
 
@@ -792,6 +794,14 @@ async def get_bill(bill_id: UUID, db: AsyncSession = Depends(get_db)):
     }
 
 
+@router.get("/report-entries")
+async def report_entries_list(db: AsyncSession = Depends(get_db)):
+    """Every entry of every published (non-simulated) committee report, for pages that list them all."""
+    rows = (await db.execute(select(ReportEntry).join(CommitteeReport, CommitteeReport.id == ReportEntry.report_ref)
+                             .where(CommitteeReport.is_simulated.is_(False)))).scalars().all()
+    return [to_dict(row) for row in rows]
+
+
 @router.get("/bootstrap")
 async def bootstrap(db: AsyncSession = Depends(get_db)):
     """Return the non-secret application data needed by the initial client shell."""
@@ -803,7 +813,8 @@ async def bootstrap(db: AsyncSession = Depends(get_db)):
             query = query.where(~Committee.name.ilike("%simulated%"))
         result = await db.execute(query)
         rows = result.scalars().all()
-        return [report_to_dict(row) if model is CommitteeReport else to_dict(row, exclude=exclude) for row in rows]
+        # A report's full text (up to megabytes each) is not needed to start the app.
+        return [report_to_dict(row, exclude={"extracted_text"}) if model is CommitteeReport else to_dict(row, exclude=exclude) for row in rows]
 
     bills = await all_rows(LegislativeItem)
     live_bill_ids = {bill["id"] for bill in bills}
@@ -817,9 +828,14 @@ async def bootstrap(db: AsyncSession = Depends(get_db)):
         bill_notices.setdefault(notice["bill_ref"], []).append(notice)
     for bill in bills:
         bill_with_participation(bill, bill_notices.get(bill["id"], []))
-    report_entries = [entry for entry in await all_rows(ReportEntry) if entry.get("report_ref") in live_report_ids]
-    report_entry_ids = {entry["id"] for entry in report_entries}
-    matches = [match for match in await all_rows(SubmissionMatch) if match.get("report_entry_ref") in report_entry_ids]
+    # Only the entries a submission is matched to: all 8,000+ entries are megabytes the first page never shows.
+    # Pages that list every entry (Clerk's Office, research export) load them from /report-entries.
+    live_reports = {str(report_id) for report_id in live_report_ids}
+    live_entry_ids = {str(entry_id) for entry_id, report_ref in (await db.execute(select(ReportEntry.id, ReportEntry.report_ref))).all()
+                      if str(report_ref) in live_reports}
+    matches = [match for match in await all_rows(SubmissionMatch) if str(match.get("report_entry_ref")) in live_entry_ids]
+    matched_ids = {UUID(str(match["report_entry_ref"])) for match in matches}
+    report_entries = [to_dict(row) for row in (await db.execute(select(ReportEntry).where(ReportEntry.id.in_(matched_ids)))).scalars()] if matched_ids else []
     confirmed_receipt_ids = {match["receipt_ref"] for match in matches if match.get("reviewer_decision") == "confirmed"}
     for receipt in receipts:
         if receipt.get("id") in confirmed_receipt_ids:

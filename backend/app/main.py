@@ -2,6 +2,7 @@
 
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
 from contextlib import asynccontextmanager
 import asyncio
@@ -45,6 +46,9 @@ configured_cors_origins = {
 cors_origins = sorted(default_cors_origins | configured_cors_origins)
 
 app.add_middleware(GlobalRateLimitMiddleware)
+# Compress responses: the start-up data is mostly repetitive JSON and shrinks several times over,
+# which matters most on mobile data.
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 app.add_middleware(
     CORSMiddleware,
