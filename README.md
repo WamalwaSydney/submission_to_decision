@@ -10,7 +10,7 @@ Participation Trace helps citizens follow their public-participation submissions
 - **Figma prototype:** [Participation Trace — Kenya](https://www.figma.com/design/0xIxRyyV8vdUSg8vsUHtxx/Participation-Trace-%E2%80%94-Kenya?node-id=0-1&t=iD8kLK1UBjEuoB1B-1)
 - **Video demonstration (5–10 minutes):** [_Video Link._](https://www.youtube.com/watch?v=WPp6CnCSf0Y)
 - **Technical report (PDF, 2 pages):** [`docs/TECHNICAL_REPORT.pdf`](https://drive.google.com/file/d/1q9JY7gkEAiBDc2BhVNsxL6lmVeTWuHaA/view?usp=sharing)
-- **Live application (Netlify):** https://uraia-4.netlify.app
+- **Live application (Netlify):** https://participationtrace.netlify.app
 - **API health check (Render):** https://submission-to-decision.onrender.com/health
 
 ## What the platform does
