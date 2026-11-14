@@ -3,6 +3,7 @@
 PDF tools and downloads are replaced with fakes, so these tests are fast and offline.
 """
 import subprocess
+import sys
 import uuid
 from datetime import date, datetime
 from pathlib import Path
@@ -107,10 +108,11 @@ def test_page_count_is_read_from_pdfinfo(monkeypatch):
 
 
 def test_pdf_commands_return_output_and_are_killed_on_timeout():
-    done = ing._run_pdf_command(["echo", "hello"], timeout=5, text=True)
+    # Python itself stands in for pdftotext, so the test runs on Windows as well as Linux.
+    done = ing._run_pdf_command([sys.executable, "-c", "print('hello')"], timeout=5, text=True)
     assert done.returncode == 0 and done.stdout.strip() == "hello"
     with pytest.raises(subprocess.TimeoutExpired):
-        ing._run_pdf_command(["sleep", "5"], timeout=0.2)
+        ing._run_pdf_command([sys.executable, "-c", "import time; time.sleep(5)"], timeout=0.2)
 
 
 def test_render_page_returns_the_image_or_explains_the_failure(monkeypatch, tmp_path):

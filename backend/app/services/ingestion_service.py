@@ -181,7 +181,10 @@ def _run_pdf_command(args: list[str], *, timeout: int, text: bool = False):
     try:
         stdout, stderr = process.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
-        os.killpg(process.pid, signal.SIGKILL)
+        if hasattr(os, "killpg"):  # Linux and macOS: the child and anything it started
+            os.killpg(process.pid, signal.SIGKILL)
+        else:  # Windows has no process groups to kill
+            process.kill()
         process.wait()
         raise
     return subprocess.CompletedProcess(args, process.returncode, stdout, stderr)

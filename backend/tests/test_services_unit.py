@@ -4,6 +4,7 @@ import asyncio
 import io
 import json
 import subprocess
+from pathlib import Path
 import uuid
 import zipfile
 from datetime import date, datetime, timedelta, timezone
@@ -72,7 +73,8 @@ def test_reports_are_stored_once_under_a_safe_name(tmp_path, monkeypatch):
     first = storage_service.persist_report(b"%PDF report", "../../etc/My Report (final).pdf")
     again = storage_service.persist_report(b"%PDF report", "My Report (final).pdf")
     assert first["storage_ref"] == again["storage_ref"] and first["size_bytes"] == 11
-    assert "/" not in first["storage_ref"].rsplit("reports/", 1)[1] and "(" not in first["storage_ref"]
+    stored = Path(first["storage_ref"])
+    assert stored.parent == tmp_path / "reports" and "(" not in stored.name  # no path escape, on any OS
     assert first["mime_type"] == "application/pdf" and len(first["sha256"]) == 64
     assert storage_service.persist_report(b"%PDF", "")["storage_ref"].endswith("report.pdf")
 
@@ -268,7 +270,7 @@ def make_docx(paragraphs, *, size_override=None):
     (b"x" * (docs.MAX_BYTES + 1), "memo.txt", "larger than 10 MB"),
     (b"not a pdf", "memo.pdf", "not a valid PDF"),
     (b"not a zip", "memo.docx", "not a valid Word"),
-])
+], ids=["wrong-type", "empty", "too-large", "bad-pdf", "bad-docx"])  # short ids: Windows caps environment variables at 32,767 characters
 def test_bad_memoranda_are_rejected_with_a_clear_reason(content, name, message):
     with pytest.raises(docs.DocumentRejected, match=message):
         docs._validate(content, name)
