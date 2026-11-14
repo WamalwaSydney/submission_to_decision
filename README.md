@@ -9,7 +9,7 @@ Participation Trace helps citizens follow their public-participation submissions
 - **GitHub repository:** https://github.com/WamalwaSydney/submission_to_decision.git
 - **Figma prototype:** [Participation Trace — Kenya](https://www.figma.com/design/0xIxRyyV8vdUSg8vsUHtxx/Participation-Trace-%E2%80%94-Kenya?node-id=0-1&t=iD8kLK1UBjEuoB1B-1)
 - **Video demonstration (5–10 minutes):** [_Video Link._](https://www.youtube.com/watch?v=WPp6CnCSf0Y)
-- **Technical report (PDF, 2 pages):** [`docs/TECHNICAL_REPORT.pdf`](docs/TECHNICAL_REPORT.pdf) (source: [`docs/TECHNICAL_REPORT.typ`](docs/TECHNICAL_REPORT.typ))
+- **Technical report (PDF, 2 pages):** [`docs/TECHNICAL_REPORT.pdf`](https://drive.google.com/file/d/1q9JY7gkEAiBDc2BhVNsxL6lmVeTWuHaA/view?usp=sharing)
 - **Live application (Netlify):** https://uraia-4.netlify.app
 - **API health check (Render):** https://submission-to-decision.onrender.com/health
 
@@ -330,7 +330,7 @@ Platform notes:
 - County coverage is two assemblies. Neither publishes bill stages; Nairobi publishes committee reports as scans, which OCR reads imperfectly, and Trans Nzoia publishes none on bills.
 - Subject-matter committee assignments need administrator confirmation.
 - The interface is English-only; notifications are English and Kiswahili.
-- The app loads about 2.3 MB of data at start-up, which is slow on mobile data.
+- The bills list (about 1 MB, 80 KB compressed) is sent in one response; on a slow phone the bills page takes about 5 s to show. Server-side paging is the next fix. The start-up data is about 230 KB compressed: report texts and entries load only on the pages that need them.
 - Online submissions are not statistically representative of the public.
 
 ## Legal context

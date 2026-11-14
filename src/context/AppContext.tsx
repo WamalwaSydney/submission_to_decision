@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useMemo, useReducer, ReactNode } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, ReactNode } from 'react';
 import {
   User, LegislativeItem, ParticipationReceipt, CommitteeReport,
   ReportEntry, SubmissionMatch, NoticeRecord, RepresentativeProfile,
@@ -34,6 +34,7 @@ type Action =
   | { type: 'ADD_AUDIT_LOG'; payload: AuditLogEntry }
   | { type: 'ADD_REPORT'; payload: CommitteeReport }
   | { type: 'ADD_REPORT_ENTRIES'; payload: ReportEntry[] }
+  | { type: 'MERGE_REPORT_ENTRIES'; payload: ReportEntry[] }
   | { type: 'ADD_MATCH'; payload: SubmissionMatch }
   | { type: 'UPSERT_MATCH'; payload: SubmissionMatch }
   | { type: 'UPDATE_MATCH_DECISION'; payload: { matchId: string; decision: ReviewerDecision; reviewerId: string } }
@@ -93,6 +94,10 @@ function reducer(state: AppState, action: Action): AppState {
       return { ...state, reports: [...state.reports, action.payload] };
     case 'ADD_REPORT_ENTRIES':
       return { ...state, reportEntries: [...state.reportEntries, ...action.payload] };
+    case 'MERGE_REPORT_ENTRIES': {
+      const incoming = new Set(action.payload.map(entry => entry.id));
+      return { ...state, reportEntries: [...state.reportEntries.filter(entry => !incoming.has(entry.id)), ...action.payload] };
+    }
     case 'ADD_MATCH':
       return { ...state, matches: [...state.matches, action.payload] };
     case 'UPSERT_MATCH':
@@ -181,6 +186,8 @@ interface AppContextType {
   getSubmissionReviewDecision: (receiptId: string) => ReviewerDecision | null;
   getSubmissionLodgingStatus: (receiptId: string) => LodgingStatus;
   getBillOutcomes: (billId: string) => { status: SubmissionStage; count: number }[];
+  /** Load every report entry once (they are left out of the start-up data to keep it small). */
+  loadAllReportEntries: () => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -277,8 +284,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }));
   };
 
+  const allEntriesRequest = useRef<Promise<void> | null>(null);
+  const loadAllReportEntries = useCallback(() => {
+    allEntriesRequest.current ??= api.reportEntries()
+      .then(entries => dispatch({ type: 'MERGE_REPORT_ENTRIES', payload: entries }))
+      .catch(error => { allEntriesRequest.current = null; throw error; });
+    return allEntriesRequest.current;
+  }, []);
+
   return (
-    <AppContext.Provider value={{ state, dispatch, getSubmissionStatus, getSubmissionReviewDecision, getSubmissionLodgingStatus, getBillOutcomes }}>
+    <AppContext.Provider value={{ state, dispatch, getSubmissionStatus, getSubmissionReviewDecision, getSubmissionLodgingStatus, getBillOutcomes, loadAllReportEntries }}>
       {children}
     </AppContext.Provider>
   );

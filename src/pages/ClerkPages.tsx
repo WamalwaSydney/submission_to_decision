@@ -43,7 +43,8 @@ const treatmentVariant = (treatment: string) =>
 
 /** Reports read for this committee: a filterable, paginated table; a row opens the report and its entries. */
 function IngestedReports() {
-  const { state, dispatch } = useApp();
+  const { state, dispatch, loadAllReportEntries } = useApp();
+  useEffect(() => { loadAllReportEntries().catch(() => undefined); }, [loadAllReportEntries]);
   const [filter, setFilter] = useState<ReportFilter>('all');
   const [query, setQuery] = useState('');
   const [sortBy, setSortBy] = useState<'newest' | 'oldest' | 'bill'>('newest');

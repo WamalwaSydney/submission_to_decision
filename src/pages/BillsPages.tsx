@@ -798,7 +798,7 @@ export function BillPage() {
                 <a key={report.id} href={reportDocumentHref(report)} target="_blank" rel="noreferrer" aria-label={`Open committee report ${report.title || report.source_document_ref}`} className="block rounded-2xl p-5 border border-[#e7e3da] bg-[#faf9f6] hover:bg-white hover:border-[#cfe5d4] transition-colors">
                   <div className="flex items-start justify-between gap-3 mb-2 flex-wrap">
                     <span className="font-bold text-[#182020] break-words">{report.title || report.source_document_ref}</span>
-                    <Badge variant={report.source_verification_status === 'verified' ? 'green' : 'gray'}>{report.source_verification_status === 'verified' ? 'Official Parliament source · Verified' : 'Source not verified'}</Badge>
+                    <Badge variant={report.source_verification_status === 'verified' ? 'green' : 'gray'}>{report.source_verification_status === 'verified' ? `${/parliament\.go\.ke/i.test(report.source_url || '') ? 'Official Parliament source' : 'Official county assembly source'} · Verified` : 'Source not verified'}</Badge>
                   </div>
                   <div className="flex flex-wrap gap-x-4 gap-y-2 text-xs font-semibold text-[#687575]">
                     <span className="flex items-center gap-1"><Calendar className="h-3.5 w-3.5" aria-hidden="true" /> Tabled: {formatDate(report.date_tabled)}</span>

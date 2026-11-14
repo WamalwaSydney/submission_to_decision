@@ -8,7 +8,8 @@ import { motion } from 'framer-motion';
 import { Badge, DisclaimerBox, InfoBox, Card } from '../components/UI';
 
 export function AdminPage() {
-  const { state } = useApp();
+  const { state, loadAllReportEntries } = useApp();
+  useEffect(() => { loadAllReportEntries().catch(() => undefined); }, [loadAllReportEntries]);  // for the research export
   const [searchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState<'roles' | 'committees' | 'assignments' | 'export' | 'settings'>(() => (searchParams.get('tab') as any) || 'roles');
   const [adminUsers, setAdminUsers] = useState(state.users);

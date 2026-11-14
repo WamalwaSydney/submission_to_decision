@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
-import { motion, AnimatePresence } from 'framer-motion';
 import {
   AppBar,
   Toolbar,
@@ -550,14 +549,8 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <img src="/kenya-flag-shield.svg" alt="" aria-hidden="true" />
       </Box>
 
-      <AnimatePresence>
-        {!state.isOnline && (
-          <motion.div
-            initial={{ opacity: 0, y: -8 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8 }}
-            className="offline-banner"
-          >
+      {!state.isOnline && (
+          <div className="offline-banner banner-enter">
             <Box
               sx={{
                 maxWidth: 1280,
@@ -586,15 +579,16 @@ export function Layout({ children }: { children: React.ReactNode }) {
                 </Typography>
               </Typography>
             </Box>
-          </motion.div>
+          </div>
         )}
-      </AnimatePresence>
 
       <Box
         component="main"
         id="main-content"
         sx={{
           flex: 1,
+          // At least a screen tall, so the footer never jumps down when a page or its data arrives.
+          minHeight: '100vh',
           position: 'relative',
           zIndex: 1,
           width: '100%',
@@ -609,17 +603,11 @@ export function Layout({ children }: { children: React.ReactNode }) {
             py: { xs: 4, md: 5, lg: 6 },
           }}
         >
-          {/* A keyed fade-in only. The previous exit animation (AnimatePresence
-              mode="wait") rendered each new page twice, so typing in its first
-              moments was lost. */}
-          <motion.div
-            key={location.pathname}
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
-          >
+          {/* A keyed CSS fade-in (index.css .page-enter). It starts just above zero opacity so the
+              browser counts the page as painted at once, and needs no animation library on first load. */}
+          <div key={location.pathname} className="page-enter">
             {children}
-          </motion.div>
+          </div>
         </Box>
       </Box>
 

@@ -3,6 +3,10 @@ import ReactDOM from "react-dom/client";
 import { ThemeProvider } from "@mui/material/styles";
 import CssBaseline from "@mui/material/CssBaseline";
 import theme from "./theme";
+// Roboto served from this site (Latin only): no wait on Google's font servers before text can show.
+import "@fontsource/roboto/latin-400.css";
+import "@fontsource/roboto/latin-500.css";
+import "@fontsource/roboto/latin-700.css";
 import "./index.css";
 import App from "./App.tsx";
 

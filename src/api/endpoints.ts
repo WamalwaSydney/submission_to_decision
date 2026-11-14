@@ -131,6 +131,8 @@ export interface ParticipationOutcomeRow {
 
 export const api = {
   bootstrap: () => apiFetch<BootstrapResponse>('/bootstrap'),
+  // Every report entry: not part of the start-up data, loaded by the pages that list them all.
+  reportEntries: () => apiFetch<any[]>('/report-entries'),
   committees: () => apiFetch<{ committees: any[] }>('/committees'),
   createCommittee: (data: { name: string; institution: string; description?: string; contact_email?: string; account_name?: string; account_email?: string; account_password?: string }) => apiFetch<any>('/committees', { method: 'POST', body: JSON.stringify(data) }),
   setBillCommittee: (billId: string, committeeId: string | null) => apiFetch<{ bill: any }>(`/bills/${encodeURIComponent(billId)}/committee`, { method: 'PUT', body: JSON.stringify({ committee_id: committeeId }) }),

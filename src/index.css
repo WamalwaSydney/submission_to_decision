@@ -473,3 +473,10 @@
   .auth-shell-main { max-width:1040px; margin:0 auto; padding:28px 20px 48px; }
   @media (max-width:520px) { .auth-shell-header { padding:14px 16px 0; } .auth-shell-main { padding:20px 16px 40px; } }
 }
+
+/* Page and banner entrances (Layout.tsx). Opacity starts above zero so the first paint counts. */
+@keyframes page-enter { from { opacity: .01; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+@keyframes banner-enter { from { opacity: .01; transform: translateY(-8px); } to { opacity: 1; transform: none; } }
+.page-enter { animation: page-enter .3s cubic-bezier(.22, 1, .36, 1) both; }
+.banner-enter { animation: banner-enter .2s ease-out both; }
+@media (prefers-reduced-motion: reduce) { .page-enter, .banner-enter { animation: none; } }

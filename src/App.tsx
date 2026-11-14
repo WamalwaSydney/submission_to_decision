@@ -1,22 +1,39 @@
-import React, { useCallback, useEffect } from 'react';
+import React, { lazy, Suspense, useCallback, useEffect } from 'react';
 import { HashRouter, Routes, Route, Navigate, Outlet, useLocation } from 'react-router-dom';
 import { AppProvider, useApp } from './context/AppContext';
 import { Layout } from './components/Layout';
 import { AuthShell } from './components/AuthShell';
 import { HomePage } from './pages/HomePage';
-import { BillsListPage, BillPage } from './pages/BillsPages';
-import { ActPage } from './pages/ActPage';
-import { ReceiptLookupPage, ReceiptVerifyPage } from './pages/ReceiptPages';
-import { SubmitViewPage } from './pages/SubmitViewPage';
-import { LoginPage } from './pages/LoginPage';
-import { ResetPasswordPage } from './pages/ResetPasswordPage';
-import { SignupPage } from './pages/SignupPage';
-import { ReviewerQueuePage, ReportedContentPage } from './pages/ModeratorPages';
-import { CommitteeOfficerIngestionPage, CommitteeOfficerNoticesPage } from './pages/ClerkPages';
-import { AdminPage } from './pages/AdminPage';
-import { ResearchExportPage, CommunityRulesPage, MyReceiptsPage } from './pages/OtherPages';
-import { CommitteeDashboardPage, BillFlowPage } from './pages/CommitteePages';
-import { MessagesPage } from './pages/MessagesPage';
+
+// Every page but the home page is loaded when first opened, so the first visit downloads only what it shows.
+function lazyPage<K extends string>(load: () => Promise<Record<K, React.ComponentType<any>>>, name: K) {
+  return lazy(() => load().then(module => ({ default: module[name] })));
+}
+const BillsListPage = lazyPage(() => import('./pages/BillsPages'), 'BillsListPage');
+const BillPage = lazyPage(() => import('./pages/BillsPages'), 'BillPage');
+const ActPage = lazyPage(() => import('./pages/ActPage'), 'ActPage');
+const ReceiptLookupPage = lazyPage(() => import('./pages/ReceiptPages'), 'ReceiptLookupPage');
+const ReceiptVerifyPage = lazyPage(() => import('./pages/ReceiptPages'), 'ReceiptVerifyPage');
+const SubmitViewPage = lazyPage(() => import('./pages/SubmitViewPage'), 'SubmitViewPage');
+const LoginPage = lazyPage(() => import('./pages/LoginPage'), 'LoginPage');
+const ResetPasswordPage = lazyPage(() => import('./pages/ResetPasswordPage'), 'ResetPasswordPage');
+const SignupPage = lazyPage(() => import('./pages/SignupPage'), 'SignupPage');
+const ReviewerQueuePage = lazyPage(() => import('./pages/ModeratorPages'), 'ReviewerQueuePage');
+const ReportedContentPage = lazyPage(() => import('./pages/ModeratorPages'), 'ReportedContentPage');
+const CommitteeOfficerIngestionPage = lazyPage(() => import('./pages/ClerkPages'), 'CommitteeOfficerIngestionPage');
+const CommitteeOfficerNoticesPage = lazyPage(() => import('./pages/ClerkPages'), 'CommitteeOfficerNoticesPage');
+const AdminPage = lazyPage(() => import('./pages/AdminPage'), 'AdminPage');
+const ResearchExportPage = lazyPage(() => import('./pages/OtherPages'), 'ResearchExportPage');
+const CommunityRulesPage = lazyPage(() => import('./pages/OtherPages'), 'CommunityRulesPage');
+const MyReceiptsPage = lazyPage(() => import('./pages/OtherPages'), 'MyReceiptsPage');
+const CommitteeDashboardPage = lazyPage(() => import('./pages/CommitteePages'), 'CommitteeDashboardPage');
+const BillFlowPage = lazyPage(() => import('./pages/CommitteePages'), 'BillFlowPage');
+const MessagesPage = lazyPage(() => import('./pages/MessagesPage'), 'MessagesPage');
+
+function PageLoading() {
+  return <p role="status" className="p-6 text-sm font-semibold text-[#526060]">Loading…</p>;
+}
+
 import { api } from './api/endpoints';
 import { ApiError } from './api/client';
 import { getUnsyncedDrafts, markDraftSynced } from './utils/offline';
@@ -85,7 +102,7 @@ function CitizenSubmissionRoute() {
 }
 
 function MenuLayout() {
-  return <Layout><Outlet /></Layout>;
+  return <Layout><Suspense fallback={<PageLoading />}><Outlet /></Suspense></Layout>;
 }
 
 function AppRoutes() {
@@ -131,7 +148,9 @@ function App() {
     <AppProvider>
       <HashRouter>
         <OnlineStatusListener />
-        <AppRoutes />
+        <Suspense fallback={<PageLoading />}>
+          <AppRoutes />
+        </Suspense>
       </HashRouter>
     </AppProvider>
   );
