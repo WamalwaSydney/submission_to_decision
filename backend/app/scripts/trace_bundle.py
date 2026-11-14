@@ -221,19 +221,20 @@ async def import_(file: Path = DEFAULT_FILE, replace: bool = False) -> dict:
                             "house", "house_kept", "acts", "acts_kept", "no_bill"), 0)
     ids: dict[str, str] = {}
     async with async_session() as db:
-        for item in data["reports"]:
+        # One short transaction per record: a distant hosted database drops connections held open for long.
+        steps = [(_import_report, (item, ids, replace, counts), item["source_url"]) for item in data["reports"]]
+        steps += [(_import_trace, (HouseTrace, HOUSE_FIELDS, item, ids, replace, counts, "house"), item["bill"]) for item in data["house"]]
+        steps += [(_import_trace, (ActTrace, ACT_FIELDS, item, ids, replace, counts, "acts"), item["bill"]) for item in data["acts"]]
+        for i, (step, step_args, label) in enumerate(steps, 1):
             try:
-                async with db.begin_nested():
-                    await _import_report(db, item, ids, replace, counts)
-            except Exception as exc:  # one bad report must not stop the rest
+                await step(db, *step_args)
+                await db.commit()
+            except Exception as exc:  # one bad record must not stop the rest
+                await db.rollback()
                 counts["failed"] = counts.get("failed", 0) + 1
-                print(f"  FAILED {item['source_url']}: {exc}", flush=True)
-        await db.commit()
-        for item in data["house"]:
-            await _import_trace(db, HouseTrace, HOUSE_FIELDS, item, ids, replace, counts, "house")
-        for item in data["acts"]:
-            await _import_trace(db, ActTrace, ACT_FIELDS, item, ids, replace, counts, "acts")
-        await db.commit()
+                print(f"  FAILED {label}: {exc}", flush=True)
+            if i % 50 == 0:
+                print(f"  {i}/{len(steps)}", flush=True)
     print(f"Imported {file}: {counts}", flush=True)
     return counts
 

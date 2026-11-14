@@ -1684,6 +1684,15 @@ async def main() -> int:
         bill_texts = []
     engine = create_async_engine(database_url, pool_pre_ping=True)
     try:
+        # Mzalendo's pages take many minutes to read, so read them before the write transaction opens:
+        # a hosted database (Neon) closes connections that are held open that long.
+        mzalendo_texts: list[BillText] = []
+        try:
+            async with engine.connect() as conn:
+                have_text = await titles_with_text(conn)
+            mzalendo_texts = await fetch_mzalendo_bill_texts(have_text)
+        except Exception as exc:  # a bonus source; never block the sync
+            log.warning("Could not read Mzalendo's bill tracker: %s", exc)
         async with engine.begin() as conn:
             await conn.execute(text("SELECT 1"))
             for statement in filter(None, (s.strip() for s in SCHEMA_SQL.split(";"))):
@@ -1692,11 +1701,7 @@ async def main() -> int:
             notice_count = await upsert_notices(conn, notices)
             opened, moved_on = await sync_participation_stages(conn, date.today())
             log.info("Bill texts: %d found on Parliament's Bills pages, %d newly linked", len(bill_texts), await attach_bill_texts(conn, bill_texts))
-            try:
-                mzalendo_texts = await fetch_mzalendo_bill_texts(await titles_with_text(conn))
-                log.info("Bill texts: %d more from Mzalendo, %d newly linked", len(mzalendo_texts), await attach_bill_texts(conn, mzalendo_texts))
-            except Exception as exc:  # a bonus source; never block the sync
-                log.warning("Could not read Mzalendo's bill tracker: %s", exc)
+            log.info("Bill texts: %d more from Mzalendo, %d newly linked", len(mzalendo_texts), await attach_bill_texts(conn, mzalendo_texts))
             log.info("Public participation: %d bill(s) open now, %d moved on after their call closed", opened, moved_on)
             new_reports = await upsert_reports(conn, reports)
             log.info("Committee reports: %d more linked to their bill by name", await link_unlinked_reports(conn))
