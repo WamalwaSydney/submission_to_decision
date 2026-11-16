@@ -5,7 +5,7 @@ import os
 import re
 import random
 import logging
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 from uuid import UUID, uuid4
@@ -1296,7 +1296,7 @@ async def create_receipt(
     if current_user.role != "citizen":
         raise HTTPException(status_code=403, detail="Only citizens can submit views")
 
-    recent_cutoff = datetime.utcnow() - timedelta(hours=1)
+    recent_cutoff = datetime.now(timezone.utc) - timedelta(hours=1)
     recent_result = await db.execute(
         select(ParticipationReceipt.id).where(
             ParticipationReceipt.author_id == current_user.id,
@@ -1691,7 +1691,7 @@ async def upload_report(
         source_storage_ref=provenance["storage_ref"],
         provenance={
             "original_filename": os.path.basename(file.filename or "report.pdf"),
-            "uploaded_at": datetime.utcnow().isoformat() + "Z",
+            "uploaded_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             "sha256": provenance["sha256"],
             "storage_ref": provenance["storage_ref"],
         },
