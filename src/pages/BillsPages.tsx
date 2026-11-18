@@ -22,6 +22,7 @@ import { reportDocumentHref } from '../utils/reportLinks';
 import { FinalActPanel, HousePanel, ReportAnalysisPanel, ReportSubmissionsTable, useParticipationSummary } from '../components/ParticipationSummary';
 import type { ReportDecision } from '../api/endpoints';
 import type { SubmissionStage } from '../utils/submissionStage';
+import { OUTCOME_STAGES, STAGE_META } from '../utils/submissionStage';
 
 function SubmissionStatusBadge({ status }: { status: SubmissionStatus }) {
   return StatusBadge({ status });
@@ -608,6 +609,14 @@ export function BillPage() {
   const REPORT_STAGE: Record<ReportDecision, SubmissionStage> = { adopted: 'adopted', amended: 'amended', rejected: 'rejected', 'not addressed': 'not_addressed' };
   const reportCount = (status: SubmissionStage) => reportItems.filter(item => REPORT_STAGE[item.decision] === status).length;
   const allOutcomes = outcomes.map(o => ({ ...o, platform: o.count, report: reportCount(o.status), count: o.count + reportCount(o.status) }));
+  // The journey cards count every submission that has reached each stage, wherever it was made. A submission the
+  // committee report records was received, went to the committee and is in the published report, and the report
+  // itself records the response, so it counts at every step. The outcome cards show where each one ended.
+  const stageCards = allOutcomes.map(o => {
+    if (OUTCOME_STAGES.includes(o.status)) return { ...o, reached: false };
+    const platform = outcomes.filter(x => STAGE_META[x.status].step >= STAGE_META[o.status].step).reduce((sum, x) => sum + x.count, 0);
+    return { ...o, platform, report: reportItems.length, count: platform + reportItems.length, reached: true };
+  });
   const totalSubmissions = billReceipts.length + reportItems.length;
   const outcomeChart = allOutcomes.map(o => ({ name: o.status.replace('_', ' '), submissions: o.count }));
 
@@ -682,15 +691,15 @@ export function BillPage() {
           {totalSubmissions} submission{totalSubmissions === 1 ? '' : 's'} traced: {billReceipts.length} sent on this platform{reportItems.length ? `, ${reportItems.length} recorded in the committee report (written memoranda and hearings)` : ''}.
         </p>
         <div className="stage-counts">
-          {allOutcomes.map(o => (
+          {stageCards.map(o => (
             <div key={o.status} className={`stage-count ${o.count ? '' : 'is-zero'}`}>
               <strong>{o.count}</strong>
               <SubmissionStatusBadge status={o.status as SubmissionStatus} />
-              {o.report > 0 && <small className="block text-[11px] font-semibold text-[#687575] mt-1">{o.platform} on this platform · {o.report} in the report</small>}
+              {o.report > 0 && <small className="block text-[11px] font-semibold text-[#687575] mt-1">{o.platform} on this platform · {o.report} in the report{o.reached && o.status === 'under_review' ? ' (the report records their response)' : ''}</small>}
             </div>
           ))}
         </div>
-        <p className="mt-4 mb-0 text-xs font-semibold text-surface-500">Outcome labels record what the committee's report says. They are not legal findings or judgments about anyone.</p>
+        <p className="mt-4 mb-0 text-xs font-semibold text-surface-500">The first four count every submission that has reached that stage, including those already decided; the outcomes show where each one ended. Outcome labels record what the committee's report says. They are not legal findings or judgments about anyone.</p>
         <ReportAnalysisPanel data={participationData} hasReport={billReports.length > 0} />
         <HousePanel data={participationData} passed={/^(assented|passed by national assembly|passed by senate|mediation report adopted)$/i.test(bill.stage)} />
         <FinalActPanel data={participationData} assented={/^assented$/i.test(bill.stage)} />

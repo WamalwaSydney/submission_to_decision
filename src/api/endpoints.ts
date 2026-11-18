@@ -25,6 +25,14 @@ export interface BootstrapResponse {
   matches: any[];
   notices: any[];
   profiles: any[];
+  stats?: ReportTotals;
+}
+
+/** Submissions the committee reports record (written memoranda and hearings), across all bills. */
+export interface ReportTotals {
+  report_submissions: number;
+  report_decisions: number;
+  reports_with_submissions: number;
 }
 
 export type ReportDecision = 'adopted' | 'amended' | 'rejected' | 'not addressed';

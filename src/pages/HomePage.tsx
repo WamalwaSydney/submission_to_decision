@@ -121,7 +121,13 @@ function Journey() {
 function VisitorHome() {
   const { state } = useApp();
   const open = useOpenBills();
-  const responses = state.matches.filter(m => m.reviewer_decision === 'confirmed').length;
+  // Every submission: views sent on this platform plus those the committee reports record (written memoranda and
+  // hearings). Responses: platform views a moderator matched to the report, plus report submissions with a decision.
+  const platformViews = state.receipts.length;
+  const reportViews = state.reportTotals?.report_submissions || 0;
+  const platformResponses = state.matches.filter(m => m.reviewer_decision === 'confirmed').length;
+  const reportResponses = state.reportTotals?.report_decisions || 0;
+  const count = (n: number) => n.toLocaleString('en-KE');
   return (
     <div className="home">
       <Hero kicker="Public participation · Kenya" title={<>Have your say on the laws <span className="gradient-text">being made for Kenya</span></>}
@@ -131,8 +137,10 @@ function VisitorHome() {
       </Hero>
       <div className="stat-tiles">
         <Tile tone="green" value={state.isLoading ? '…' : open.length} label="Bills open for views" note="Committees are collecting public views on these now." to="/bills?open=1" />
-        <Tile tone="red" value={state.isLoading ? '…' : state.receipts.length} label="Views submitted" note="Each one has a tamper-evident receipt." />
-        <Tile tone="black" value={state.isLoading ? '…' : responses} label="Committee responses traced" note="Checked by a moderator against the report." />
+        <Tile tone="red" value={state.isLoading ? '…' : count(platformViews + reportViews)} label="Views submitted"
+          note={`${count(platformViews)} sent on this platform, each with a tamper-evident receipt; ${count(reportViews)} recorded in committee reports.`} to="/bills" />
+        <Tile tone="black" value={state.isLoading ? '…' : count(platformResponses + reportResponses)} label="Committee responses traced"
+          note={`${count(reportResponses)} decisions recorded in committee reports; ${count(platformResponses)} platform views matched to the report by a moderator.`} />
       </div>
       <section aria-labelledby="explore-heading">
         <div className="home-section-head"><div><h2 id="explore-heading">Explore</h2><p>Everything here is open to the public. You only need an account to submit a view.</p></div></div>

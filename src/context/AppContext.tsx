@@ -5,7 +5,7 @@ import {
   ModerationAction, AuditLogEntry, UserRole, SubmissionStatus,
   RepresentativeStatus, ReviewerDecision, LodgingStatus, Committee
 } from '../types';
-import { api } from '../api/endpoints';
+import { api, type ReportTotals } from '../api/endpoints';
 import { STAGE_ORDER, SubmissionStage, submissionStage } from '../utils/submissionStage';
 
 interface AppState {
@@ -18,6 +18,7 @@ interface AppState {
   matches: SubmissionMatch[];
   notices: NoticeRecord[];
   profiles: RepresentativeProfile[];
+  reportTotals: ReportTotals | null;
   moderationActions: ModerationAction[];
   auditLog: AuditLogEntry[];
   currentUser: User | null;
@@ -61,6 +62,7 @@ const initialState: AppState = {
   matches: [],
   notices: [],
   profiles: [],
+  reportTotals: null,
   moderationActions: [],
   auditLog: [],
   currentUser: null,
@@ -235,6 +237,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         matches: data.matches,
         notices: data.notices,
         profiles: data.profiles,
+        reportTotals: data.stats || null,
       } });
     }).catch(error => {
       if (!cancelled) dispatch({ type: 'SET_API_ERROR', payload: error instanceof Error ? error.message : 'Unable to load API data' });

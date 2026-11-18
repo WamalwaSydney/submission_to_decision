@@ -355,10 +355,16 @@ def parse_report_entries(text: str) -> List[Tuple[str, str, str, str | None]]:
             current["reason"] = reason.group(1).strip()
             continue
 
+        found = None
         for treatment, pattern in TREATMENT_PATTERNS:
             if pattern.search(line):
-                current["treatment"] = treatment
+                found = current["treatment"] = treatment
                 break
+
+        # A reason that wraps onto the next line continues there until its sentence ends.
+        if current["reason"] is not None and not found and not current["reason"].endswith((".", "!", "?")):
+            current["reason"] = f"{current['reason']} {line}".strip()
+            continue
 
         current["summary"].append(line)
 

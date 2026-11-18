@@ -802,6 +802,36 @@ async def report_entries_list(db: AsyncSession = Depends(get_db)):
     return [to_dict(row) for row in rows]
 
 
+CLASSIFIED_TREATMENTS = ("adopted", "amended", "rejected with reasons", "not addressed")
+
+
+async def report_submission_totals(db: AsyncSession, report_ids) -> dict:
+    """Submissions the committee reports record (written memoranda and hearings), across all live reports.
+
+    A report's AI analysis lists them with the committee's decision. A report not yet analysed counts the entries
+    the text reader found a decision for; passages it could not classify are not submissions.
+    """
+    ids = list(report_ids)
+    if not ids:
+        return {"report_submissions": 0, "report_decisions": 0, "reports_with_submissions": 0}
+    submissions = decisions = reports_counted = 0
+    analysed = set()
+    for report_ref, items in (await db.execute(select(ReportAnalysis.report_ref, ReportAnalysis.items).where(ReportAnalysis.report_ref.in_(ids)))).all():
+        analysed.add(report_ref)
+        items = items or []
+        submissions += len(items)
+        decisions += sum(1 for item in items if (item or {}).get("decision") in report_analysis_service.DECISIONS)
+        reports_counted += bool(items)
+    parsed = (await db.execute(
+        select(ReportEntry.report_ref, ReportEntry.id)
+        .where(ReportEntry.report_ref.in_([i for i in ids if i not in analysed]), ReportEntry.treatment.in_(CLASSIFIED_TREATMENTS))
+    )).all()
+    submissions += len(parsed)
+    decisions += len(parsed)
+    reports_counted += len({report_ref for report_ref, _ in parsed})
+    return {"report_submissions": submissions, "report_decisions": decisions, "reports_with_submissions": reports_counted}
+
+
 @router.get("/bootstrap")
 async def bootstrap(db: AsyncSession = Depends(get_db)):
     """Return the non-secret application data needed by the initial client shell."""
@@ -842,6 +872,7 @@ async def bootstrap(db: AsyncSession = Depends(get_db)):
             receipt["lodging_status"] = "acknowledged"
 
     return {
+        "stats": await report_submission_totals(db, live_report_ids),
         "committees": await all_rows(Committee),
         "bills": bills,
         "receipts": receipts,
@@ -1117,7 +1148,7 @@ async def bill_flow(
         status = stages[receipt.id]
         submissions.append({"public_id": receipt_service.stable_id_of(receipt), "timestamp": receipt.timestamp, "clause_ref": receipt.clause_ref, "status": status, "match_percentage": round(match.confidence_score * 100, 1) if match else None, "match_decision": match.reviewer_decision if match else None, "reason": entry.stated_reason if entry and confirmed_match else (match.reviewer_reason if match and match.reviewer_decision == "rejected" else None)})
     flow_notices = await notices_by_bill(db, [bill.id])
-    return {"bill": bill_with_participation(to_dict(bill), flow_notices.get(bill.id, [])), "flow": [{"stage": h.get("stage"), "date": h.get("date"), "note": h.get("note")} for h in (bill.status_history or [])], "reports": [report_to_dict(r) for r in reports], "report_entries": [to_dict(e) for e in entries], "submissions": submissions}
+    return {"bill": bill_with_participation(to_dict(bill), flow_notices.get(bill.id, [])), "flow": [{"stage": h.get("stage"), "date": h.get("date"), "note": h.get("note")} for h in (bill.status_history or [])], "reports": [report_to_dict(r, exclude={"extracted_text"}) for r in reports], "report_entries": [to_dict(e) for e in entries], "submissions": submissions}
 
 # ============ Messages ============
 

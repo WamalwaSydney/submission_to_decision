@@ -2,7 +2,7 @@
 
 Participation Trace helps citizens follow their public-participation submissions on bills in Kenya's National Assembly and county assemblies, from the moment they send a view to the committee's recorded response.
 
-> **Status (14 November 2026):** the live site and API run the latest code, and the production database holds the full trace: committee reports, the analysis of each submission, House decisions and final Acts. Locally, 248 backend tests pass with 87% line coverage, and the type check and production build pass. See [Testing](#testing) and [Deploying this release](#deploying-this-release).
+> **Status (14 November 2026):** the live site and API run the latest code, and the production database holds the full trace: committee reports, the analysis of each submission, House decisions and final Acts. Locally, 261 backend tests pass with 96% line coverage, and the type check and production build pass. See [Testing](#testing) and [Deploying this release](#deploying-this-release).
 
 ## Project links
 
@@ -229,7 +229,7 @@ docker compose exec -e TEST_DATABASE_URL=postgresql+asyncpg://postgres:postgres@
 
 Create the test database once with `docker compose exec postgres psql -U postgres -c "create database participation_platform_test"`. The tests install the same append-only triggers as production, so code that tries to change a receipt fails in tests too. The `evaluation/` folder is mounted into the backend container for the report-parsing fixtures.
 
-Latest local run (14 November 2026): **248 passed** across 20 test modules, **87% line coverage** of `app/` (it was 97% before the House and Act tracing scripts, which are not yet fully tested). Coverage includes:
+Latest local run (16 November 2026): **261 passed** across 21 test modules, **96% line coverage** of `app/`, with every file at 88% or more. Coverage includes:
 
 - **Receipts and the chain:** tamper detection (edited text, deleted receipt, swapped document), append-only enforcement, edits and versions.
 - **Participation rules:** when a bill accepts views, one submission per bill, document uploads.
@@ -240,6 +240,7 @@ Latest local run (14 November 2026): **248 passed** across 20 test modules, **87
 - **Tracing:** report analysis, House and Act evidence checks, and a receipt followed into the Act.
 - **Counties and production copy:** Nairobi Acts and reports, Act library loading, and the trace bundle never replacing entries matched to submissions.
 - **Performance:** the start-up data leaving out report texts and being compressed.
+- **Command-line scripts:** report analysis, House and Act tracing, report reading, county Act downloads and demo seeding, with Gemini and every website faked.
 
 Lighthouse (14 November 2026): home page 99 on desktop and 74–78 on mobile; bills page 95 on desktop and 65–68 on mobile. Accessibility and best practices score 100. Details are in the technical report.
 
@@ -275,7 +276,7 @@ Platform notes:
 │   │   │                            # act_library, download_county_acts, fill_gaps, trace_bundle
 │   │   └── services/                # receipts, ingestion (OCR), matching, report analysis, House and Act tracing
 │   ├── alembic/versions/            # migrations
-│   ├── tests/                       # 20 pytest modules
+│   ├── tests/                       # 21 pytest modules
 │   ├── requirements.txt
 │   └── Dockerfile
 ├── src/                             # React frontend
