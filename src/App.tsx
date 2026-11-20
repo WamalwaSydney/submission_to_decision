@@ -26,6 +26,7 @@ const CommitteeOfficerNoticesPage = lazyPage(() => import('./pages/ClerkPages'),
 const AdminPage = lazyPage(() => import('./pages/AdminPage'), 'AdminPage');
 const ResearchExportPage = lazyPage(() => import('./pages/OtherPages'), 'ResearchExportPage');
 const CommunityRulesPage = lazyPage(() => import('./pages/OtherPages'), 'CommunityRulesPage');
+const PrivacyPolicyPage = lazyPage(() => import('./pages/OtherPages'), 'PrivacyPolicyPage');
 const MyReceiptsPage = lazyPage(() => import('./pages/OtherPages'), 'MyReceiptsPage');
 const CommitteeDashboardPage = lazyPage(() => import('./pages/CommitteePages'), 'CommitteeDashboardPage');
 const BillFlowPage = lazyPage(() => import('./pages/CommitteePages'), 'BillFlowPage');
@@ -138,6 +139,7 @@ function AppRoutes() {
         <Route path="/admin" element={<AdminPage />} />
         <Route path="/research/export" element={<ResearchExportPage />} />
         <Route path="/community-rules" element={<CommunityRulesPage />} />
+        <Route path="/privacy" element={<PrivacyPolicyPage />} />
         <Route path="/committee" element={<CommitteeDashboardPage />} />
         <Route path="/messages" element={<MessagesPage />} />
       </Route>

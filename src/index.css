@@ -480,3 +480,12 @@
 .page-enter { animation: page-enter .3s cubic-bezier(.22, 1, .36, 1) both; }
 .banner-enter { animation: banner-enter .2s ease-out both; }
 @media (prefers-reduced-motion: reduce) { .page-enter, .banner-enter { animation: none; } }
+
+/* Privacy policy text */
+.privacy-text { color:#2d3838; font-size:.95rem; line-height:1.7; }
+.privacy-text p { margin:0 0 .75rem; }
+.privacy-text p:last-child { margin-bottom:0; }
+.privacy-text ul { margin:0 0 .75rem; padding-left:1.25rem; list-style:disc; }
+.privacy-text li { margin:.35rem 0; }
+.privacy-text strong { color:#182020; }
+.privacy-text a { color:#a52d29; font-weight:700; text-decoration:underline; }

@@ -202,8 +202,11 @@ export function CommunityRulesPage() {
       <h1 className="text-4xl md:text-5xl font-black tracking-tighter text-surface-900 mb-4">
         Community <span className="gradient-text">Rules</span>
       </h1>
-      <p className="text-lg text-surface-600 leading-relaxed max-w-3xl mb-8">
+      <p className="text-lg text-surface-600 leading-relaxed max-w-3xl mb-3">
         Rules governing user-generated content on this platform.
+      </p>
+      <p className="text-sm text-surface-600 mb-8">
+        How we handle your personal data is set out in our <Link to="/privacy" className="font-bold text-primary-700 underline">Privacy Policy</Link>.
       </p>
 
       <motion.div
@@ -400,6 +403,20 @@ export function CommunityRulesPage() {
           </div>
         </Card>
       </motion.div>
+
+      <Card className="!p-7 md:!p-8 mt-6" hover={false}>
+        <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+          <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-primary-600 to-accent-500 flex items-center justify-center text-white shrink-0">
+            <Lock className="h-5.5 w-5.5" />
+          </div>
+          <div className="flex-1">
+            <div className="text-xs font-black uppercase tracking-[0.18em] text-primary-600 mb-1">Your data</div>
+            <h2 className="text-2xl font-black text-surface-900 tracking-tight m-0">Privacy Policy</h2>
+            <p className="text-sm text-surface-700 mt-1 mb-0">What we collect, what becomes public, how Google Gemini is used, where data is stored and your rights under the Kenya Data Protection Act.</p>
+          </div>
+          <Link to="/privacy" className="action-button is-primary shrink-0">Read the Privacy Policy</Link>
+        </div>
+      </Card>
     </div>
   );
 }
@@ -743,6 +760,191 @@ export function MyReceiptsPage() {
         myEdit={selected ? { editable: Boolean(selected.editable), edit_block: selected.edit_block } : null}
         showBill
       />
+    </div>
+  );
+}
+
+const PRIVACY_UPDATED = '20 November 2026';
+
+const PRIVACY_SECTIONS: { id: string; title: string; body: React.ReactNode }[] = [
+  {
+    id: 'who',
+    title: 'Who runs Participation Trace',
+    body: (
+      <>
+        <p>Participation Trace is a research prototype built as a BSc Software Engineering capstone project at the African Leadership University. It is not run by Parliament, a county assembly or any government office, and it does not send your views to them.</p>
+        <p>It has not yet been registered as a data controller with the Office of the Data Protection Commissioner (ODPC). We handle personal data following the principles of the Kenya Data Protection Act, 2019, and this page explains how.</p>
+      </>
+    ),
+  },
+  {
+    id: 'browse',
+    title: 'Browsing without an account',
+    body: (
+      <p>You do not need an account to read bills, calls for views, committee reports, outcomes or receipts, or to verify the hash chain. We do not ask who you are, set tracking cookies, or use analytics or advertising tools.</p>
+    ),
+  },
+  {
+    id: 'collect',
+    title: 'What we collect',
+    body: (
+      <ul>
+        <li><strong>Your account:</strong> your name, email address and password, your role and, for Clerk's Office staff, your committee. Passwords and recovery codes are stored only as one-way hashes (argon2id and SHA-256), never as text.</li>
+        <li><strong>Your submissions:</strong> the text of your view, the clause it is about, the bill, the time, and its hash in the receipt chain. If you upload a memorandum, we keep the file, its size, type and SHA-256 fingerprint, and the text read from it.</li>
+        <li><strong>Your settings:</strong> whether your name is shown on your submissions (off unless you turn it on) and the language for your notifications.</li>
+        <li><strong>Moderation and audit records:</strong> who reported content and why, moderators' decisions and reasons, and a record of significant actions (such as creating a receipt or confirming a match) and the account that took them.</li>
+        <li><strong>Technical data:</strong> your IP address is used to apply rate limits, and our hosting provider's logs record the IP address, time and page of each request to the service.</li>
+      </ul>
+    ),
+  },
+  {
+    id: 'public',
+    title: 'What is public',
+    body: (
+      <>
+        <p>Public participation is a public process, so some of what you submit is public by design:</p>
+        <ul>
+          <li><strong>Public:</strong> the text of your view, the bill and clause, the time, the receipt ID and its hash, the committee's response once matched, and the text read from an uploaded memorandum. Anyone with a receipt ID can look it up.</li>
+          <li><strong>Public only if you choose:</strong> your name. It is hidden by default; you can choose to show it when you submit.</li>
+          <li><strong>Never public:</strong> your email address, your password, your account ID, and the original memorandum file, which only you and the platform's Clerk's Office, moderator and administrator accounts can open (it may contain signatures or contact details).</li>
+        </ul>
+        <p>Do not put personal details you do not want published, such as your phone number or ID number, in the text of a view.</p>
+        <p>The platform also shows submissions that committee reports list (memoranda and hearing submissions made to the committee directly). These come from reports Parliament and the county assemblies have already published, including any names those reports give.</p>
+      </>
+    ),
+  },
+  {
+    id: 'use',
+    title: 'How we use it',
+    body: (
+      <ul>
+        <li>To issue your receipt and keep the tamper-evident record of your submission.</li>
+        <li>To find the committee's response to your view in its report, and to show you where your submission is.</li>
+        <li>To send you notifications inside the platform when your submission's status changes, in English or Kiswahili.</li>
+        <li>To run the accounts and roles (citizen, Clerk's Office, moderator, administrator), keep the service secure and enforce the Community Rules.</li>
+        <li>To publish identifier-free data (submission text, bill, clause, time and outcome; no names, emails or account IDs) for research on public participation.</li>
+      </ul>
+    ),
+  },
+  {
+    id: 'ai',
+    title: 'Automated processing with Google Gemini',
+    body: (
+      <>
+        <p>We send the text of submissions and of committee reports to Google's Gemini API to propose which part of a report answers each view, to list the submissions a report records, and to write some notifications. Your name and email are not sent. Google processes this text under its Gemini API terms.</p>
+        <p>No decision about you is made by the AI alone: a human moderator confirms or rejects every proposed match before it is shown as the committee's response.</p>
+      </>
+    ),
+  },
+  {
+    id: 'where',
+    title: 'Where it is stored',
+    body: (
+      <>
+        <p>The service runs on providers outside Kenya:</p>
+        <ul>
+          <li>Neon: the database, in the United States.</li>
+          <li>Render: the server and uploaded files.</li>
+          <li>Netlify: the website.</li>
+          <li>GitHub Actions: the nightly update from official sources, which handles no personal data.</li>
+        </ul>
+        <p>Data is sent to and from them over encrypted HTTPS connections. By using the platform you are told that your data is processed in these countries.</p>
+      </>
+    ),
+  },
+  {
+    id: 'keep',
+    title: 'How long we keep it',
+    body: (
+      <>
+        <p>Receipts and the audit record are <strong>permanent and append-only</strong>: the database refuses to change or delete them, because a record that could be quietly edited would prove nothing. If you edit your view while a call for views is open, the earlier version stays in the chain, marked as superseded.</p>
+        <p>Account details are kept while your account exists. Password reset tokens expire and recovery codes stop working once used. Our hosting provider keeps request logs for a limited period.</p>
+      </>
+    ),
+  },
+  {
+    id: 'device',
+    title: 'On your device',
+    body: (
+      <p>Your browser stores your sign-in session and profile (local storage), and drafts of views you are writing, including those saved while offline (IndexedDB), so you do not lose them. They stay on your device until they are sent or you clear your browser data. Signing out removes your session.</p>
+    ),
+  },
+  {
+    id: 'rights',
+    title: 'Your rights',
+    body: (
+      <>
+        <p>Under the Kenya Data Protection Act, 2019 you can ask to see the personal data we hold about you, to correct it, to object to its use, and to have it deleted. You can change your notification language and see all your submissions from your account.</p>
+        <p>Deletion has one limit: we cannot delete or edit a receipt already in the hash chain, as that would break the record for everyone. We can close your account and erase the name and email in it; your submissions stay in the chain without your account details, except that a submission on which you chose to show your name keeps that name in its receipt.</p>
+        <p>If you are not satisfied with how we handle a request, you can complain to the Office of the Data Protection Commissioner (odpc.go.ke).</p>
+      </>
+    ),
+  },
+  {
+    id: 'children',
+    title: 'Age',
+    body: <p>Accounts are for people aged 18 or older.</p>,
+  },
+  {
+    id: 'contact',
+    title: 'Contact and changes',
+    body: (
+      <>
+        <p>To make a request or ask a question, open an issue on the project's repository at <a href="https://github.com/WamalwaSydney/submission_to_decision/issues" target="_blank" rel="noreferrer">github.com/WamalwaSydney/submission_to_decision</a>, without putting personal details in it; we will reply there and arrange a private channel if needed.</p>
+        <p>If we change this policy, we will update it here and change the date at the top.</p>
+      </>
+    ),
+  },
+];
+
+export function PrivacyPolicyPage() {
+  return (
+    <div className="max-w-4xl mx-auto">
+      <nav className="mb-4 text-sm" aria-label="Breadcrumb">
+        <Link to="/community-rules" className="font-semibold text-[#11521f] hover:underline">← Community Rules</Link>
+      </nav>
+      <div className="inline-flex items-center gap-2 mb-4">
+        <span className="w-8 h-px bg-gradient-to-r from-primary-500 to-accent-500 rounded-full" />
+        <span className="text-xs font-black uppercase tracking-[0.18em] text-primary-600">Your data</span>
+      </div>
+      <h1 className="text-4xl md:text-5xl font-black tracking-tighter text-surface-900 mb-3">
+        Privacy <span className="gradient-text">Policy</span>
+      </h1>
+      <p className="text-sm font-semibold text-surface-500 mb-4">Last updated {PRIVACY_UPDATED}</p>
+      <p className="text-lg text-surface-600 leading-relaxed max-w-3xl mb-8">
+        What Participation Trace collects, what becomes public, who processes it and what you can ask us to do.
+      </p>
+
+      <Card className="!p-6 md:!p-7 mb-6" hover={false}>
+        <h2 className="text-lg font-black text-surface-900 mb-3">In short</h2>
+        <div className="privacy-text"><ul>
+          <li>You can read everything without an account. We use no tracking cookies or analytics.</li>
+          <li>The text of your view and your receipt are public; your name is shown only if you choose.</li>
+          <li>Receipts are permanent: they cannot be edited or deleted, by you or by us.</li>
+          <li>Submission text is processed by Google Gemini to find the committee's response; a person confirms every match.</li>
+          <li>Data is stored with providers in the United States.</li>
+        </ul></div>
+      </Card>
+
+      <Card className="!p-6 md:!p-7 mb-6" hover={false}>
+        <h2 className="text-sm font-black uppercase tracking-[0.14em] text-surface-500 mb-3">Contents</h2>
+        <ol className="grid sm:grid-cols-2 gap-x-6 gap-y-1.5 list-decimal list-inside text-sm">
+          {PRIVACY_SECTIONS.map(s => <li key={s.id}><a href={`#privacy-${s.id}`} onClick={e => { e.preventDefault(); document.getElementById(`privacy-${s.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }} className="font-semibold text-primary-700 hover:underline">{s.title}</a></li>)}
+        </ol>
+      </Card>
+
+      <div className="space-y-6">
+        {PRIVACY_SECTIONS.map((s, i) => (
+          <Card key={s.id} className="!p-6 md:!p-8 scroll-mt-6" hover={false}>
+            <section id={`privacy-${s.id}`} aria-labelledby={`privacy-${s.id}-title`}>
+              <h2 id={`privacy-${s.id}-title`} className="text-xl md:text-2xl font-black text-surface-900 tracking-tight mb-3">
+                <span className="text-primary-600 mr-2">{i + 1}.</span>{s.title}
+              </h2>
+              <div className="privacy-text">{s.body}</div>
+            </section>
+          </Card>
+        ))}
+      </div>
     </div>
   );
 }
