@@ -33,7 +33,7 @@ _report_extraction_lock = asyncio.Lock()
 PDFTOTEXT_TIMEOUT = int(os.getenv("PDFTOTEXT_TIMEOUT", "120"))
 PDFINFO_TIMEOUT = int(os.getenv("PDFINFO_TIMEOUT", "30"))
 PDF_DOWNLOAD_TOTAL_TIMEOUT = int(os.getenv("PDF_DOWNLOAD_TOTAL_TIMEOUT", "240"))
-PDF_MAX_BYTES = int(os.getenv("PDF_MAX_BYTES", str(60 * 1024 * 1024)))  # streamed to disk, not held in memory
+PDF_MAX_BYTES = int(os.getenv("PDF_MAX_BYTES", str(100 * 1024 * 1024)))  # streamed to disk; scanned reports reach 64 MB
 
 # One modest pass is substantially faster and safer on a free Render instance
 # than retrying every page at three resolutions.
