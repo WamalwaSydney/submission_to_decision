@@ -30,7 +30,8 @@ const REPORT_FILTERS: { id: ReportFilter; label: string; note: string }[] = [
 const EXTRACTION_LABELS: Record<string, string> = {
   pending: 'Not yet read',
   extracting: 'Reading',
-  needs_review: 'Needs review',
+  needs_review: 'Read in part',
+  unread: 'Could not be read',
   extracted: 'Extracted',
   ocr_used: 'Extracted (OCR)',
   verified: 'Verified',
@@ -171,7 +172,7 @@ function IngestedReports() {
                           <div className="text-xs text-surface-500 font-mono">{bill?.identifier}</div>
                         </td>
                         <td className="whitespace-nowrap">{formatDate(report.date_tabled)}</td>
-                        <td><Badge variant={(report.extraction_status === 'verified' ? 'green' : reportGroup(report.extraction_status) === 'pending' ? 'gray' : 'yellow') as any}>{EXTRACTION_LABELS[report.extraction_status] || report.extraction_status}</Badge></td>
+                        <td><Badge variant={(report.extraction_status === 'verified' ? 'green' : reportGroup(report.extraction_status) === 'pending' ? 'gray' : 'yellow') as any}>{EXTRACTION_LABELS[report.read_state === 'unread' ? 'unread' : report.extraction_status] || report.extraction_status}</Badge></td>
                         <td className="font-bold">{entryCounts.get(report.id) || 0}</td>
                         <td className="chevron"><ChevronRight size={18} aria-hidden="true" /></td>
                       </tr>
@@ -189,7 +190,7 @@ function IngestedReports() {
         {selected && (
           <>
             <DialogTitle id="report-dialog-title" sx={{ pr: 7, pb: 1 }}>
-              <span className="block text-xs font-black uppercase tracking-[0.16em] text-[#176b2b]">Committee report · {EXTRACTION_LABELS[selected.extraction_status] || selected.extraction_status}</span>
+              <span className="block text-xs font-black uppercase tracking-[0.16em] text-[#176b2b]">Committee report · {EXTRACTION_LABELS[selected.read_state === 'unread' ? 'unread' : selected.extraction_status] || selected.extraction_status}</span>
               <span className="block text-xl font-black text-[#182020] mt-1">{reportName(selected)}</span>
               <IconButton onClick={() => setSelectedId(null)} aria-label="Close" sx={{ position: 'absolute', right: 12, top: 12 }}><X size={20} /></IconButton>
             </DialogTitle>

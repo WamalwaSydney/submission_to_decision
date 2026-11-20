@@ -1553,8 +1553,23 @@ async def _upsert_report(conn, row: dict) -> bool:
     """Insert or update one report. Returns True if a new row was inserted."""
     is_new = False
     bill_id = await resolve_report_bill(conn, row)
-    existing = (await conn.execute(text("SELECT id FROM committee_reports WHERE source_url=:source_url AND committee_url=:committee_url"), {"source_url": row["source_url"], "committee_url": row["committee_url"]})).first()
+    existing = (await conn.execute(text("SELECT id FROM committee_reports WHERE source_url=:source_url AND committee_url=:committee_url AND is_simulated=false"), {"source_url": row["source_url"], "committee_url": row["committee_url"]})).first()
     params = {**row, "bill_ref": bill_id, "source_document_ref": row["source_url"], "date_tabled": row["date_tabled"] or date.today(), "extraction_status": "pending", "ocr_used": False, "is_simulated": False}
+    if not existing:
+        # The same PDF found through another committee page (e.g. ".../index.php/..." or an older committee URL) is the
+        # same report: update that one, and keep its committee link, rather than adding a duplicate.
+        if bill_id is not None:
+            same_pdf = (await conn.execute(text(
+                "SELECT id FROM committee_reports WHERE source_url=:source_url AND is_simulated=false "
+                "AND (bill_ref=:bill_ref OR bill_ref IS NULL) ORDER BY bill_ref IS NULL LIMIT 1"),
+                {"source_url": row["source_url"], "bill_ref": bill_id})).first()
+        else:
+            same_pdf = (await conn.execute(text(
+                "SELECT id FROM committee_reports WHERE source_url=:source_url AND is_simulated=false LIMIT 1"),
+                {"source_url": row["source_url"]})).first()
+        if same_pdf:
+            await conn.execute(text("""UPDATE committee_reports SET bill_ref=COALESCE(bill_ref, :bill_ref),institution=:institution,date_tabled=:date_tabled,committee_name=COALESCE(committee_name, :committee_name),title=:title,bill_house=:bill_house,bill_number=:bill_number,bill_year=:bill_year WHERE id=:id"""), {**params, "id": same_pdf[0]})
+            return False
     if existing:
         await conn.execute(text("""UPDATE committee_reports SET bill_ref=COALESCE(:bill_ref, bill_ref),institution=:institution,date_tabled=:date_tabled,source_document_ref=:source_document_ref,committee_name=:committee_name,committee_url=:committee_url,title=:title,bill_house=:bill_house,bill_number=:bill_number,bill_year=:bill_year,source_url=:source_url,is_simulated=false WHERE id=:id"""), {**params, "id": existing[0]})
         report_id = existing[0]

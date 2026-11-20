@@ -456,6 +456,10 @@ def report_to_dict(report: CommitteeReport, exclude=frozenset()) -> dict:
         ("Official Parliament source verified" if parliament else "Official county assembly source verified")
         if official_source else "Source not verified as an official Parliament or county assembly site"
     )
+    # needs_review is not an approval step: matching never waits for it. It means the PDF was read only in part
+    # (some scanned pages failed; what was read is matched), or could not be read at all (nothing to match).
+    if report.extraction_status == "needs_review":
+        data["read_state"] = "partial" if (report.extracted_text or "").strip() else "unread"
     return data
 
 
@@ -832,7 +836,7 @@ async def report_submission_totals(db: AsyncSession, report_ids) -> dict:
     submissions += len(parsed)
     decisions += len(parsed)
     reports_counted += len({report_ref for report_ref, _ in parsed})
-    sealed = (await db.execute(select(func.count()).select_from(ReportRecord))).scalar_one()
+    sealed = (await db.execute(select(func.count()).select_from(ReportRecord).where(ReportRecord.report_ref.in_(ids)))).scalar_one()
     return {"report_submissions": submissions, "report_decisions": decisions, "reports_with_submissions": reports_counted, "records_sealed": sealed}
 
 

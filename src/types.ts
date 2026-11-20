@@ -146,6 +146,8 @@ export interface ParticipationReceipt {
 
 export interface CommitteeReport {
   id: string;
+  /** For a needs_review report: read in part (what was read is matched), or not read at all. */
+  read_state?: 'partial' | 'unread';
   bill_ref: string;
   institution: Institution;
   date_tabled: string;

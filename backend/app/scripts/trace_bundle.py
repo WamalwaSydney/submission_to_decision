@@ -136,9 +136,13 @@ def _when(value):
 
 async def _import_report(db, item: dict, ids: dict[str, str], replace: bool, counts: dict) -> None:
     bill = await find_bill(db, item["bill"])
-    query = select(CommitteeReport).where(CommitteeReport.source_url == item["source_url"])
-    query = query.where(CommitteeReport.committee_url == item["committee_url"]) if item["committee_url"] else query.where(CommitteeReport.committee_url.is_(None))
-    report = (await db.execute(query)).scalars().first() or await db.get(CommitteeReport, uuid.UUID(item["id"]))
+    query = select(CommitteeReport).where(CommitteeReport.source_url == item["source_url"], CommitteeReport.is_simulated.is_(False))
+    exact = query.where(CommitteeReport.committee_url == item["committee_url"]) if item["committee_url"] else query.where(CommitteeReport.committee_url.is_(None))
+    # The same PDF on the same bill is the same report, even when found through another committee page.
+    same_pdf = query.where(CommitteeReport.bill_ref == bill.id) if bill else None
+    report = ((await db.execute(exact)).scalars().first()
+              or ((await db.execute(same_pdf)).scalars().first() if same_pdf is not None else None)
+              or await db.get(CommitteeReport, uuid.UUID(item["id"])))
     if report is None:
         report = CommitteeReport(id=uuid.UUID(item["id"]), is_simulated=False, date_tabled=date.fromisoformat(item["date_tabled"]),
                                  **{f: item[f] for f in REPORT_FIELDS})

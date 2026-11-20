@@ -359,7 +359,7 @@ async def upsert_county_reports(conn, county: County, rows: list[dict]) -> tuple
         bill_id = await resolve_county_report_bill(conn, county, row)
         linked += bill_id is not None
         params = {**row, "bill_ref": bill_id, "date_tabled": row["date_tabled"] or date.today()}
-        existing = (await conn.execute(text("SELECT id FROM committee_reports WHERE source_url=:source_url"), {"source_url": row["source_url"]})).first()
+        existing = (await conn.execute(text("SELECT id FROM committee_reports WHERE source_url=:source_url ORDER BY is_simulated, id LIMIT 1"), {"source_url": row["source_url"]})).first()
         if existing:
             # Never drop a link a person or an earlier sync made.
             await conn.execute(text("""UPDATE committee_reports SET bill_ref=COALESCE(bill_ref, :bill_ref), title=:title,

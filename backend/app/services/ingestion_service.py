@@ -33,7 +33,7 @@ _report_extraction_lock = asyncio.Lock()
 PDFTOTEXT_TIMEOUT = int(os.getenv("PDFTOTEXT_TIMEOUT", "120"))
 PDFINFO_TIMEOUT = int(os.getenv("PDFINFO_TIMEOUT", "30"))
 PDF_DOWNLOAD_TOTAL_TIMEOUT = int(os.getenv("PDF_DOWNLOAD_TOTAL_TIMEOUT", "240"))
-PDF_MAX_BYTES = int(os.getenv("PDF_MAX_BYTES", str(35 * 1024 * 1024)))
+PDF_MAX_BYTES = int(os.getenv("PDF_MAX_BYTES", str(60 * 1024 * 1024)))  # streamed to disk, not held in memory
 
 # One modest pass is substantially faster and safer on a free Render instance
 # than retrying every page at three resolutions.
@@ -447,6 +447,7 @@ async def extract_pending_linked_reports(
     query = select(CommitteeReport.id).where(
         CommitteeReport.extraction_status.in_(["pending", "extracting"]),
         CommitteeReport.source_url.is_not(None),
+        CommitteeReport.is_simulated.is_(False),
     )
 
     if report_id is not None:

@@ -798,7 +798,9 @@ export function BillPage() {
               const extractionMessages: Record<string, string> = {
                 pending: 'PDF text extraction has not started yet.',
                 extracting: 'Reading the PDF to create reviewable report entries…',
-                needs_review: 'PDF extraction needs staff review before matching.',
+                needs_review: report.read_state === 'unread'
+                  ? 'The platform could not read this PDF automatically (for example, a very large or damaged file). It will be retried; nothing from it can be matched until it is read.'
+                  : `Some scanned pages could not be read. ${entriesCount ? `${entriesCount} entr${entriesCount === 1 ? 'y' : 'ies'} from the pages that were read ${entriesCount === 1 ? 'is' : 'are'} matched as usual.` : 'What was read is matched as usual.'}`,
                 extracted: entriesCount ? `${entriesCount} reviewable report entr${entriesCount === 1 ? 'y is' : 'ies are'} available.` : 'PDF text was extracted, but no reviewable entries were recognized.',
                 ocr_used: entriesCount ? `${entriesCount} reviewable entr${entriesCount === 1 ? 'y was' : 'ies were'} extracted using OCR.` : 'OCR completed, but no reviewable entries were recognized.',
                 verified: 'Report contents have been reviewed and verified.',

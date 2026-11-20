@@ -36,6 +36,7 @@ async def process_pending_reports(limit: int = BILLS_PER_RUN) -> int:
                 CommitteeReport.extraction_status == "pending",
                 CommitteeReport.source_url.is_not(None),
                 CommitteeReport.bill_ref.is_not(None),
+                CommitteeReport.is_simulated.is_(False),
             )
             .distinct()
             .limit(limit)
