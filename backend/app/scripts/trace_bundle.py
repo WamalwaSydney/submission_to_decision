@@ -37,6 +37,7 @@ from sqlalchemy import delete, func, select
 
 from app.database import async_session
 from app.models import ActTrace, CommitteeReport, HouseTrace, LegislativeItem, ReportAnalysis, ReportEntry, SubmissionMatch
+from app.services import report_record_service
 
 DEFAULT_FILE = Path("/app/var/trace_bundle.json.gz")
 VERSION = 1
@@ -235,6 +236,7 @@ async def import_(file: Path = DEFAULT_FILE, replace: bool = False) -> dict:
                 print(f"  FAILED {label}: {exc}", flush=True)
             if i % 50 == 0:
                 print(f"  {i}/{len(steps)}", flush=True)
+        counts["records_sealed"] = await report_record_service.seal_new_records(db)
     print(f"Imported {file}: {counts}", flush=True)
     return counts
 

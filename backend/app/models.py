@@ -1,6 +1,6 @@
 # Database Models
 
-from sqlalchemy import Column, String, Text, Boolean, Float, Date, DateTime, ForeignKey, ARRAY, JSON, Integer, BigInteger
+from sqlalchemy import Column, String, Text, Boolean, Float, Date, DateTime, ForeignKey, ARRAY, JSON, Integer, BigInteger, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -194,6 +194,35 @@ class ReportAnalysis(Base):
     submitters = Column(JSON)  # stakeholders the report says sent views, each name checked against the report text
     summary = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+class ReportRecord(Base):
+    """A submission a committee report records (a memorandum or hearing submission made to the committee directly),
+    sealed into the same hash chain as platform receipts.
+
+    Append-only. It proves the platform's copy of what the report records about the submission (who, what, the
+    committee's decision and reason, and the report file's SHA-256) has not changed since it was read. It does not
+    prove when the person made the submission: only the report knows that.
+    """
+    __tablename__ = "report_records"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    public_id = Column(String(20), unique=True, nullable=False)
+    report_ref = Column(UUID(as_uuid=True), ForeignKey("committee_reports.id"), nullable=False)
+    legislative_item_id = Column(UUID(as_uuid=True), ForeignKey("legislative_items.id"), nullable=False)
+    entry_key = Column(String(100), nullable=False)  # the report entry (or analysis item) it was read from
+    source = Column(String(20), nullable=False)  # "analysis" (AI reading of the report) or "parsed" (text reader)
+    stakeholder = Column(Text)
+    clause_ref = Column(String(255))
+    issue = Column(Text, nullable=False)
+    decision = Column(String(30), nullable=False)
+    reason = Column(Text)
+    report_sha256 = Column(String(64))
+    recorded_at = Column(DateTime(timezone=True), nullable=False)
+    hash = Column(String(64), nullable=False)
+    previous_hash = Column(String(64), nullable=False)
+    chain_sequence = Column(BigInteger, nullable=False, unique=True)
+    __table_args__ = (UniqueConstraint("report_ref", "entry_key", name="uq_report_record_entry"),)
+
 
 class SubmissionMatch(Base):
     __tablename__ = "submission_matches"

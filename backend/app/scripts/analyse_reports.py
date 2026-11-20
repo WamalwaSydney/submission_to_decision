@@ -19,7 +19,7 @@ from sqlalchemy import func, select
 from app.api.routes import PASSED_STAGES
 from app.database import async_session
 from app.models import CommitteeReport, LegislativeItem, ReportAnalysis, ReportEntry
-from app.services import llm_matching_service, report_analysis_service
+from app.services import llm_matching_service, report_analysis_service, report_record_service
 
 
 async def names(db) -> None:
@@ -86,6 +86,8 @@ async def run(args: argparse.Namespace) -> None:
                 print(f"  FAILED {identifier}: {exc}", flush=True)
                 continue
             print(f"  {identifier}: {found} submissions in {entries} entries · {counts}", flush=True)
+        sealed = await report_record_service.seal_new_records(db)
+        print(f"Sealed {sealed} report record(s) into the hash chain.", flush=True)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])

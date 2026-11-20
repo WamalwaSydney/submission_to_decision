@@ -14,7 +14,7 @@ from urllib.parse import urlparse
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, UploadFile, File, Form
 from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel, EmailStr, Field
-from sqlalchemy import select, text, update, inspect as sa_inspect
+from sqlalchemy import func, select, text, update, inspect as sa_inspect
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db, async_session
@@ -23,10 +23,10 @@ from app.models import (
     ActTrace,
     User, Committee, LegislativeItem, ParticipationReceipt, Message,
     CommitteeReport, ReportEntry, SubmissionMatch, RepresentativeProfile, NoticeRecord,
-    ModerationAction, PasswordRecoveryCode, ReportAnalysis,
+    ModerationAction, PasswordRecoveryCode, ReportAnalysis, ReportRecord,
 )
 from app.services import receipt_service, linking_service, ingestion_service, storage_service, notification_service
-from app.services import submission_documents, report_analysis_service, llm_matching_service, act_trace_service, house_trace_service
+from app.services import submission_documents, report_analysis_service, llm_matching_service, act_trace_service, house_trace_service, report_record_service
 from app.participation import participation_window, stage_from_notices
 from app.submission_stage import STAGES, submission_stage
 from app.audit import record_audit
@@ -813,7 +813,7 @@ async def report_submission_totals(db: AsyncSession, report_ids) -> dict:
     """
     ids = list(report_ids)
     if not ids:
-        return {"report_submissions": 0, "report_decisions": 0, "reports_with_submissions": 0}
+        return {"report_submissions": 0, "report_decisions": 0, "reports_with_submissions": 0, "records_sealed": 0}
     submissions = decisions = reports_counted = 0
     analysed = set()
     for report_ref, items in (await db.execute(select(ReportAnalysis.report_ref, ReportAnalysis.items).where(ReportAnalysis.report_ref.in_(ids)))).all():
@@ -822,14 +822,18 @@ async def report_submission_totals(db: AsyncSession, report_ids) -> dict:
         submissions += len(items)
         decisions += sum(1 for item in items if (item or {}).get("decision") in report_analysis_service.DECISIONS)
         reports_counted += bool(items)
+    # Same rule as the hash chain (report_record_service): without an AI reading, only reports a Clerk's Office
+    # uploaded count their text-reader entries.
+    uploaded = set((await db.execute(select(CommitteeReport.id).where(CommitteeReport.id.in_(ids), CommitteeReport.uploaded_by.is_not(None)))).scalars())
     parsed = (await db.execute(
         select(ReportEntry.report_ref, ReportEntry.id)
-        .where(ReportEntry.report_ref.in_([i for i in ids if i not in analysed]), ReportEntry.treatment.in_(CLASSIFIED_TREATMENTS))
+        .where(ReportEntry.report_ref.in_([i for i in ids if i not in analysed and i in uploaded]), ReportEntry.treatment.in_(CLASSIFIED_TREATMENTS))
     )).all()
     submissions += len(parsed)
     decisions += len(parsed)
     reports_counted += len({report_ref for report_ref, _ in parsed})
-    return {"report_submissions": submissions, "report_decisions": decisions, "reports_with_submissions": reports_counted}
+    sealed = (await db.execute(select(func.count()).select_from(ReportRecord))).scalar_one()
+    return {"report_submissions": submissions, "report_decisions": decisions, "reports_with_submissions": reports_counted, "records_sealed": sealed}
 
 
 @router.get("/bootstrap")
@@ -921,11 +925,19 @@ async def bill_participation_summary(bill_id: UUID, db: AsyncSession = Depends(g
         raise HTTPException(status_code=404, detail="Bill not found")
     reports = (await db.execute(select(CommitteeReport.id).where(CommitteeReport.bill_ref == bill.id, CommitteeReport.is_simulated.is_(False)))).scalars().all()
     analyses = await report_analysis_service.analyses_for_bills(db, [bill.id])
+    pairs = analyses.get(bill.id, [])
+    combined = report_analysis_service.combine(pairs)
+    if combined:
+        # Each submission's report record in the hash chain (REC-XXXXXX), once sealed.
+        sealed = await report_record_service.record_ids_by_key(db, [report.id for report, _ in pairs])
+        keys = [(str(report.id), key) for report, analysis in pairs for key in report_record_service.item_keys(analysis.items)]
+        for item, (report_id, key) in zip(combined["items"], keys):
+            item["record_id"] = sealed.get((report_id, key)) if key else None
     return {
         "bill_id": str(bill.id),
         "platform": (await _platform_counts(db, [bill.id]))[bill.id],
         "reports": len(reports),
-        "report_analysis": report_analysis_service.combine(analyses.get(bill.id, [])),
+        "report_analysis": combined,
         "final_act": act_trace_service.to_public(await act_trace_service.get_trace(db, bill.id)),
         "house": house_trace_service.to_public(await house_trace_service.get_trace(db, bill.id)),
         "platform_links": await platform_links(db, bill.id),
@@ -1148,7 +1160,8 @@ async def bill_flow(
         status = stages[receipt.id]
         submissions.append({"public_id": receipt_service.stable_id_of(receipt), "timestamp": receipt.timestamp, "clause_ref": receipt.clause_ref, "status": status, "match_percentage": round(match.confidence_score * 100, 1) if match else None, "match_decision": match.reviewer_decision if match else None, "reason": entry.stated_reason if entry and confirmed_match else (match.reviewer_reason if match and match.reviewer_decision == "rejected" else None)})
     flow_notices = await notices_by_bill(db, [bill.id])
-    return {"bill": bill_with_participation(to_dict(bill), flow_notices.get(bill.id, [])), "flow": [{"stage": h.get("stage"), "date": h.get("date"), "note": h.get("note")} for h in (bill.status_history or [])], "reports": [report_to_dict(r, exclude={"extracted_text"}) for r in reports], "report_entries": [to_dict(e) for e in entries], "submissions": submissions}
+    return {"bill": bill_with_participation(to_dict(bill), flow_notices.get(bill.id, [])), "flow": [{"stage": h.get("stage"), "date": h.get("date"), "note": h.get("note")} for h in (bill.status_history or [])], "reports": [report_to_dict(r, exclude={"extracted_text"}) for r in reports], "report_entries": [to_dict(e) for e in entries], "submissions": submissions,
+            "record_ids": {f"{ref}:{key}": public_id for (ref, key), public_id in (await report_record_service.record_ids_by_key(db, [r.id for r in reports])).items()}}
 
 # ============ Messages ============
 
@@ -1498,6 +1511,30 @@ async def download_receipt_document(
 @router.get("/receipts/verify")
 async def verify_chain(db: AsyncSession = Depends(get_db)):
     return await receipt_service.verify_chain(db)
+
+
+@router.get("/records/{public_id}")
+async def get_report_record(public_id: str, db: AsyncSession = Depends(get_db)):
+    """A submission a committee report records, as sealed in the hash chain, with its check."""
+    record = (await db.execute(select(ReportRecord).where(ReportRecord.public_id == public_id.strip().upper()))).scalar_one_or_none()
+    if record is None:
+        raise HTTPException(status_code=404, detail="Record not found")
+    report = await db.get(CommitteeReport, record.report_ref)
+    bill = await db.get(LegislativeItem, record.legislative_item_id)
+    return {
+        "record": to_dict(record),
+        "bill": {"id": str(bill.id), "title": bill.title, "identifier": bill.identifier, "institution": bill.institution} if bill else None,
+        "report": report_to_dict(report, exclude={"extracted_text"}) if report else None,
+        "verification": await receipt_service.verify_record(db, record.public_id),
+    }
+
+
+@router.get("/records/{public_id}/verify")
+async def verify_one_record(public_id: str, db: AsyncSession = Depends(get_db)):
+    result = await receipt_service.verify_record(db, public_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Record not found")
+    return result
 
 
 @router.get("/receipts/{public_id}/verify")

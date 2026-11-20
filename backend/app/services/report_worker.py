@@ -15,7 +15,7 @@ from sqlalchemy import select
 
 from app.database import async_session
 from app.models import CommitteeReport
-from app.services import ingestion_service, linking_service
+from app.services import ingestion_service, linking_service, report_record_service
 
 log = logging.getLogger(__name__)
 
@@ -47,6 +47,12 @@ async def process_pending_reports(limit: int = BILLS_PER_RUN) -> int:
                 await linking_service.propose_matches(db, bill_id, use_llm=True)
         except Exception:
             log.exception("Report processing failed for bill %s", bill_id)
+    # Seal what newly read reports record into the hash chain (a no-op when nothing is new).
+    try:
+        async with async_session() as db:
+            await report_record_service.seal_new_records(db)
+    except Exception:
+        log.exception("Sealing report records failed")
     return len(bill_ids)
 
 

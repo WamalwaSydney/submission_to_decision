@@ -138,7 +138,7 @@ function VisitorHome() {
       <div className="stat-tiles">
         <Tile tone="green" value={state.isLoading ? '…' : open.length} label="Bills open for views" note="Committees are collecting public views on these now." to="/bills?open=1" />
         <Tile tone="red" value={state.isLoading ? '…' : count(platformViews + reportViews)} label="Views submitted"
-          note={`${count(platformViews)} sent on this platform, each with a tamper-evident receipt; ${count(reportViews)} recorded in committee reports.`} to="/bills" />
+          note={`${count(platformViews)} sent on this platform and ${count(reportViews)} recorded in committee reports, ${state.reportTotals?.records_sealed === reportViews ? 'all' : `${count(state.reportTotals?.records_sealed || 0)} of them`} sealed in the tamper-evident hash chain.`} to="/bills" />
         <Tile tone="black" value={state.isLoading ? '…' : count(platformResponses + reportResponses)} label="Committee responses traced"
           note={`${count(reportResponses)} decisions recorded in committee reports; ${count(platformResponses)} platform views matched to the report by a moderator.`} />
       </div>

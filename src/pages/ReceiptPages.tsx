@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useSearchParams, Link } from 'react-router-dom';
+import { useSearchParams, useParams, Link } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import { verifyChain } from '../utils/hashChain';
 import { api } from '../api/endpoints';
@@ -10,9 +10,10 @@ import {
   RefreshCw, Copy, ExternalLink, Flag, Printer, MessageCircle, Smartphone
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Card, Badge, Label, InputField, DisclaimerBox, InfoBox, StatusBadge } from '../components/UI';
+import { Card, Badge, Label, InputField, DisclaimerBox, InfoBox, StatusBadge, Pager, usePaged } from '../components/UI';
 import { confidenceClasses, confidenceBarClass, confidenceLabel } from '../utils/confidence';
 import { copyText } from '../utils/clipboard';
+import { reportDocumentHref } from '../utils/reportLinks';
 import QRCode from 'qrcode';
 import { EditBlock, EditSubmissionAction, SubmissionProgress } from '../components/Participation';
 import { ReceiptTraceTimeline } from '../components/ParticipationSummary';
@@ -464,12 +465,13 @@ export function ReceiptLookupPage() {
   );
 }
 
-function ReceiptCheck({ check }: { check: ReceiptVerification }) {
+export function ReceiptCheck({ check }: { check: ReceiptVerification }) {
+  const noun = check.kind === 'record' ? 'Report record' : 'Receipt';
   return (
     <div className={`notice-box ${check.valid ? 'is-info' : 'is-error'}`} role="status">
-      <strong>{check.valid ? `Receipt ${check.receipt_id} is intact.` : `Receipt ${check.receipt_id} failed verification.`}</strong>{' '}
+      <strong>{check.valid ? `${noun} ${check.receipt_id} is intact.` : `${noun} ${check.receipt_id} failed verification.`}</strong>{' '}
       {check.valid
-        ? `Its hash matches its content, it links to the receipt before it, and it is position ${check.position} in the chain.${check.superseded ? ' This is an earlier version of an edited submission.' : ''}`
+        ? `Its hash matches its content, it links to the link before it, and it is position ${check.position.toLocaleString()} in the chain.${check.superseded ? ' This is an earlier version of an edited submission.' : ''}`
         : check.problems.join(' ')}
     </div>
   );
@@ -485,7 +487,7 @@ export function ReceiptVerifyPage() {
     if (!singleId.trim()) return;
     setSingleChecking(true); setSingleError(''); setSingleCheck(null);
     try {
-      setSingleCheck(await api.verifyReceipt(singleId));
+      setSingleCheck(/^\s*REC-/i.test(singleId) ? await api.verifyRecord(singleId) : await api.verifyReceipt(singleId));
     } catch (error) {
       setSingleError(error instanceof Error ? error.message : 'Could not check this receipt.');
     } finally {
@@ -493,6 +495,9 @@ export function ReceiptVerifyPage() {
     }
   };
   const [result, setResult] = useState<ChainVerificationResult | null>(null);
+  const [brokenOnly, setBrokenOnly] = useState(false);
+  const chainRows = result ? (brokenOnly ? result.details.filter(d => !d.valid) : result.details) : [];
+  const chainPages = usePaged(chainRows, 50, `${result?.totalChecked}|${brokenOnly}`);
   const [verifying, setVerifying] = useState(false);
   const [verificationError, setVerificationError] = useState('');
 
@@ -504,10 +509,13 @@ export function ReceiptVerifyPage() {
       setResult({
         valid: remote.valid,
         totalChecked: remote.total_checked,
+        receiptsChecked: remote.receipts_checked,
+        recordsChecked: remote.records_checked,
         brokenCount: remote.broken_count,
         firstBrokenIndex: remote.first_broken_index ?? undefined,
         details: (remote.details || []).map((item: any) => ({
           index: item.index,
+          kind: item.kind,
           receiptId: item.receipt_id,
           valid: item.valid,
           expectedHash: item.expected_hash,
@@ -536,8 +544,8 @@ export function ReceiptVerifyPage() {
           Verify <span className="gradient-text">Hash Chain</span>
         </h1>
         <p className="text-lg text-surface-600 leading-relaxed">
-          Verify the integrity of every receipt in the hash chain. Each link is recomputed and checked — so any tampering,
-          anywhere in history, breaks the chain.
+          Verify every link in the hash chain: receipts for views sent on this platform, and records of the submissions
+          committee reports list. Each link is recomputed and checked, so any tampering, anywhere in history, breaks the chain.
         </p>
       </div>
 
@@ -547,8 +555,10 @@ export function ReceiptVerifyPage() {
             <Shield className="h-5 w-5" />
           </div>
           <p className="text-sm font-semibold leading-relaxed">
-            <strong className="font-black">How this works:</strong> the platform recomputes every receipt's SHA-256 hash from its content and checks that each one points to the receipt before it.
-            This includes earlier versions of edited submissions, which stay on the record. A single changed word, swapped document or deleted receipt shows up as a broken link.
+            <strong className="font-black">How this works:</strong> the platform recomputes every link's SHA-256 hash from its content and checks that each one points to the link before it.
+            A <strong>receipt</strong> (RCT-) covers a view sent on this platform, including earlier versions of edited submissions. A <strong>report record</strong> (REC-) covers a submission a
+            committee report lists, made to the committee directly: what the report says about it and the report file's own SHA-256. It proves the platform's copy has not changed since the report was read,
+            not when the person made the submission. A single changed word, swapped document or deleted link shows up as a broken link.
           </p>
         </div>
       </InfoBox>
@@ -566,10 +576,10 @@ export function ReceiptVerifyPage() {
               <p className="text-xs font-black uppercase tracking-[0.18em] text-primary-600 mb-2">Current Chain</p>
               <h2 className="text-3xl md:text-4xl font-black text-surface-900 tracking-tight mb-1">
                 {result ? result.totalChecked.toLocaleString() : 'Every'}
-                <span className="text-surface-400 font-bold"> {result ? 'receipts checked' : 'receipt, every version'}</span>
+                <span className="text-surface-400 font-bold"> {result ? 'links checked' : 'receipt and report record'}</span>
               </h2>
               <p className="text-sm text-surface-600 font-medium leading-relaxed max-w-xl">
-                Each receipt's hash is computed from its content, timestamp, and the previous receipt's hash.
+                Each link's hash is computed from its content and the previous link's hash.
                 Any modification — anywhere — breaks the chain.
               </p>
             </div>
@@ -593,12 +603,12 @@ export function ReceiptVerifyPage() {
       </Card>
 
       <Card className="!p-7 md:!p-8" hover={false}>
-        <h2 className="text-xl font-black text-[#182020] mb-1">Check one receipt</h2>
-        <p className="text-sm text-[#596767] mb-4">Enter a receipt ID to confirm it has not been changed and is still linked into the chain.</p>
+        <h2 className="text-xl font-black text-[#182020] mb-1">Check one receipt or report record</h2>
+        <p className="text-sm text-[#596767] mb-4">Enter a receipt ID (RCT-) or report record ID (REC-) to confirm it has not been changed and is still linked into the chain.</p>
         <form onSubmit={checkOne} className="flex flex-col sm:flex-row gap-3">
           <label htmlFor="verify-one" className="sr-only">Receipt ID</label>
-          <input id="verify-one" value={singleId} onChange={e => setSingleId(e.target.value)} placeholder="e.g. RCT-KN8X2M" className="input-field font-mono sm:max-w-sm" />
-          <button type="submit" disabled={singleChecking || !singleId.trim()} className="action-button is-primary">{singleChecking ? 'Checking…' : 'Check receipt'}</button>
+          <input id="verify-one" value={singleId} onChange={e => setSingleId(e.target.value)} placeholder="e.g. RCT-KN8X2M or REC-D6L6W2" className="input-field font-mono sm:max-w-sm" />
+          <button type="submit" disabled={singleChecking || !singleId.trim()} className="action-button is-primary">{singleChecking ? 'Checking…' : 'Check'}</button>
         </form>
         {singleCheck && <div className="mt-4"><ReceiptCheck check={singleCheck} /></div>}
         {singleError && <p role="alert" className="notice-box is-error mt-4">{singleError}</p>}
@@ -656,9 +666,9 @@ export function ReceiptVerifyPage() {
                   <p className={`text-lg font-semibold leading-relaxed ${
                     result.valid ? 'text-accent-700/90' : 'text-red-700/90'
                   }`}>
-                    {result.totalChecked === 0 ? 'No receipts have been issued yet.' : `${result.totalChecked} receipts checked${result.brokenCount ? `, ${result.brokenCount} broken` : ''}.`}
+                    {result.totalChecked === 0 ? 'No receipts have been issued yet.' : `${result.totalChecked.toLocaleString()} links checked (${(result.receiptsChecked ?? result.totalChecked).toLocaleString()} platform receipts, ${(result.recordsChecked ?? 0).toLocaleString()} report records)${result.brokenCount ? `, ${result.brokenCount} broken` : ''}.`}
                     {result.firstBrokenIndex !== undefined && (
-                      <> First broken link at position <span className="font-black bg-white/80 px-2 py-0.5 rounded-md">{result.firstBrokenIndex + 1}</span> (receipt{' '}
+                      <> First broken link at position <span className="font-black bg-white/80 px-2 py-0.5 rounded-md">{result.firstBrokenIndex + 1}</span> ({result.details[result.firstBrokenIndex].kind === 'record' ? 'report record' : 'receipt'}{' '}
                         <span className="font-mono font-bold">{result.details[result.firstBrokenIndex].receiptId}</span>).</>
                     )}
                     {result.valid && result.totalChecked > 0 && (
@@ -679,7 +689,8 @@ export function ReceiptVerifyPage() {
                   </div>
                   <h3 className="text-2xl font-black text-surface-900 tracking-tight">Per-link verification</h3>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-3 flex-wrap">
+                  {!result.valid && <label className="flex items-center gap-1.5 text-xs font-bold text-surface-700"><input type="checkbox" checked={brokenOnly} onChange={e => setBrokenOnly(e.target.checked)} /> Broken links only</label>}
                   <div className="flex items-center gap-1.5 text-xs font-semibold">
                     <span className="w-2.5 h-2.5 rounded-full bg-accent-500" /> Valid
                   </div>
@@ -693,16 +704,18 @@ export function ReceiptVerifyPage() {
                   <thead>
                     <tr>
                       <th>#</th>
-                      <th>Receipt ID</th>
+                      <th>ID</th>
+                      <th>Type</th>
                       <th>Status</th>
                       <th>Hash / problem</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {result.details.map((d, i) => (
-                      <tr key={i}>
-                        <td className="font-black text-surface-700">{i + 1}</td>
-                        <td className="font-mono font-bold text-xs text-surface-800">{d.receiptId}</td>
+                    {chainPages.rows.map(d => (
+                      <tr key={d.index}>
+                        <td className="font-black text-surface-700">{d.index + 1}</td>
+                        <td className="font-mono font-bold text-xs text-surface-800">{d.kind === 'record' ? <Link to={`/records/${d.receiptId}`} className="hover:underline">{d.receiptId}</Link> : d.receiptId}</td>
+                        <td className="text-xs font-semibold text-surface-600">{d.kind === 'record' ? 'Report record' : 'Platform receipt'}</td>
                         <td>
                           {d.valid ? (
                             <Badge variant="green" showIcon>Valid</Badge>
@@ -719,6 +732,7 @@ export function ReceiptVerifyPage() {
                   </tbody>
                 </table>
               </div>
+              <Pager page={chainPages.page} pageCount={chainPages.pageCount} onChange={chainPages.setPage} label="Chain pages" summary={chainPages.summary} className="mt-4" />
             </Card>
 
             {/* Back link */}
@@ -728,6 +742,55 @@ export function ReceiptVerifyPage() {
           </motion.div>
         )}
       </AnimatePresence>
+    </div>
+  );
+}
+
+const RECORD_DECISION: Record<string, string> = { adopted: 'adopted', amended: 'amended', rejected: 'rejected', 'not addressed': 'not_addressed' };
+
+/** A submission a committee report records, as sealed in the hash chain (REC-XXXXXX). */
+export function ReportRecordPage() {
+  const { id = '' } = useParams();
+  const [data, setData] = useState<any>(null);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    setData(null); setError('');
+    api.reportRecord(id).then(setData).catch(e => setError(e instanceof Error ? e.message : 'Record not found'));
+  }, [id]);
+  if (error) return <Card className="!p-8" hover={false}><h1 className="text-2xl font-black m-0">Record not found</h1><p className="text-surface-600 mt-2">No report record has the ID {id.toUpperCase()}. <Link to="/receipt-verify" className="font-bold text-primary-700 underline">Check an ID</Link></p></Card>;
+  if (!data) return <Card className="!p-8" hover={false}><p className="m-0 text-surface-600">Loading the record…</p></Card>;
+  const { record, bill, report, verification } = data;
+  const reportHref = report ? reportDocumentHref(report) : undefined;
+  const reportName = report ? (report.title || report.provenance?.original_filename || 'Committee report') : 'Committee report';
+  const row = (label: string, value: React.ReactNode) => <div className="grid sm:grid-cols-[180px_minmax(0,1fr)] gap-1 sm:gap-4 py-3 border-b border-[#ece8df] last:border-0"><dt className="text-xs font-black uppercase tracking-wide text-surface-500">{label}</dt><dd className="m-0 text-sm text-surface-800 break-words">{value}</dd></div>;
+  return (
+    <div className="space-y-6 max-w-4xl">
+      <div>
+        <p className="text-xs font-black uppercase tracking-[0.18em] text-primary-600 m-0">Report record · hash chain</p>
+        <h1 className="text-3xl md:text-4xl font-black tracking-tight text-surface-900 font-mono mt-2 mb-2">{record.public_id}</h1>
+        <p className="text-surface-600 m-0">A submission made to the committee directly, as its report records it. {bill && <>On <Link to={`/bills/${bill.id}`} className="font-bold text-primary-700 underline">{bill.title}</Link>.</>}</p>
+      </div>
+      {verification && <ReceiptCheck check={verification} />}
+      <Card className="!p-6 md:!p-8" hover={false}>
+        <dl className="m-0">
+          {row('Submitted by', record.stakeholder && record.stakeholder !== 'Not named' ? record.stakeholder : 'Not named in the report')}
+          {row('Clause', record.clause_ref || 'Whole bill')}
+          {row('What they asked for', record.issue)}
+          {row('Committee decision', <StatusBadge status={RECORD_DECISION[record.decision] || record.decision} />)}
+          {row("Committee's reason", record.reason || 'The report gives no reason for this item.')}
+          {row('Report', <>{reportHref ? <a href={reportHref} target="_blank" rel="noreferrer" className="font-bold text-primary-700 underline">{reportName}</a> : reportName}{report?.date_tabled ? ` · tabled ${new Date(`${report.date_tabled}T00:00:00`).toLocaleDateString('en-KE', { day: 'numeric', month: 'short', year: 'numeric' })}` : ''}</>)}
+          {row('Report file SHA-256', <span className="font-mono text-xs">{record.report_sha256 || 'Not recorded'}</span>)}
+          {row('Read from', record.source === 'analysis' ? 'The AI reading of the report (Google Gemini), wording quoted from the report' : "The report's text, read by the platform")}
+          {row('Sealed', new Date(record.recorded_at).toLocaleString('en-KE'))}
+          {row('Hash', <span className="font-mono text-xs">{record.hash}</span>)}
+          {row('Previous link', <span className="font-mono text-xs">{record.previous_hash}</span>)}
+        </dl>
+      </Card>
+      <p className="notice-box is-info !m-0">This record proves the platform's copy of what the report says about this submission has not changed since it was sealed into the chain. It does not prove when the person made the submission, or that the reading is right: open the report (its SHA-256 identifies the exact file) to check.</p>
+      <div className="flex flex-wrap gap-3">
+        <Link to="/receipt-verify" className="btn-secondary inline-flex"><Shield className="h-4 w-4" /> Verify Hash Chain</Link>
+        {bill && <Link to={`/bills/${bill.id}`} className="btn-secondary inline-flex"><FileText className="h-4 w-4" /> View the bill</Link>}
+      </div>
     </div>
   );
 }

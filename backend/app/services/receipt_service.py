@@ -87,13 +87,45 @@ def compute_receipt_hash(receipt_data: dict) -> str:
     content = canonical_json(payload)
     return hashlib.sha256(content.encode()).hexdigest()
 
+# The chain runs through two tables: platform receipts and the submissions committee reports record. They share
+# one sequence and one head, so each link (of either kind) points to the link before it.
+CHAIN_LINKS = ("(SELECT id, hash, previous_hash, chain_sequence FROM participation_receipts "
+               "UNION ALL SELECT id, hash, previous_hash, chain_sequence FROM report_records) AS links")
+
+
 async def get_chain_head(db: AsyncSession) -> str:
-    """Get the hash of the most recent receipt (chain head)."""
-    result = await db.execute(
-        text("SELECT hash FROM participation_receipts ORDER BY chain_sequence DESC NULLS LAST, timestamp DESC, id DESC LIMIT 1")
-    )
-    row = result.first()
+    """Get the hash of the most recent link in the chain (chain head)."""
+    row = (await db.execute(text(f"SELECT hash FROM {CHAIN_LINKS} ORDER BY chain_sequence DESC LIMIT 1"))).first()
     return row[0] if row else GENESIS_HASH
+
+
+async def next_chain_sequence(db: AsyncSession) -> int:
+    return int((await db.execute(text(f"SELECT COALESCE(MAX(chain_sequence), 0) + 1 FROM {CHAIN_LINKS}"))).scalar_one())
+
+
+async def lock_chain(db: AsyncSession) -> None:
+    """Serialize chain-head reads within the current transaction, so two writers never extend the same head."""
+    await db.execute(text("SELECT pg_advisory_xact_lock(hashtext('participation_receipts_chain'))"))
+
+
+def compute_record_hash(record) -> str:
+    """SHA-256 of a report record: what the report says about one submission, and the link before it."""
+    payload = {
+        "record_id": str(record["id"]),
+        "legislative_item_id": str(record["legislative_item_id"]),
+        "report_id": str(record["report_ref"]),
+        "report_sha256": record.get("report_sha256"),
+        "entry_key": record["entry_key"],
+        "source": record["source"],
+        "stakeholder": record.get("stakeholder"),
+        "clause_ref": record.get("clause_ref"),
+        "issue": record["issue"],
+        "decision": record["decision"],
+        "reason": record.get("reason"),
+        "recorded_at": record["recorded_at"].isoformat(),
+        "previous_hash": record["previous_hash"],
+    }
+    return hashlib.sha256(canonical_json(payload).encode()).hexdigest()
 
 async def create_receipt(
     db: AsyncSession,
@@ -112,10 +144,9 @@ async def create_receipt(
     # Serialize chain-head reads within the current transaction. Without this
     # lock, concurrent submissions could observe the same previous hash and
     # create competing branches.
-    await db.execute(text("SELECT pg_advisory_xact_lock(hashtext('participation_receipts_chain'))"))
+    await lock_chain(db)
     previous_hash = await get_chain_head(db)
-    sequence_result = await db.execute(text("SELECT COALESCE(MAX(chain_sequence), 0) + 1 FROM participation_receipts"))
-    chain_sequence = int(sequence_result.scalar_one())
+    chain_sequence = await next_chain_sequence(db)
     
     # Allocate the primary key before flush so the complete hash payload can
     # be computed before PostgreSQL validates the NOT NULL hash column.
@@ -200,6 +231,7 @@ def _check_link(row, expected_previous: str, expected_sequence: int, latest_revi
     if not sequence_ok:
         problems.append("The receipt is out of order in the chain.")
     return {
+        "kind": "receipt",
         "receipt_id": row.public_id,
         "valid": not problems,
         "content_matches": content_ok,
@@ -217,29 +249,91 @@ def _check_link(row, expected_previous: str, expected_sequence: int, latest_revi
     }
 
 
+def _check_record_link(row, expected_previous: str, expected_sequence: int) -> dict:
+    """Recompute one report record's hash and check its link to the link before it."""
+    expected_hash = compute_record_hash({**row._mapping, "previous_hash": expected_previous})
+    content_ok = row.hash == expected_hash
+    link_ok = row.previous_hash == expected_previous
+    sequence_ok = row.chain_sequence == expected_sequence
+    problems = []
+    if not content_ok:
+        problems.append("The record no longer matches its hash, so what it says the report records was changed after it was sealed.")
+    if not link_ok:
+        problems.append("The record does not point to the link before it in the chain.")
+    if not sequence_ok:
+        problems.append("The record is out of order in the chain.")
+    return {
+        "kind": "record",
+        "receipt_id": row.public_id,
+        "valid": not problems,
+        "content_matches": content_ok,
+        "link_matches": link_ok,
+        "expected_hash": expected_hash,
+        "actual_hash": row.hash,
+        "previous_hash": row.previous_hash,
+        "expected_previous_hash": expected_previous,
+        "sequence": row.chain_sequence,
+        "expected_sequence": expected_sequence,
+        "timestamp": row.recorded_at.isoformat(),
+        "superseded": False,
+        "problems": problems,
+    }
+
+
 async def verify_chain(db: AsyncSession) -> dict:
-    """Verify every receipt, including earlier versions of edited submissions."""
-    result = await db.execute(
+    """Verify every link: platform receipts (including earlier versions of edited submissions) and report records."""
+    receipts = (await db.execute(
         text("SELECT * FROM participation_receipts ORDER BY chain_sequence ASC NULLS LAST, timestamp ASC, id ASC")
-    )
-    receipts = result.fetchall()
+    )).fetchall()
+    records = (await db.execute(text("SELECT * FROM report_records ORDER BY chain_sequence ASC"))).fetchall()
     latest_revision: dict = {}
     for row in receipts:
         key = row.submission_ref or row.public_id
         latest_revision[key] = max(latest_revision.get(key, 0), row.revision or 1)
+    record_ids = {row.id for row in records}
+    links = sorted([*receipts, *records], key=lambda row: (row.chain_sequence is None, row.chain_sequence or 0))
     details = []
-    for i, row in enumerate(receipts):
-        expected_previous = GENESIS_HASH if i == 0 else receipts[i - 1].hash
-        details.append({"index": i, **_check_link(row, expected_previous, i + 1, latest_revision)})
+    for i, row in enumerate(links):
+        expected_previous = GENESIS_HASH if i == 0 else links[i - 1].hash
+        if row.id in record_ids:
+            check = _check_record_link(row, expected_previous, i + 1)
+        else:
+            check = _check_link(row, expected_previous, i + 1, latest_revision)
+        details.append({"index": i, **check})
     broken = [item["index"] for item in details if not item["valid"]]
     return {
         "valid": not broken,
-        "total_checked": len(receipts),
+        "total_checked": len(links),
+        "receipts_checked": len(receipts),
+        "records_checked": len(records),
         "broken_count": len(broken),
         "first_broken_index": broken[0] if broken else None,
-        "head_hash": receipts[-1].hash if receipts else GENESIS_HASH,
+        "head_hash": links[-1].hash if links else GENESIS_HASH,
         "details": details,
     }
+
+
+async def _neighbours(db: AsyncSession, sequence: int):
+    """A link's position in the chain, the hash of the link before it, and what the link after it points back to."""
+    position = (await db.execute(text(f"SELECT COUNT(*) FROM {CHAIN_LINKS} WHERE chain_sequence < :s"), {"s": sequence})).scalar_one() + 1
+    previous = (await db.execute(text(f"SELECT hash FROM {CHAIN_LINKS} WHERE chain_sequence < :s ORDER BY chain_sequence DESC LIMIT 1"), {"s": sequence})).first()
+    following = (await db.execute(text(f"SELECT previous_hash FROM {CHAIN_LINKS} WHERE chain_sequence > :s ORDER BY chain_sequence ASC LIMIT 1"), {"s": sequence})).first()
+    return position, (previous[0] if previous else None), (following[0] if following else None)
+
+
+async def verify_record(db: AsyncSession, public_id: str) -> Optional[dict]:
+    """Check one report record: its own hash, and its links to the chain on both sides."""
+    row = (await db.execute(text("SELECT * FROM report_records WHERE public_id = :p"), {"p": public_id.strip().upper()})).first()
+    if row is None:
+        return None
+    position, previous, following = await _neighbours(db, row.chain_sequence)
+    check = _check_record_link(row, previous or GENESIS_HASH, position)
+    check["next_links_back"] = following is None or following == row.hash
+    if not check["next_links_back"]:
+        check["valid"] = False
+        check["problems"].append("The next link in the chain does not point to this record.")
+    check["position"] = position
+    return check
 
 
 async def verify_receipt(db: AsyncSession, receipt_id: str) -> Optional[dict]:
@@ -252,22 +346,12 @@ async def verify_receipt(db: AsyncSession, receipt_id: str) -> Optional[dict]:
     )).first()
     if row is None:
         return None
-    position = (await db.execute(
-        text("SELECT COUNT(*) FROM participation_receipts WHERE chain_sequence < :sequence"), {"sequence": row.chain_sequence}
-    )).scalar_one() + 1
-    previous = (await db.execute(
-        text("SELECT hash FROM participation_receipts WHERE chain_sequence < :sequence ORDER BY chain_sequence DESC LIMIT 1"),
-        {"sequence": row.chain_sequence},
-    )).first()
-    following = (await db.execute(
-        text("SELECT previous_hash FROM participation_receipts WHERE chain_sequence > :sequence ORDER BY chain_sequence ASC LIMIT 1"),
-        {"sequence": row.chain_sequence},
-    )).first()
+    position, previous, following = await _neighbours(db, row.chain_sequence)
     newer = await has_newer_version(db, resolved)
-    check = _check_link(row, previous[0] if previous else GENESIS_HASH, position,
+    check = _check_link(row, previous or GENESIS_HASH, position,
                         {stable_id_of(resolved): resolved.revision + (1 if newer else 0)})
-    # The next receipt must point back at this one, or this one was replaced.
-    check["next_links_back"] = following is None or following[0] == row.hash
+    # The next link must point back at this one, or this one was replaced.
+    check["next_links_back"] = following is None or following == row.hash
     if not check["next_links_back"]:
         check["valid"] = False
         check["problems"].append("The next receipt in the chain does not point to this receipt.")

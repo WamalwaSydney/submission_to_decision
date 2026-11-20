@@ -233,11 +233,14 @@ export interface ChainVerificationResult {
   valid: boolean;
   firstBrokenIndex?: number;
   totalChecked: number;
+  receiptsChecked?: number;
+  recordsChecked?: number;
   brokenCount?: number;
-  details: { index: number; receiptId: string; valid: boolean; expectedHash: string; actualHash: string; problems?: string[]; superseded?: boolean }[];
+  details: { index: number; kind?: 'receipt' | 'record'; receiptId: string; valid: boolean; expectedHash: string; actualHash: string; problems?: string[]; superseded?: boolean }[];
 }
 
 export interface ReceiptVerification {
+  kind?: 'receipt' | 'record';
   receipt_id: string;
   valid: boolean;
   content_matches: boolean;

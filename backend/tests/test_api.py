@@ -60,7 +60,7 @@ async def db_session():
             CREATE OR REPLACE FUNCTION prevent_append_only_modification() RETURNS TRIGGER AS $$
             BEGIN RAISE EXCEPTION '% rows are append-only and cannot be modified or deleted', TG_TABLE_NAME; END;
             $$ LANGUAGE plpgsql"""))
-        for table, prefix in (("participation_receipts", "receipt"), ("audit_log", "audit")):
+        for table, prefix in (("participation_receipts", "receipt"), ("audit_log", "audit"), ("report_records", "record")):
             await conn.execute(text(f"CREATE TRIGGER trg_{prefix}_prevent_update BEFORE UPDATE ON {table} FOR EACH ROW EXECUTE FUNCTION prevent_append_only_modification()"))
             await conn.execute(text(f"CREATE TRIGGER trg_{prefix}_prevent_delete BEFORE DELETE ON {table} FOR EACH ROW EXECUTE FUNCTION prevent_append_only_modification()"))
 

@@ -80,6 +80,7 @@ function ItemDialog({ item, act, finalAct, house, houseTrace, submitters, receip
         <dl className="submission-detail-meta">
           <div><dt>Clause</dt><dd>{item.clause_ref || 'Whole bill'}</dd></div>
           <div><dt>Committee decision</dt><dd><DecisionBadge decision={item.decision} /></dd></div>
+          {item.record_id && <div><dt>Hash chain record</dt><dd><Link to={`/records/${item.record_id}`} className="font-mono font-bold underline">{item.record_id}</Link></dd></div>}
           {house && <div><dt>The House</dt><dd><HouseBadge item={house} /></dd></div>}
           {act && <div><dt>In the law</dt><dd><ActBadge status={act.status} /></dd></div>}
         </dl>
@@ -165,6 +166,7 @@ export function ReportSubmissionsTable({ items, finalAct, house, submitters, pla
                 <tr key={`${item.report_id}-${item.entry_id}`} tabIndex={0} onClick={open} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } }} aria-label={`Open submission by ${item.stakeholder}`}>
                   <td className={item.stakeholder === UNNAMED ? 'font-semibold text-[#687575] italic' : 'font-bold'}>
                     {stakeholderLabel(item.stakeholder)}
+                    {item.record_id && <span className="block mt-0.5 font-mono text-[11px] font-semibold text-[#687575]">{item.record_id}</span>}
                     {linksFor(item).length > 0 && <span className="block mt-1"><Badge variant="blue">Also sent on this platform</Badge></span>}
                   </td>
                   <td className="whitespace-nowrap">{item.clause_ref || '—'}</td>

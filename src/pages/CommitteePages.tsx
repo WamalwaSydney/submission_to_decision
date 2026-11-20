@@ -139,12 +139,13 @@ export function BillFlowPage() {
   const submissions: any[] = flow.submissions || [];
   const reports: any[] = flow.reports || [];
   const reportTitles = new Map(reports.map(r => [r.id, reportName(r)]));
-  // Submissions the committee report records: the AI reading of the report when there is one, otherwise the entries
-  // the text reader classified. Passages it could not classify are left out.
+  // Submissions the committee report records: the AI reading of the report when there is one, otherwise, for a report
+  // the Clerk's Office uploaded, the entries the text reader classified (the same rule as the hash chain).
   const analysed: ReportSubmissionItem[] = summary.items;
+  const uploaded = new Set(reports.filter(r => r.uploaded_by).map(r => r.id));
   const parsed: ReportSubmissionItem[] = (flow.report_entries || [])
-    .filter((e: any) => ENTRY_DECISION[e.treatment])
-    .map((e: any) => ({ entry_id: e.id, clause_ref: e.clause_ref, stakeholder: 'Not stated', issue: e.extracted_summary || '', decision: ENTRY_DECISION[e.treatment], reason: e.stated_reason || '', report_id: e.report_ref, report_title: reportTitles.get(e.report_ref) || 'Committee report' }));
+    .filter((e: any) => ENTRY_DECISION[e.treatment] && uploaded.has(e.report_ref))
+    .map((e: any) => ({ entry_id: e.id, clause_ref: e.clause_ref, stakeholder: 'Not stated', issue: e.extracted_summary || '', decision: ENTRY_DECISION[e.treatment], reason: e.stated_reason || '', report_id: e.report_ref, report_title: reportTitles.get(e.report_ref) || 'Committee report', record_id: flow.record_ids?.[`${e.report_ref}:${e.id}`] || null }));
   const reportItems = analysed.length ? analysed : parsed;
   const unclassified = (flow.report_entries || []).length - parsed.length;
 

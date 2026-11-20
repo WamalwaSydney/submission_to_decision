@@ -14,6 +14,7 @@ const BillPage = lazyPage(() => import('./pages/BillsPages'), 'BillPage');
 const ActPage = lazyPage(() => import('./pages/ActPage'), 'ActPage');
 const ReceiptLookupPage = lazyPage(() => import('./pages/ReceiptPages'), 'ReceiptLookupPage');
 const ReceiptVerifyPage = lazyPage(() => import('./pages/ReceiptPages'), 'ReceiptVerifyPage');
+const ReportRecordPage = lazyPage(() => import('./pages/ReceiptPages'), 'ReportRecordPage');
 const SubmitViewPage = lazyPage(() => import('./pages/SubmitViewPage'), 'SubmitViewPage');
 const LoginPage = lazyPage(() => import('./pages/LoginPage'), 'LoginPage');
 const ResetPasswordPage = lazyPage(() => import('./pages/ResetPasswordPage'), 'ResetPasswordPage');
@@ -123,6 +124,7 @@ function AppRoutes() {
         <Route path="/bill-flow/:id" element={<BillFlowPage />} />
         <Route path="/receipt-lookup" element={<ReceiptLookupPage />} />
         <Route path="/receipt-verify" element={<ReceiptVerifyPage />} />
+        <Route path="/records/:id" element={<ReportRecordPage />} />
         <Route path="/submit" element={<CitizenSubmissionRoute />} />
         <Route path="/account-security" element={<Navigate to="/" replace />} />
         {/* Calls for views now show as each bill's status on the Bills page. */}

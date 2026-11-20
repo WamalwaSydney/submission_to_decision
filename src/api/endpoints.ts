@@ -33,6 +33,8 @@ export interface ReportTotals {
   report_submissions: number;
   report_decisions: number;
   reports_with_submissions: number;
+  /** Of those, how many are sealed into the hash chain as report records. */
+  records_sealed?: number;
 }
 
 export type ReportDecision = 'adopted' | 'amended' | 'rejected' | 'not addressed';
@@ -45,6 +47,8 @@ export interface ReportSubmissionItem {
   reason: string;
   report_id: string;
   report_title: string;
+  /** The submission's report record in the hash chain (REC-XXXXXX), once sealed. */
+  record_id?: string | null;
 }
 export interface PlatformCounts { submissions: number; confirmed: number; rejected: number; pending: number; }
 export interface ReportAnalysisSummary {
@@ -203,6 +207,8 @@ export const api = {
   downloadReceiptDocument: (publicId: string) => apiFetchBlob(`/receipts/${encodeURIComponent(publicId)}/document`),
   verifyChain: () => apiFetch<any>('/receipts/verify'),
   verifyReceipt: (publicId: string) => apiFetch<ReceiptVerification>(`/receipts/${encodeURIComponent(publicId.trim())}/verify`),
+  verifyRecord: (publicId: string) => apiFetch<ReceiptVerification>(`/records/${encodeURIComponent(publicId.trim().toUpperCase())}/verify`),
+  reportRecord: (publicId: string) => apiFetch<any>(`/records/${encodeURIComponent(publicId.trim().toUpperCase())}`),
   uploadReport: (file: File, billRef: string, institution: string, dateTabled: string, sourceUrl?: string) => {
     const form = new FormData();
     form.append('file', file);
