@@ -74,7 +74,10 @@ async def run(args: argparse.Namespace) -> None:
         # Plain values: a commit expires ORM objects, and async sessions cannot reload them implicitly.
         work = [(report.id, bill.identifier, bill.title) for report, bill in rows]
         print(f"{len(work)} report(s) to analyse with {llm_matching_service.MODEL}", flush=True)
-        for report_id, identifier, title in work:
+    # One short session per report: a report waits on Gemini for a while, and a hosted database closes connections
+    # left idle that long, so a single long-lived session would take the whole run down with it.
+    for report_id, identifier, title in work:
+        async with async_session() as db:
             try:
                 report = await db.get(CommitteeReport, report_id)
                 analysis = await report_analysis_service.analyse_report(db, report, title)
@@ -82,12 +85,19 @@ async def run(args: argparse.Namespace) -> None:
                 counts = report_analysis_service.decision_counts(analysis.items)
                 await db.commit()
             except Exception as exc:  # keep going; one bad report should not stop the run
-                await db.rollback()
-                print(f"  FAILED {identifier}: {exc}", flush=True)
+                try:
+                    await db.rollback()
+                except Exception:
+                    pass  # the connection may already be gone; this session is discarded either way
+                print(f"  FAILED {identifier}: {str(exc)[:300]}", flush=True)
+                if "PerDay" in str(exc) or "per day" in str(exc).lower():
+                    print("Gemini's daily quota is used up; the remaining reports are analysed next run.", flush=True)
+                    break
                 continue
-            print(f"  {identifier}: {found} submissions in {entries} entries · {counts}", flush=True)
+        print(f"  {identifier}: {found} submissions in {entries} entries · {counts}", flush=True)
+    async with async_session() as db:
         sealed = await report_record_service.seal_new_records(db)
-        print(f"Sealed {sealed} report record(s) into the hash chain.", flush=True)
+    print(f"Sealed {sealed} report record(s) into the hash chain.", flush=True)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])

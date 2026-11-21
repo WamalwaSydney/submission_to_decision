@@ -19,6 +19,7 @@ import asyncio
 import json
 import os
 import re
+import time
 from typing import Any
 import httpx
 
@@ -110,6 +111,46 @@ def check_proposal(receipt: dict, entry: dict, confidence: float, explanation: s
     }
 
 
+# Free-tier Gemini allows a fixed number of requests a minute (15 for this model). Batch jobs set
+# GEMINI_MIN_INTERVAL_SECONDS (e.g. 4.2) so their requests stay under it; the API leaves it at 0.
+MIN_INTERVAL_SECONDS = float(os.getenv("GEMINI_MIN_INTERVAL_SECONDS", "0"))
+MAX_RETRY_WAIT_SECONDS = 90.0
+_last_request = 0.0
+_throttle_lock = asyncio.Lock()
+
+
+async def _throttle() -> None:
+    global _last_request
+    if MIN_INTERVAL_SECONDS <= 0:
+        return
+    async with _throttle_lock:
+        wait = _last_request + MIN_INTERVAL_SECONDS - time.monotonic()
+        if wait > 0:
+            await asyncio.sleep(wait)
+        _last_request = time.monotonic()
+
+
+def _error_text(response) -> str:
+    try:
+        return json.dumps(response.json())
+    except ValueError:
+        return response.text or ""
+
+
+def _daily_quota_spent(response) -> bool:
+    """A 429 for the per-day quota will not clear by waiting a minute: stop instead of retrying."""
+    return response.status_code == 429 and "PerDay" in _error_text(response)
+
+
+def _retry_wait(response, attempt: int) -> float:
+    """How long to wait before retrying: the delay Gemini asks for on a 429 ("retry in 55.8s"), else a growing wait."""
+    if response.status_code == 429:
+        found = re.search(r"retry in ([\d.]+)s", _error_text(response)) or re.search(r'"retryDelay":\s*"([\d.]+)s"', _error_text(response))
+        if found:
+            return min(float(found.group(1)) + 1.0, MAX_RETRY_WAIT_SECONDS)
+    return RETRY_BASE_SECONDS * 2 ** attempt
+
+
 async def generate_json(system: str, prompt: str, schema: dict, max_output_tokens: int = 3000) -> dict | None:
     """Ask Gemini for JSON matching `schema`. Returns None if the model sends no content."""
     body = {
@@ -127,6 +168,7 @@ async def generate_json(system: str, prompt: str, schema: dict, max_output_token
         # Gemini returns 429/503 when busy, and sometimes drops the connection or times out;
         # those usually pass, so retry a few times with a growing wait.
         for attempt in range(RETRIES + 1):
+            await _throttle()
             try:
                 response = await client.post(f"{BASE_URL}/models/{MODEL}:generateContent", headers={"x-goog-api-key": os.environ["GEMINI_API_KEY"]}, json=body)
             except httpx.TransportError as exc:
@@ -134,9 +176,9 @@ async def generate_json(system: str, prompt: str, schema: dict, max_output_token
                     raise RuntimeError(f"Gemini request failed: {type(exc).__name__}") from exc
                 await asyncio.sleep(RETRY_BASE_SECONDS * 2 ** attempt)
                 continue
-            if response.status_code not in RETRY_STATUSES or attempt == RETRIES:
+            if response.status_code not in RETRY_STATUSES or attempt == RETRIES or _daily_quota_spent(response):
                 break
-            await asyncio.sleep(RETRY_BASE_SECONDS * 2 ** attempt)
+            await asyncio.sleep(_retry_wait(response, attempt))
         if response.status_code >= 400:
             try:
                 message = response.json().get("error", {}).get("message", "")
