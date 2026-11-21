@@ -5,6 +5,7 @@ DPI with bounded timeouts. If a page still fails, extraction continues for the
 remaining pages and the report is marked ``needs_review`` rather than losing all
 successfully extracted text.
 """
+import hashlib
 import os
 import re
 import tempfile
@@ -444,8 +445,10 @@ async def extract_pending_linked_reports(
     redirect destinations, enforces a download size limit, and marks partial
     OCR results for manual review.
     """
+    # A report another reader has claimed ("extracting", e.g. the nightly read_reports job) is left to it, unless this
+    # call names that report.
     query = select(CommitteeReport.id).where(
-        CommitteeReport.extraction_status.in_(["pending", "extracting"]),
+        CommitteeReport.extraction_status.in_(["pending", "extracting"] if report_id is not None else ["pending"]),
         CommitteeReport.source_url.is_not(None),
         CommitteeReport.is_simulated.is_(False),
     )
@@ -484,8 +487,10 @@ async def extract_pending_linked_reports(
                         "The linked report URL is not on an official Parliament or county assembly HTTPS domain"
                     )
 
-                chunks = []
                 total_bytes = 0
+                digest = hashlib.sha256()
+                directory_handle = tempfile.TemporaryDirectory(prefix="parliament-report-")
+                pdf_path = Path(directory_handle.name) / "report.pdf"
 
                 timeout = httpx.Timeout(
                     connect=15.0,
@@ -512,24 +517,25 @@ async def extract_pending_linked_reports(
                                     "PDF redirect left the official Parliament or county assembly domain"
                                 )
 
-                            async for chunk in response.aiter_bytes():
-                                total_bytes += len(chunk)
-                                if total_bytes > PDF_MAX_BYTES:
-                                    raise ValueError(
-                                        f"PDF exceeded the {PDF_MAX_BYTES // (1024 * 1024)} MB limit"
-                                    )
-                                chunks.append(chunk)
+                            # Written to disk as it arrives: a scanned report can be tens of MB.
+                            with open(pdf_path, "wb") as handle:
+                                async for chunk in response.aiter_bytes():
+                                    total_bytes += len(chunk)
+                                    if total_bytes > PDF_MAX_BYTES:
+                                        raise ValueError(
+                                            f"PDF exceeded the {PDF_MAX_BYTES // (1024 * 1024)} MB limit"
+                                        )
+                                    digest.update(chunk)
+                                    handle.write(chunk)
 
-                pdf_bytes = b"".join(chunks)
-                if not pdf_bytes.startswith(b"%PDF"):
-                    raise ValueError("The linked document is not a readable PDF")
+                with open(pdf_path, "rb") as handle:
+                    if handle.read(4) != b"%PDF":
+                        raise ValueError("The linked document is not a readable PDF")
+                # The exact file read: its fingerprint goes into the report's provenance and its sealed records.
+                report.source_sha256 = report.source_sha256 or digest.hexdigest()
+                report.source_size_bytes = report.source_size_bytes or total_bytes
 
-                with tempfile.TemporaryDirectory(
-                    prefix="parliament-report-"
-                ) as directory:
-                    pdf_path = Path(directory) / "report.pdf"
-                    pdf_path.write_bytes(pdf_bytes)
-
+                with directory_handle as directory:
                     async with _pdf_ocr_semaphore:
                         text, ocr_used = await asyncio.to_thread(
                             extract_text, str(pdf_path)

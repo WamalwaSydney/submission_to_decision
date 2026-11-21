@@ -55,6 +55,38 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}/backend
         run: python -m app.scripts.sync_legislation
 
+      - name: Install OCR
+        run: sudo apt-get install -y tesseract-ocr
+
+      # Reads every report linked to a bill (including large scans), proposes matches and seals report records.
+      # The runner has far more time and memory than the API server, so the OCR limits are set high here.
+      - name: Read committee reports
+        working-directory: backend
+        timeout-minutes: 320
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          PYTHONPATH: ${{ github.workspace }}/backend
+          OCR_TOTAL_TIMEOUT: '3600'
+          MAX_OCR_PAGES: '600'
+          TESSERACT_TIMEOUT: '180'
+          PDF_RENDER_TIMEOUT: '60'
+          READ_BUDGET_MINUTES: '300'
+        run: python -m app.scripts.read_reports
+
+      # The AI reading lists every submission a report records (who, what, the committee's decision and reason) and
+      # seals each into the hash chain. Only reports not yet analysed; without a Gemini key, or on a quota
+      # error, the step stops but does not fail the run (the rest are analysed next night).
+      - name: Analyse committee reports
+        continue-on-error: true
+        working-directory: backend
+        timeout-minutes: 60
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          PYTHONPATH: ${{ github.workspace }}/backend
+        run: python -m app.scripts.analyse_reports --all
+
       - name: Notify on failure
         if: failure()
         continue-on-error: true
