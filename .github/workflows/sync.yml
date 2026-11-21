@@ -88,6 +88,9 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_MIN_INTERVAL_SECONDS: '4.2'  # free tier: at most 15 Gemini requests a minute
           PYTHONPATH: ${{ github.workspace }}/backend
+          # Same model as matching (gemini-3.5-flash-lite). It stops after this many requests a night, so it leaves the
+          # model's free daily quota for matching citizens' submissions; the remaining reports are analysed next night.
+          GEMINI_MAX_REQUESTS: '400'
         run: python -m app.scripts.analyse_reports --all
 
       - name: Notify on failure

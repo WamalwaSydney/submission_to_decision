@@ -28,7 +28,7 @@ from app.models import CommitteeReport, ReportAnalysis, ReportEntry
 from app.services import llm_matching_service as gemini
 
 DECISIONS = ("adopted", "amended", "rejected", "not addressed")
-BATCH_SIZE = 20
+BATCH_SIZE = 40  # entries per Gemini request: fewer requests against the free daily quota
 MAX_ENTRY_CHARS = 1500
 # Entries shorter than this are headings or a stakeholder's name on its own.
 MIN_ENTRY_CHARS = 60
@@ -89,7 +89,7 @@ async def classify_entries(entries: list[dict[str, Any]]) -> list[dict[str, Any]
             [{"entry_id": str(e["id"]), "clause": e.get("clause_ref"), "text": _clip(e.get("extracted_summary", ""))} for e in batch],
             ensure_ascii=False,
         )
-        data = await gemini.generate_json(SYSTEM_INSTRUCTION, prompt, ITEMS_SCHEMA, max_output_tokens=6000) or {}
+        data = await gemini.generate_json(SYSTEM_INSTRUCTION, prompt, ITEMS_SCHEMA, max_output_tokens=12000) or {}
         seen: set[str] = set()
         for item in data.get("items", []):
             entry_id = str(item.get("entry_id"))

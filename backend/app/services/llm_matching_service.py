@@ -24,6 +24,14 @@ from typing import Any
 import httpx
 
 MODEL = os.getenv("GEMINI_MATCH_MODEL", "gemini-3.5-flash-lite")
+# Requests this process may make (0 = no limit). The nightly AI reading of reports sets one, so it stops in time and
+# leaves the model's free daily quota for matching citizens' submissions; it carries on the next night.
+MAX_REQUESTS = int(os.getenv("GEMINI_MAX_REQUESTS", "0"))
+_requests_made = 0
+
+
+class RequestBudgetSpent(RuntimeError):
+    """This run has made its allowed number of Gemini requests (GEMINI_MAX_REQUESTS)."""
 BASE_URL = os.getenv("GEMINI_API_BASE", "https://generativelanguage.googleapis.com/v1beta").rstrip("/")
 
 RESPONSE_SCHEMA = {
@@ -163,12 +171,16 @@ async def generate_json(system: str, prompt: str, schema: dict, max_output_token
             "maxOutputTokens": max_output_tokens,
         },
     }
+    global _requests_made
     async with httpx.AsyncClient(timeout=90) as client:
         # The key goes in a header, never the URL, so it cannot leak into error messages or logs.
         # Gemini returns 429/503 when busy, and sometimes drops the connection or times out;
         # those usually pass, so retry a few times with a growing wait.
         for attempt in range(RETRIES + 1):
+            if MAX_REQUESTS and _requests_made >= MAX_REQUESTS:
+                raise RequestBudgetSpent(f"Gemini request budget for this run ({MAX_REQUESTS}) is used up")
             await _throttle()
+            _requests_made += 1
             try:
                 response = await client.post(f"{BASE_URL}/models/{MODEL}:generateContent", headers={"x-goog-api-key": os.environ["GEMINI_API_KEY"]}, json=body)
             except httpx.TransportError as exc:

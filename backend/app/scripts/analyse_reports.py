@@ -89,6 +89,10 @@ async def run(args: argparse.Namespace) -> None:
                     await db.rollback()
                 except Exception:
                     pass  # the connection may already be gone; this session is discarded either way
+                if isinstance(exc, llm_matching_service.RequestBudgetSpent):
+                    print(f"Stopped at this run's Gemini request budget ({llm_matching_service.MAX_REQUESTS}), leaving the rest "
+                          "of the daily quota for matching; the remaining reports are analysed next run.", flush=True)
+                    break
                 print(f"  FAILED {identifier}: {str(exc)[:300]}", flush=True)
                 if "PerDay" in str(exc) or "per day" in str(exc).lower():
                     print("Gemini's daily quota is used up; the remaining reports are analysed next run.", flush=True)
