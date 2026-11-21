@@ -217,6 +217,11 @@ def _render_page(file_path: str, page_number: int, prefix: str, dpi: int) -> str
     return image_path
 
 
+class BlankPageError(RuntimeError):
+    """Tesseract ran and found no words on the page. In scanned reports this is a blank page (the back of a cover, a
+    separator, "this page is intentionally left blank"), not a reading failure."""
+
+
 def _ocr_page(file_path: str, page_number: int, directory: str) -> str:
     """OCR one page once; retries multiply cost and cause Render timeouts."""
     prefix = str(Path(directory) / f"page_{page_number}")
@@ -239,7 +244,7 @@ def _ocr_page(file_path: str, page_number: int, directory: str) -> str:
             )
         result = ocr.stdout.strip()
         if not result:
-            raise RuntimeError(f"Tesseract returned no text for page {page_number}")
+            raise BlankPageError(f"Tesseract returned no text for page {page_number}")
         return result
     finally:
         if image_path:
@@ -274,6 +279,9 @@ def ocr_extract(file_path: str) -> str:
             try:
                 page_text = _ocr_page(file_path, page_number, directory)
                 pages.append(f"[Page {page_number}]\n{page_text}")
+            except BlankPageError:
+                # Nothing to read on this page, so nothing is missing: not a failure.
+                pages.append(f"[Page {page_number}: blank]")
             except Exception:
                 # Continue processing other pages. The failure marker ensures
                 # the report is not presented as a complete extraction.
