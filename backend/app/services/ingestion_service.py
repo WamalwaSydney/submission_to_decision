@@ -44,6 +44,8 @@ TESSERACT_TIMEOUT = int(os.getenv("TESSERACT_TIMEOUT", "45"))
 PDF_RENDER_TIMEOUT = int(os.getenv("PDF_RENDER_TIMEOUT", "20"))
 OCR_TOTAL_TIMEOUT = int(os.getenv("OCR_TOTAL_TIMEOUT", "240"))
 MAX_OCR_PAGES = int(os.getenv("MAX_OCR_PAGES", "500"))  # committee reports run to 230+ scanned pages
+# Pages OCR'd at once. 1 on the small API server; the nightly GitHub job sets it to its core count.
+OCR_WORKERS = max(1, int(os.getenv("OCR_WORKERS", "1")))
 
 # Report PDFs are downloaded only from these official sites (and their subdomains).
 OFFICIAL_REPORT_DOMAINS = ("parliament.go.ke", "nairobiassembly.go.ke", "transnzoiaassembly.go.ke")
@@ -272,23 +274,51 @@ def ocr_extract(file_path: str) -> str:
         page_count_to_process = page_count
 
     with tempfile.TemporaryDirectory(prefix="parliament-ocr-page-") as directory:
+        if OCR_WORKERS > 1:
+            pages.extend(_ocr_pages_parallel(file_path, page_count_to_process, directory, deadline))
+            return "\n".join(pages)
         for page_number in range(1, page_count_to_process + 1):
             if time.monotonic() >= deadline:
                 pages.append(f"[OCR_TOTAL_TIMEOUT pages_completed={page_number - 1}]")
                 break
-            try:
-                page_text = _ocr_page(file_path, page_number, directory)
-                pages.append(f"[Page {page_number}]\n{page_text}")
-            except BlankPageError:
-                # Nothing to read on this page, so nothing is missing: not a failure.
-                pages.append(f"[Page {page_number}: blank]")
-            except Exception:
-                # Continue processing other pages. The failure marker ensures
-                # the report is not presented as a complete extraction.
-                log.exception("OCR failed for PDF page %s", page_number)
-                pages.append(f"[OCR_FAILED_PAGE {page_number}]")
+            pages.append(ocr_page_text(file_path, page_number, directory))
 
     return "\n".join(pages)
+
+
+def ocr_page_text(file_path: str, page_number: int, directory: str) -> str:
+    """One page's text block: its text, a blank-page note, or a failure marker."""
+    try:
+        return f"[Page {page_number}]\n{_ocr_page(file_path, page_number, directory)}"
+    except BlankPageError:
+        # Nothing to read on this page, so nothing is missing: not a failure.
+        return f"[Page {page_number}: blank]"
+    except Exception:
+        # Continue processing other pages. The failure marker ensures
+        # the report is not presented as a complete extraction.
+        log.exception("OCR failed for PDF page %s", page_number)
+        return f"[OCR_FAILED_PAGE {page_number}]"
+
+
+def _ocr_pages_parallel(file_path: str, page_count: int, directory: str, deadline: float) -> list[str]:
+    """OCR pages OCR_WORKERS at a time (each page is its own pdftoppm and tesseract process), in page order.
+
+    Used where there are cores to spare (the nightly GitHub Actions job); the API server reads one page at a time.
+    A page not started before the deadline is not read, and the text says how many pages were completed.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    def read(page_number: int) -> str | None:
+        return None if time.monotonic() >= deadline else ocr_page_text(file_path, page_number, directory)
+
+    with ThreadPoolExecutor(max_workers=OCR_WORKERS) as pool:
+        results = list(pool.map(read, range(1, page_count + 1)))
+    done = [result for result in results if result is not None]
+    if len(done) < page_count:
+        first_missing = results.index(None)
+        done = [result for result in results[:first_missing]]
+        done.append(f"[OCR_TOTAL_TIMEOUT pages_completed={first_missing}]")
+    return done
 
 
 CLAUSE_RE = re.compile(

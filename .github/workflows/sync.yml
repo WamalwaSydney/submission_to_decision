@@ -69,6 +69,7 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}/backend
           OCR_TOTAL_TIMEOUT: '3600'
           MAX_OCR_PAGES: '500'
+          OCR_WORKERS: '4'  # the runner's 4 cores: four pages at once
           TESSERACT_TIMEOUT: '180'
           PDF_RENDER_TIMEOUT: '60'
           READ_BUDGET_MINUTES: '300'

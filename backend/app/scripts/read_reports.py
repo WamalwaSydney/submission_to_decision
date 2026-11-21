@@ -22,8 +22,10 @@ Exit status is 0 even when some reports could not be read; they are listed in th
 import asyncio
 import hashlib
 import os
+import re
 import tempfile
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlparse
@@ -150,8 +152,75 @@ async def _save(job: dict, result: dict | None, error: str | None, now) -> str:
         return report.extraction_status
 
 
+RECHECK_SQL = """
+SELECT id, source_url, coalesce(title, source_document_ref) AS name, extracted_text, provenance
+FROM committee_reports
+WHERE is_simulated = false AND bill_ref IS NOT NULL AND source_url LIKE 'https://%'
+  AND extraction_status = 'needs_review' AND extracted_text LIKE '%[OCR_FAILED_PAGE %'
+  AND extracted_text NOT LIKE '%[OCR_PAGE_LIMIT_EXCEEDED%' AND extracted_text NOT LIKE '%[OCR_TOTAL_TIMEOUT%'
+"""
+FAILED_PAGE_RE = re.compile(r"\[OCR_FAILED_PAGE (\d+)\]")
+MAX_RECHECKS = 2
+
+
+async def recheck_failed_pages(started: float) -> dict:
+    """Read again only the pages an earlier read marked as failed.
+
+    Most were blank pages (covers, separators), which older code counted as failures, leaving whole reports "read in
+    part". A blank page adds no text, so the report's entries and matches stay exactly as they are: the marker becomes
+    "[Page n: blank]", and a report with no failed pages left counts as read in full. A failed page that turns out to
+    have text is left marked (its words are not in the entries yet); a full re-read handles it where that is safe.
+    """
+    counts = {"checked": 0, "now_complete": 0, "pages_blank": 0, "pages_with_text": 0, "pages_still_failing": 0}
+    async with async_session() as db:
+        rows = (await db.execute(text(RECHECK_SQL))).all()
+    rows = [row for row in rows if int((row.provenance or {}).get("failed_pages_rechecked", 0)) < MAX_RECHECKS]
+    print(f"{len(rows)} report(s) with pages to re-check", flush=True)
+    for row in rows:
+        if time.monotonic() - started > BUDGET_SECONDS:
+            break
+        failed = sorted({int(n) for n in FAILED_PAGE_RE.findall(row.extracted_text or "")})
+        try:
+            with tempfile.TemporaryDirectory(prefix="recheck-report-") as directory:
+                path = Path(directory) / "report.pdf"
+                await _download(row.source_url, path)
+                with ThreadPoolExecutor(max_workers=ingestion_service.OCR_WORKERS) as pool:
+                    results = await asyncio.to_thread(
+                        lambda: list(pool.map(lambda n: ingestion_service.ocr_page_text(str(path), n, directory), failed)))
+        except Exception as exc:
+            print(f"  {str(row.name)[:90]}: could not re-check ({type(exc).__name__}: {exc})", flush=True)
+            continue
+        blank = [n for n, result in zip(failed, results) if result == f"[Page {n}: blank]"]
+        with_text = [n for n, result in zip(failed, results) if result.startswith(f"[Page {n}]")]
+        counts["checked"] += 1
+        counts["pages_blank"] += len(blank)
+        counts["pages_with_text"] += len(with_text)
+        counts["pages_still_failing"] += len(failed) - len(blank) - len(with_text)
+        async with async_session() as db:
+            report = await db.get(CommitteeReport, row.id)
+            updated = report.extracted_text or ""
+            for n in blank:
+                updated = updated.replace(f"[OCR_FAILED_PAGE {n}]", f"[Page {n}: blank]")
+            report.extracted_text = updated
+            provenance = dict(report.provenance or {})
+            provenance["failed_pages_rechecked"] = int(provenance.get("failed_pages_rechecked", 0)) + 1
+            provenance["failed_pages_rechecked_at"] = datetime.now(timezone.utc).isoformat()
+            report.provenance = provenance
+            flag_modified(report, "provenance")
+            complete = not ingestion_service._has_ocr_failures(updated)
+            if complete:
+                report.extraction_status = "ocr_used" if report.ocr_used else "extracted"
+                counts["now_complete"] += 1
+            await db.commit()
+        print(f"  {str(row.name)[:90]}: {len(blank)} of {len(failed)} failed page(s) blank"
+              + (" -> read in full" if complete else f"; {len(with_text)} with text, still read in part"), flush=True)
+    print(f"Re-checked failed pages: {counts}", flush=True)
+    return counts
+
+
 async def main() -> None:
     started = time.monotonic()
+    rechecked = await recheck_failed_pages(started)
     async with async_session() as db:
         candidates = (await db.execute(text(CANDIDATES_SQL))).all()
     print(f"{len(candidates)} report(s) to read", flush=True)
@@ -185,7 +254,9 @@ async def main() -> None:
             print(f"  matching failed for bill {bill_id}: {type(exc).__name__}: {exc}", flush=True)
     async with async_session() as db:
         sealed = await report_record_service.seal_new_records(db)
-    summary = [f"Read {sum(outcomes.values())} report(s): {outcomes}.", f"Proposed matches on {len(bills)} bill(s).",
+    summary = [f"Re-checked failed pages in {rechecked['checked']} report(s): {rechecked['now_complete']} now read in full "
+               f"({rechecked['pages_blank']} blank pages, {rechecked['pages_with_text']} with text, {rechecked['pages_still_failing']} still failing).",
+               f"Read {sum(outcomes.values())} report(s): {outcomes}.", f"Proposed matches on {len(bills)} bill(s).",
                f"Sealed {sealed} report record(s)."]
     if unread:
         summary.append(f"{len(unread)} report(s) still unread, retried next run:")
