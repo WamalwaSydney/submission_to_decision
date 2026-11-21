@@ -43,7 +43,7 @@ OCR_MAX_DIMENSION = int(os.getenv("OCR_MAX_DIMENSION", "1800"))
 TESSERACT_TIMEOUT = int(os.getenv("TESSERACT_TIMEOUT", "45"))
 PDF_RENDER_TIMEOUT = int(os.getenv("PDF_RENDER_TIMEOUT", "20"))
 OCR_TOTAL_TIMEOUT = int(os.getenv("OCR_TOTAL_TIMEOUT", "240"))
-MAX_OCR_PAGES = int(os.getenv("MAX_OCR_PAGES", "100"))
+MAX_OCR_PAGES = int(os.getenv("MAX_OCR_PAGES", "500"))  # committee reports run to 230+ scanned pages
 
 # Report PDFs are downloaded only from these official sites (and their subdomains).
 OFFICIAL_REPORT_DOMAINS = ("parliament.go.ke", "nairobiassembly.go.ke", "transnzoiaassembly.go.ke")

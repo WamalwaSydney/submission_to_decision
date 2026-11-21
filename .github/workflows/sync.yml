@@ -68,7 +68,7 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           PYTHONPATH: ${{ github.workspace }}/backend
           OCR_TOTAL_TIMEOUT: '3600'
-          MAX_OCR_PAGES: '600'
+          MAX_OCR_PAGES: '500'
           TESSERACT_TIMEOUT: '180'
           PDF_RENDER_TIMEOUT: '60'
           READ_BUDGET_MINUTES: '300'
