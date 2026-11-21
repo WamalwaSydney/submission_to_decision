@@ -106,23 +106,13 @@ export function BillsListPage() {
   }, [dispatch]);
 
   const committeeName = (bill: typeof state.bills[number]) => state.committees.find(c => c.id === bill.committee_id)?.name || 'No committee assigned yet';
-  // Submissions per bill: sent on this platform, plus those the committee report records.
-  const [traced, setTraced] = useState<Map<string, number>>(new Map());
-  useEffect(() => {
-    let cancelled = false;
-    api.participationOutcomes().then(result => {
-      if (cancelled) return;
-      setTraced(new Map(result.bills.map(row => [row.id, row.platform.submissions + (row.report?.submissions_recorded || 0)])));
-    }).catch(() => { /* Platform counts below still work. */ });
-    return () => { cancelled = true; };
-  }, [state.receipts.length]);
+  // Submissions per bill: sent on this platform, plus those the committee report records. Both come with the start-up
+  // data, so the counts are complete from the first render instead of growing when a second request returns.
   const submissionCount = useMemo(() => {
-    const platform = new Map<string, number>();
-    state.receipts.forEach(r => platform.set(r.legislative_item_id, (platform.get(r.legislative_item_id) || 0) + 1));
-    const counts = new Map(traced);
-    platform.forEach((n, billId) => counts.set(billId, Math.max(n, counts.get(billId) || 0)));
+    const counts = new Map<string, number>(Object.entries(state.reportTotals?.by_bill || {}));
+    state.receipts.forEach(r => counts.set(r.legislative_item_id, (counts.get(r.legislative_item_id) || 0) + 1));
     return counts;
-  }, [state.receipts, traced]);
+  }, [state.receipts, state.reportTotals]);
   const calls = useMemo(() => {
     const byBill = new Map<string, typeof state.notices>();
     state.notices.forEach(n => byBill.set(n.bill_ref, [...(byBill.get(n.bill_ref) || []), n]));

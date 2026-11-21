@@ -35,6 +35,8 @@ export interface ReportTotals {
   reports_with_submissions: number;
   /** Of those, how many are sealed into the hash chain as report records. */
   records_sealed?: number;
+  /** Submissions the committee reports record, per bill id. */
+  by_bill?: Record<string, number>;
 }
 
 export type ReportDecision = 'adopted' | 'amended' | 'rejected' | 'not addressed';

@@ -817,13 +817,22 @@ async def report_submission_totals(db: AsyncSession, report_ids) -> dict:
     """
     ids = list(report_ids)
     if not ids:
-        return {"report_submissions": 0, "report_decisions": 0, "reports_with_submissions": 0, "records_sealed": 0}
+        return {"report_submissions": 0, "report_decisions": 0, "reports_with_submissions": 0, "records_sealed": 0, "by_bill": {}}
     submissions = decisions = reports_counted = 0
     analysed = set()
+    # Per bill too, so the bills list can show and filter on these counts from the first render.
+    bill_of = dict((await db.execute(select(CommitteeReport.id, CommitteeReport.bill_ref).where(CommitteeReport.id.in_(ids)))).all())
+    by_bill: dict[str, int] = {}
+
+    def add(report_ref, n: int) -> None:
+        bill = bill_of.get(report_ref)
+        if bill is not None and n:
+            by_bill[str(bill)] = by_bill.get(str(bill), 0) + n
     for report_ref, items in (await db.execute(select(ReportAnalysis.report_ref, ReportAnalysis.items).where(ReportAnalysis.report_ref.in_(ids)))).all():
         analysed.add(report_ref)
         items = items or []
         submissions += len(items)
+        add(report_ref, len(items))
         decisions += sum(1 for item in items if (item or {}).get("decision") in report_analysis_service.DECISIONS)
         reports_counted += bool(items)
     # Same rule as the hash chain (report_record_service): without an AI reading, only reports a Clerk's Office
@@ -834,10 +843,13 @@ async def report_submission_totals(db: AsyncSession, report_ids) -> dict:
         .where(ReportEntry.report_ref.in_([i for i in ids if i not in analysed and i in uploaded]), ReportEntry.treatment.in_(CLASSIFIED_TREATMENTS))
     )).all()
     submissions += len(parsed)
+    for report_ref, _ in parsed:
+        add(report_ref, 1)
     decisions += len(parsed)
     reports_counted += len({report_ref for report_ref, _ in parsed})
     sealed = (await db.execute(select(func.count()).select_from(ReportRecord).where(ReportRecord.report_ref.in_(ids)))).scalar_one()
-    return {"report_submissions": submissions, "report_decisions": decisions, "reports_with_submissions": reports_counted, "records_sealed": sealed}
+    return {"report_submissions": submissions, "report_decisions": decisions, "reports_with_submissions": reports_counted,
+            "records_sealed": sealed, "by_bill": by_bill}
 
 
 @router.get("/bootstrap")
