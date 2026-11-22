@@ -2,7 +2,7 @@
 
 from sqlalchemy import Column, String, Text, Boolean, Float, Date, DateTime, ForeignKey, ARRAY, JSON, Integer, BigInteger, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import query_expression, relationship
 from sqlalchemy.sql import func
 import uuid
 
@@ -127,6 +127,9 @@ class CommitteeReport(Base):
     source_size_bytes = Column(BigInteger)
     source_storage_ref = Column(String(1000))
     extracted_text = Column(Text)
+    # Length of extracted_text, filled only by queries that leave the (often megabytes-long) text out but still need
+    # to know whether there is any (see LIGHT_REPORT in app/api/routes.py). None when not requested.
+    extracted_chars = query_expression()
     provenance = Column(JSON, default={})
     uploaded_by = Column(UUID(as_uuid=True), ForeignKey("users.id"))
 

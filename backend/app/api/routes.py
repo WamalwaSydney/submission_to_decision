@@ -15,6 +15,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request,
 from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import func, select, text, update, inspect as sa_inspect
+from sqlalchemy.orm import defer, with_expression
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db, async_session
@@ -436,10 +437,13 @@ async def approve_committee_officer(
 
 def to_dict(obj, exclude: set = frozenset()) -> dict:
     """Serialize an ORM object's columns only (no _sa_instance_state, no relationships)."""
+    state = sa_inspect(obj)
+    # Columns a query deliberately left out (a report's text) are skipped rather than loaded one row at a time.
+    skip = state.unloaded if state.has_identity else ()
     return {
         attr.key: getattr(obj, attr.key)
-        for attr in sa_inspect(obj).mapper.column_attrs
-        if attr.key not in exclude
+        for attr in state.mapper.column_attrs
+        if attr.key not in exclude and attr.key not in skip
     }
 
 
@@ -459,8 +463,19 @@ def report_to_dict(report: CommitteeReport, exclude=frozenset()) -> dict:
     # needs_review is not an approval step: matching never waits for it. It means the PDF was read only in part
     # (some scanned pages failed; what was read is matched), or could not be read at all (nothing to match).
     if report.extraction_status == "needs_review":
-        data["read_state"] = "partial" if (report.extracted_text or "").strip() else "unread"
+        if "extracted_text" in report.__dict__:
+            data["read_state"] = "partial" if (report.extracted_text or "").strip() else "unread"
+        elif report.extracted_chars is not None:
+            data["read_state"] = "partial" if report.extracted_chars > 0 else "unread"
+    data.pop("extracted_chars", None)
     return data
+
+
+# Load reports without their extracted text (megabytes for long scanned reports), keeping only its length. Every
+# frequently called query uses this: sending report texts out of the database on each page view used up the hosted
+# database's monthly network transfer.
+LIGHT_REPORT = (defer(CommitteeReport.extracted_text),
+                with_expression(CommitteeReport.extracted_chars, func.length(CommitteeReport.extracted_text)))
 
 
 PUBLIC_RECEIPT_EXCLUDE = {"author_id", "attachment_storage_ref"}
@@ -828,13 +843,18 @@ async def report_submission_totals(db: AsyncSession, report_ids) -> dict:
         bill = bill_of.get(report_ref)
         if bill is not None and n:
             by_bill[str(bill)] = by_bill.get(str(bill), 0) + n
-    for report_ref, items in (await db.execute(select(ReportAnalysis.report_ref, ReportAnalysis.items).where(ReportAnalysis.report_ref.in_(ids)))).all():
+    # Counted in the database: each AI reading's items run to hundreds of kB, and this runs on every page load.
+    counted = (await db.execute(text(
+        "SELECT a.report_ref, coalesce(json_array_length(a.items), 0) AS n, "
+        "(SELECT count(*) FROM json_array_elements(coalesce(a.items, '[]'::json)) item WHERE item->>'decision' = ANY(:decisions)) AS d "
+        "FROM report_analyses a WHERE a.report_ref = ANY(:ids)"),
+        {"ids": ids, "decisions": list(report_analysis_service.DECISIONS)})).all()
+    for report_ref, n, d in counted:
         analysed.add(report_ref)
-        items = items or []
-        submissions += len(items)
-        add(report_ref, len(items))
-        decisions += sum(1 for item in items if (item or {}).get("decision") in report_analysis_service.DECISIONS)
-        reports_counted += bool(items)
+        submissions += n
+        add(report_ref, n)
+        decisions += d
+        reports_counted += bool(n)
     # Same rule as the hash chain (report_record_service): without an AI reading, only reports a Clerk's Office
     # uploaded count their text-reader entries.
     uploaded = set((await db.execute(select(CommitteeReport.id).where(CommitteeReport.id.in_(ids), CommitteeReport.uploaded_by.is_not(None)))).scalars())
@@ -857,6 +877,8 @@ async def bootstrap(db: AsyncSession = Depends(get_db)):
     """Return the non-secret application data needed by the initial client shell."""
     async def all_rows(model, exclude=frozenset()):
         query = select(model)
+        if model is CommitteeReport:
+            query = query.options(*LIGHT_REPORT)
         if model in (LegislativeItem, CommitteeReport):
             query = query.where(model.is_simulated.is_(False))
         if model is Committee:
@@ -880,10 +902,10 @@ async def bootstrap(db: AsyncSession = Depends(get_db)):
         bill_with_participation(bill, bill_notices.get(bill["id"], []))
     # Only the entries a submission is matched to: all 8,000+ entries are megabytes the first page never shows.
     # Pages that list every entry (Clerk's Office, research export) load them from /report-entries.
-    live_reports = {str(report_id) for report_id in live_report_ids}
-    live_entry_ids = {str(entry_id) for entry_id, report_ref in (await db.execute(select(ReportEntry.id, ReportEntry.report_ref))).all()
-                      if str(report_ref) in live_reports}
-    matches = [match for match in await all_rows(SubmissionMatch) if str(match.get("report_entry_ref")) in live_entry_ids]
+    matches = [to_dict(match) for match in (await db.execute(
+        select(SubmissionMatch).join(ReportEntry, ReportEntry.id == SubmissionMatch.report_entry_ref)
+        .join(CommitteeReport, CommitteeReport.id == ReportEntry.report_ref).where(CommitteeReport.is_simulated.is_(False))
+    )).scalars()]
     matched_ids = {UUID(str(match["report_entry_ref"])) for match in matches}
     report_entries = [to_dict(row) for row in (await db.execute(select(ReportEntry).where(ReportEntry.id.in_(matched_ids)))).scalars()] if matched_ids else []
     confirmed_receipt_ids = {match["receipt_ref"] for match in matches if match.get("reviewer_decision") == "confirmed"}
@@ -1152,7 +1174,7 @@ async def bill_flow(
     bill_result = await db.execute(select(LegislativeItem).where(LegislativeItem.id == bill_id))
     bill = bill_result.scalar_one_or_none()
     if not bill: raise HTTPException(status_code=404, detail="Bill not found")
-    reports_result = await db.execute(select(CommitteeReport).where(CommitteeReport.bill_ref == bill.id).order_by(CommitteeReport.date_tabled.asc()))
+    reports_result = await db.execute(select(CommitteeReport).options(*LIGHT_REPORT).where(CommitteeReport.bill_ref == bill.id).order_by(CommitteeReport.date_tabled.asc()))
     reports = list(reports_result.scalars().all())
     entries = []
     for report in reports:
@@ -1280,7 +1302,7 @@ async def _matching_status(db: AsyncSession, bill: LegislativeItem, receipt: Par
     """Re-run matching so the new receipt enters the moderator queue too."""
     match_proposals = await linking_service.propose_matches(db, bill.id, use_llm=True)
     receipt_match_proposals = [match for match in match_proposals if match.receipt_ref == receipt.id]
-    linked_reports = list((await db.execute(select(CommitteeReport).where(CommitteeReport.bill_ref == bill.id))).scalars().all())
+    linked_reports = list((await db.execute(select(CommitteeReport).options(*LIGHT_REPORT).where(CommitteeReport.bill_ref == bill.id))).scalars().all())
     report_has_entries = (await db.execute(
         select(ReportEntry.id)
         .join(CommitteeReport, ReportEntry.report_ref == CommitteeReport.id)
@@ -1535,7 +1557,7 @@ async def get_report_record(public_id: str, db: AsyncSession = Depends(get_db)):
     record = (await db.execute(select(ReportRecord).where(ReportRecord.public_id == public_id.strip().upper()))).scalar_one_or_none()
     if record is None:
         raise HTTPException(status_code=404, detail="Record not found")
-    report = await db.get(CommitteeReport, record.report_ref)
+    report = (await db.execute(select(CommitteeReport).options(*LIGHT_REPORT).where(CommitteeReport.id == record.report_ref))).scalar_one_or_none()
     bill = await db.get(LegislativeItem, record.legislative_item_id)
     return {
         "record": to_dict(record),

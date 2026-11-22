@@ -22,6 +22,7 @@ from typing import Any, Iterable
 from uuid import UUID
 
 from sqlalchemy import select
+from sqlalchemy.orm import defer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import CommitteeReport, ReportAnalysis, ReportEntry
@@ -245,6 +246,7 @@ async def analyses_for_bills(db: AsyncSession, bill_ids: Iterable[UUID]) -> dict
         return {}
     rows = (await db.execute(
         select(CommitteeReport, ReportAnalysis)
+        .options(defer(CommitteeReport.extracted_text))  # the bill page needs the analysis, not the report's full text
         .join(ReportAnalysis, ReportAnalysis.report_ref == CommitteeReport.id)
         .where(CommitteeReport.bill_ref.in_(ids), CommitteeReport.is_simulated.is_(False))
         .order_by(CommitteeReport.date_tabled.asc())

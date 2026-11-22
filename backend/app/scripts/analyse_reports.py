@@ -15,6 +15,7 @@ import argparse
 import asyncio
 
 from sqlalchemy import func, select
+from sqlalchemy.orm import defer
 
 from app.api.routes import PASSED_STAGES
 from app.database import async_session
@@ -58,6 +59,7 @@ async def run(args: argparse.Namespace) -> None:
             await names(db)
             return
         query = (select(CommitteeReport, LegislativeItem)
+                 .options(defer(CommitteeReport.extracted_text))  # planning needs ids and titles; text is loaded per report
                  .join(LegislativeItem, LegislativeItem.id == CommitteeReport.bill_ref)
                  .where(CommitteeReport.is_simulated.is_(False), LegislativeItem.is_simulated.is_(False)))
         if args.bill:

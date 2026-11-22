@@ -17,7 +17,8 @@ import logging
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import exists, select
+from sqlalchemy.orm import defer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import AuditLog, CommitteeReport, LegislativeItem, ReportAnalysis, ReportEntry, ReportRecord
@@ -100,7 +101,12 @@ async def seal_new_records(db: AsyncSession, report_ids=None) -> int:
     Holds the chain lock for the whole run, so receipts issued meanwhile wait and then chain after these records.
     Returns how many records were added.
     """
+    # Reports already sealed are skipped (a report's submissions are sealed together, once), and reports are loaded
+    # without their text: this runs every few minutes, and sending long report texts and every AI reading out of the
+    # database each time used up the hosted database's monthly network transfer.
     query = (select(CommitteeReport, ReportAnalysis)
+             .options(defer(CommitteeReport.extracted_text))
+             .where(~exists().where(ReportRecord.report_ref == CommitteeReport.id))
              .join(LegislativeItem, LegislativeItem.id == CommitteeReport.bill_ref)
              .outerjoin(ReportAnalysis, ReportAnalysis.report_ref == CommitteeReport.id)
              .where(CommitteeReport.is_simulated.is_(False), LegislativeItem.is_simulated.is_(False))
