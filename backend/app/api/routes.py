@@ -50,6 +50,49 @@ async def _extract_and_match_uploaded_report(report_id: UUID, bill_id: UUID) -> 
         log.exception("Background upload extraction/matching failed for report %s", report_id)
 
 
+_bill_match_locks: dict = {}
+_background_matches: set = set()  # keeps running tasks referenced until they finish
+
+
+def _start_background(coroutine) -> None:
+    """Run slow follow-up work (Gemini calls) as its own task, so the response does not wait for it. FastAPI's
+    BackgroundTasks would not help: behind the rate-limit middleware (Starlette BaseHTTPMiddleware) the client
+    waits for background tasks before the response completes."""
+    task = asyncio.create_task(coroutine)
+    _background_matches.add(task)
+    task.add_done_callback(_background_matches.discard)
+
+
+def _start_background_match(bill_id: UUID) -> None:
+    _start_background(_match_submission_in_background(bill_id))
+
+
+async def _notify_received_in_background(receipt_id: UUID, event_key: str) -> None:
+    try:
+        async with async_session() as session:
+            receipt = await session.get(ParticipationReceipt, receipt_id)
+            if receipt is not None:
+                await notification_service.notify_receipt_event(session, receipt, event_key, "submission_received")
+    except Exception:
+        log.exception("Background notification failed for receipt %s", receipt_id)
+
+
+async def _match_submission_in_background(bill_id: UUID) -> None:
+    """Gemini matching for a new or edited submission, run after its receipt has been sent to the citizen.
+
+    A Gemini call can take many seconds (longer when it is rate limited), and the receipt is already sealed, so the
+    citizen does not wait for it. One run per bill at a time, so two submissions on one bill cannot both propose a
+    match for the same receipt.
+    """
+    lock = _bill_match_locks.setdefault(str(bill_id), asyncio.Lock())
+    try:
+        async with lock:
+            async with async_session() as session:
+                await linking_service.propose_matches(session, bill_id, use_llm=True)
+    except Exception:
+        log.exception("Background matching failed for bill %s", bill_id)
+
+
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str = Field(min_length=1, max_length=128)
@@ -1298,11 +1341,21 @@ def _submission_body(submission_text: Optional[str], attachment: Optional[dict])
     raise HTTPException(status_code=422, detail="Write your submission or upload it as a document.")
 
 
-async def _matching_status(db: AsyncSession, bill: LegislativeItem, receipt: ParticipationReceipt) -> tuple[list, str]:
-    """Re-run matching so the new receipt enters the moderator queue too."""
-    match_proposals = await linking_service.propose_matches(db, bill.id, use_llm=True)
-    receipt_match_proposals = [match for match in match_proposals if match.receipt_ref == receipt.id]
+async def _matching_status(db: AsyncSession, bill: LegislativeItem, receipt: ParticipationReceipt,
+                           defer: bool = False) -> tuple[list, str]:
+    """Run matching so the new receipt enters the moderator queue too.
+
+    With defer and Gemini configured, matching starts alongside the response (see _start_background_match), so the
+    receipt reaches the citizen without waiting on Gemini. The text-similarity matcher is fast and runs inline.
+    """
     linked_reports = list((await db.execute(select(CommitteeReport).options(*LIGHT_REPORT).where(CommitteeReport.bill_ref == bill.id))).scalars().all())
+    deferred = bool(defer and linked_reports and llm_matching_service.is_configured())
+    if deferred:
+        _start_background_match(bill.id)
+        receipt_match_proposals = []
+    else:
+        match_proposals = await linking_service.propose_matches(db, bill.id, use_llm=True)
+        receipt_match_proposals = [match for match in match_proposals if match.receipt_ref == receipt.id]
     report_has_entries = (await db.execute(
         select(ReportEntry.id)
         .join(CommitteeReport, ReportEntry.report_ref == CommitteeReport.id)
@@ -1334,6 +1387,8 @@ async def _matching_status(db: AsyncSession, bill: LegislativeItem, receipt: Par
         status = "report_reference_mismatch"
     elif not report_has_entries:
         status = "report_extraction_required"
+    elif deferred:
+        status = "matching_in_progress"
     else:
         status = "already_processed"
     return receipt_match_proposals, status
@@ -1417,10 +1472,13 @@ async def create_receipt(
         attachment=attachment,
     )
 
-    match_proposals, matching_status = await _matching_status(db, bill, receipt)
-    await notification_service.notify_receipt_event(
-        db, receipt, f"receipt:{receipt.id}:submitted", "submission_received",
-    )
+    match_proposals, matching_status = await _matching_status(db, bill, receipt, defer=True)
+    event_key = f"receipt:{receipt.id}:submitted"
+    if llm_matching_service.is_configured():
+        # Gemini phrases the notification, which can take seconds; the receipt does not wait for it.
+        _start_background(_notify_received_in_background(receipt.id, event_key))
+    else:
+        await notification_service.notify_receipt_event(db, receipt, event_key, "submission_received")
     return _receipt_response(receipt, match_proposals, matching_status)
 
 
@@ -1499,7 +1557,7 @@ async def edit_receipt(
     await record_audit(db, entity_type="receipt", entity_id=revised.id, action="revised", actor_id=current_user.id,
                        details={"public_id": stable_id, "version_id": revised.public_id, "previous_version": receipt.public_id, "revision": revised.revision})
     await db.commit()
-    match_proposals, matching_status = await _matching_status(db, bill, revised)
+    match_proposals, matching_status = await _matching_status(db, bill, revised, defer=True)
     response = _receipt_response(revised, match_proposals, matching_status)
     response["superseded_receipt_id"] = receipt.id
     return response

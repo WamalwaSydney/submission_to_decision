@@ -286,8 +286,9 @@ export function SubmitViewPage() {
                 <p className="text-sm font-semibold text-[#3b4747] leading-relaxed">
                   Use this ID to look up your submission status anytime. It is public — sharing it reveals no personal information.
                 </p>
-                <div role="status" className={`mt-5 notice-box ${success.matchingStatus === 'pending_review' ? 'is-info' : 'is-closed'}`}>
-                  {success.matchingStatus === 'pending_review' && 'A match proposal was generated from the available committee report and sent to the Moderator Pending Review queue. A moderator must confirm or reject the proposal.'}
+                <div role="status" className={`mt-5 notice-box ${['pending_review', 'matching_in_progress'].includes(success.matchingStatus) ? 'is-info' : 'is-closed'}`}>
+                  {success.matchingStatus === 'matching_in_progress' && 'A committee report is available. Your submission is being compared with it now; any match found goes to the Moderator Pending Review queue, and a moderator must confirm or reject it.'}
+                  {success.matchingStatus === 'pending_review' &&'A match proposal was generated from the available committee report and sent to the Moderator Pending Review queue. A moderator must confirm or reject the proposal.'}
                   {success.matchingStatus === 'submission_triage' && 'No linked committee report is available yet. Your submission is in the Moderator Submission Triage queue until a report becomes available.'}
                   {success.matchingStatus === 'report_extraction_required' && 'A report is linked, but it has not yielded usable entries yet. Your submission is flagged for moderator triage while the report is checked.'}
                   {success.matchingStatus === 'report_reference_mismatch' && 'The linked report’s official bill reference does not match the bill you selected. The submission is flagged for moderator review rather than being matched against potentially incorrect evidence.'}
