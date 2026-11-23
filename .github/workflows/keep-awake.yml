@@ -1,0 +1,24 @@
+# Keeps the Render API from sleeping (free services sleep after 15 minutes without traffic), so visitors do not
+# wait for a cold start and the in-process report worker keeps its 10-minute schedule.
+# Pings /health only: it does not touch the database, so Neon can still suspend between worker runs.
+name: Keep API awake
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Ping /health
+        run: |
+          for attempt in 1 2 3; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 90 https://submission-to-decision.onrender.com/health) || code=000
+            echo "Attempt $attempt: HTTP $code"
+            [ "$code" = "200" ] && exit 0
+            sleep 10
+          done
+          exit 1
