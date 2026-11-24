@@ -321,6 +321,22 @@ export function CommitteeOfficerIngestionPage() {
     const institution = bill?.institution || 'National Assembly';
     const dateTabled = new Date().toISOString().split('T')[0];
 
+    // The server reads the report after answering the upload; check every few seconds until it has been read.
+    const watchUploadedReport = async (reportId: string) => {
+      for (let attempt = 0; attempt < 120; attempt++) {
+        await new Promise(resolve => setTimeout(resolve, 5000));
+        try {
+          const { report } = await api.report(reportId);
+          if (report?.extraction_status && !['pending', 'extracting'].includes(report.extraction_status)) {
+            dispatch({ type: 'UPDATE_REPORT_STATUS', payload: { reportId, status: report.extraction_status } });
+            return;
+          }
+        } catch {
+          // A slow or failed check is retried on the next round.
+        }
+      }
+    };
+
     setUploading(true);
     setUploadError(null);
     setUploadSuccess(false);
@@ -342,6 +358,7 @@ export function CommitteeOfficerIngestionPage() {
       for (const match of result.match_proposals || []) {
         dispatch({ type: 'ADD_MATCH', payload: match });
       }
+      void watchUploadedReport(String(result.report_id));
       setSelectedFile(null);
       setUploadSuccess(true);
       setTimeout(() => setUploadSuccess(false), 4000);

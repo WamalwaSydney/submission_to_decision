@@ -67,6 +67,27 @@ def _start_background_match(bill_id: UUID) -> None:
     _start_background(_match_submission_in_background(bill_id))
 
 
+async def _notify_report_received(db: AsyncSession, report_id: UUID, bill_id: UUID) -> None:
+    """Tell every citizen who made a submission on the bill that its committee report has arrived."""
+    receipts = (await db.execute(current_receipts().where(ParticipationReceipt.legislative_item_id == bill_id))).scalars().all()
+    for receipt in receipts:
+        await notification_service.notify_receipt_event(
+            db, receipt, f"report:{report_id}:receipt:{receipt.id}:received", "report_received",
+        )
+    await db.commit()
+
+
+async def _after_report_upload(report_id: UUID, bill_id: UUID) -> None:
+    """Work that follows a Clerk's Office upload, run after the upload response has been sent: read and match the
+    report first (what the Clerk's Office and moderators wait for), then notify the citizens."""
+    await _extract_and_match_uploaded_report(report_id, bill_id)
+    try:
+        async with async_session() as session:
+            await _notify_report_received(session, report_id, bill_id)
+    except Exception:
+        log.exception("Report notifications failed for report %s", report_id)
+
+
 async def _notify_received_in_background(receipt_id: UUID, event_key: str) -> None:
     try:
         async with async_session() as session:
@@ -1867,13 +1888,13 @@ async def upload_report(
                        action="uploaded", actor_id=current_user.id,
                        details={"sha256": provenance["sha256"], "source_url": source_url})
     await db.commit()
-    report_receipts = await db.execute(current_receipts().where(ParticipationReceipt.legislative_item_id == report.bill_ref))
-    for receipt in report_receipts.scalars().all():
-        await notification_service.notify_receipt_event(
-            db, receipt, f"report:{report.id}:receipt:{receipt.id}:received", "report_received",
-        )
-    await db.commit()
-    background_tasks.add_task(_extract_and_match_uploaded_report, report.id, bill_uuid)
+    if llm_matching_service.is_configured():
+        # Reading the PDF (OCR on a slow server), Gemini matching and one Gemini-phrased notification per citizen can
+        # take minutes; the Clerk's Office gets its answer as soon as the file is stored.
+        _start_background(_after_report_upload(report.id, bill_uuid))
+    else:
+        await _notify_report_received(db, report.id, report.bill_ref)
+        background_tasks.add_task(_extract_and_match_uploaded_report, report.id, bill_uuid)
 
     return {
         "report_id": report.id,
